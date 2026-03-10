@@ -1,0 +1,888 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<!--
+   ______                            __
+  / ____/___  ____ ___  ____  __  __/ /____  _____
+ / /   / __ \/ __ `__ \/ __ \/ / / / __/ _ \/ ___/
+/ /___/ /_/ / / / / / / /_/ / /_/ / /_/  __/ /
+\____/\____/_/ /_/ /_/ .___/\__,_/\__/\___/_/
+                    /_/
+        Created with Perplexity Computer
+        https://www.perplexity.ai/computer
+-->
+<meta name="generator" content="Perplexity Computer">
+<meta name="author" content="Perplexity Computer">
+<meta property="og:see_also" content="https://www.perplexity.ai/computer">
+<link rel="author" href="https://www.perplexity.ai/computer">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smart Urban Sensing — APC Dashboard</title>
+
+<!-- Leaflet -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0"></script>
+
+<!-- Lucide Icons -->
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+
+<!-- jsPDF + autoTable for PDF export -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+
+<!-- SheetJS for Excel export -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+<!-- MQTT.js for browser WebSocket MQTT connection -->
+<script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
+
+<link rel="stylesheet" href="./base.css">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+
+<!-- PASSWORD GATE -->
+<div class="login-screen" id="loginScreen">
+  <div class="login-card">
+    <div class="login-logo">
+      <svg width="48" height="48" viewBox="0 0 32 32" fill="none" aria-label="Smart Urban Sensing">
+        <rect width="32" height="32" rx="8" fill="#3b82f6"/>
+        <path d="M8 20L12 12L16 17L20 10L24 16" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="16" cy="24" r="2" fill="white" opacity="0.7"/>
+        <circle cx="10" cy="24" r="1.5" fill="white" opacity="0.4"/>
+        <circle cx="22" cy="24" r="1.5" fill="white" opacity="0.4"/>
+      </svg>
+      <h1>Smart Urban Sensing</h1>
+      <p>Automatic Passenger Counting Dashboard</p>
+    </div>
+    <form id="loginForm" autocomplete="off">
+      <div class="login-field">
+        <label for="loginPassword">Dashboard Password</label>
+        <input type="password" id="loginPassword" placeholder="Enter password" required autofocus>
+      </div>
+      <div class="login-error" id="loginError"></div>
+      <button type="submit" class="btn btn-primary login-btn">Sign In</button>
+    </form>
+  </div>
+</div>
+
+<!-- SETTINGS MODAL -->
+<div class="modal-overlay" id="settingsModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>Settings</h2>
+      <button class="btn-icon modal-close" id="settingsClose" aria-label="Close">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="settings-section">
+        <h3>MQTT Broker Connection</h3>
+        <p class="settings-desc">Connect to your cloud MQTT broker (e.g. HiveMQ Cloud, EMQX Cloud). The UR35 gateways publish data here.</p>
+        <div class="settings-grid">
+          <div class="settings-field">
+            <label for="mqttHost">Broker Host</label>
+            <input type="text" id="mqttHost" class="filter-input" placeholder="e.g. abc123.s1.eu.hivemq.cloud">
+          </div>
+          <div class="settings-field">
+            <label for="mqttPort">WebSocket Port</label>
+            <input type="number" id="mqttPort" class="filter-input" value="8884" placeholder="8884 (wss) or 8083 (ws)">
+          </div>
+          <div class="settings-field">
+            <label for="mqttUsername">Username</label>
+            <input type="text" id="mqttUsername" class="filter-input" placeholder="MQTT username">
+          </div>
+          <div class="settings-field">
+            <label for="mqttPassword">Password</label>
+            <input type="password" id="mqttPassword" class="filter-input" placeholder="MQTT password">
+          </div>
+          <div class="settings-field">
+            <label for="mqttUseTls">Use TLS (wss://)</label>
+            <select id="mqttUseTls" class="filter-select">
+              <option value="true" selected>Yes — wss:// (recommended)</option>
+              <option value="false">No — ws://</option>
+            </select>
+          </div>
+          <div class="settings-field">
+            <label for="mqttBasePath">WebSocket Path</label>
+            <input type="text" id="mqttBasePath" class="filter-input" value="/mqtt" placeholder="/mqtt">
+          </div>
+        </div>
+        <div class="settings-status" id="mqttConnectionStatus">
+          <span class="status-dot disconnected"></span>
+          <span>Not connected</span>
+        </div>
+        <button class="btn btn-primary" id="mqttConnectBtn">
+          <i data-lucide="plug" style="width:14px;height:14px"></i>
+          Test Connection
+        </button>
+      </div>
+
+      <div class="settings-section">
+        <h3>MQTT Topics</h3>
+        <p class="settings-desc">Configure the topics your UR35 gateways publish to. Use # as wildcard to subscribe to all sub-topics.</p>
+        <div class="settings-grid">
+          <div class="settings-field">
+            <label for="mqttTopicPattern">Subscribe Topic</label>
+            <input type="text" id="mqttTopicPattern" class="filter-input" value="bus/#" placeholder="e.g. bus/# or v1/devices/me/telemetry">
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h3>Gateway / Bus Mapping</h3>
+        <p class="settings-desc">Map each UR35 gateway to a bus. The topic or client ID identifies which gateway is sending data.</p>
+        <div id="deviceList" class="device-list"></div>
+        <button class="btn btn-secondary" id="addDeviceBtn">
+          <i data-lucide="plus" style="width:14px;height:14px"></i>
+          Add Gateway
+        </button>
+      </div>
+
+      <div class="settings-section">
+        <h3>Dashboard Password</h3>
+        <div class="settings-grid">
+          <div class="settings-field">
+            <label for="dashPassword">Set/Change Password</label>
+            <input type="password" id="dashPassword" class="filter-input" placeholder="Dashboard access password">
+          </div>
+        </div>
+        <button class="btn btn-secondary" id="savePasswordBtn">Save Password</button>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="settingsCancelBtn">Cancel</button>
+      <button class="btn btn-primary" id="settingsSaveBtn">
+        <i data-lucide="save" style="width:14px;height:14px"></i>
+        Save &amp; Connect
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="dashboard" id="dashboard" style="display:none">
+  <!-- SIDEBAR -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+      <svg width="32" height="32" viewBox="0 0 32 32" fill="none" aria-label="Smart Urban Sensing">
+        <rect width="32" height="32" rx="8" fill="#3b82f6"/>
+        <path d="M8 20L12 12L16 17L20 10L24 16" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="16" cy="24" r="2" fill="white" opacity="0.7"/>
+        <circle cx="10" cy="24" r="1.5" fill="white" opacity="0.4"/>
+        <circle cx="22" cy="24" r="1.5" fill="white" opacity="0.4"/>
+      </svg>
+      <div class="logo-text">
+        Smart Urban Sensing
+        <span>APC Dashboard</span>
+      </div>
+    </div>
+
+    <nav class="sidebar-nav">
+      <div class="nav-section">
+        <div class="nav-section-label">Overview</div>
+        <button class="nav-item active" data-view="overview">
+          <i data-lucide="layout-dashboard"></i>
+          Dashboard
+        </button>
+        <button class="nav-item" data-view="live-map">
+          <i data-lucide="map-pin"></i>
+          Live Map
+        </button>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-section-label">Analytics</div>
+        <button class="nav-item" data-view="ridership">
+          <i data-lucide="users"></i>
+          Ridership
+        </button>
+        <button class="nav-item" data-view="routes">
+          <i data-lucide="route"></i>
+          Routes &amp; Stops
+        </button>
+        <button class="nav-item" data-view="comparison">
+          <i data-lucide="git-compare"></i>
+          Comparison
+        </button>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-section-label">Fleet</div>
+        <button class="nav-item" data-view="fleet">
+          <i data-lucide="bus"></i>
+          Fleet Status
+        </button>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-section-label">Output</div>
+        <button class="nav-item" data-view="reports">
+          <i data-lucide="file-text"></i>
+          Reports
+        </button>
+        <button class="nav-item" data-view="data-table">
+          <i data-lucide="table-2"></i>
+          Data Explorer
+        </button>
+      </div>
+    </nav>
+
+    <div class="sidebar-footer">
+      <button class="nav-item" id="settingsBtn">
+        <i data-lucide="settings"></i>
+        Settings
+      </button>
+    </div>
+  </aside>
+
+  <!-- HEADER -->
+  <header class="header">
+    <div class="header-left">
+      <button class="btn-toggle-sidebar" id="toggleSidebar" aria-label="Toggle sidebar">
+        <i data-lucide="menu"></i>
+      </button>
+      <div>
+        <div class="header-title" id="headerTitle">Dashboard</div>
+        <div class="header-breadcrumb" id="headerBreadcrumb">Overview / Real-time</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="connection-indicator" id="connectionIndicator" title="MQTT connection status">
+        <span class="status-dot disconnected" id="connDot"></span>
+        <span class="conn-label" id="connLabel">Disconnected</span>
+      </div>
+      <div class="live-badge" id="liveBadge" style="display:none">LIVE</div>
+      <div class="header-time" id="headerTime">--:--:--</div>
+      <button class="btn-icon tooltip" data-tooltip="Notifications" aria-label="Notifications">
+        <i data-lucide="bell"></i>
+        <span class="badge"></span>
+      </button>
+      <div class="export-dropdown" id="globalExport">
+        <button class="btn btn-secondary" id="exportBtn">
+          <i data-lucide="download" style="width:14px;height:14px"></i>
+          Export
+        </button>
+        <div class="export-menu" id="exportMenu">
+          <button class="export-menu-item" data-format="pdf">
+            <i data-lucide="file-text"></i>
+            Export as PDF
+          </button>
+          <button class="export-menu-item" data-format="excel">
+            <i data-lucide="sheet"></i>
+            Export as Excel
+          </button>
+          <button class="export-menu-item" data-format="csv">
+            <i data-lucide="file-spreadsheet"></i>
+            Export as CSV
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN CONTENT -->
+  <main class="main" id="mainContent">
+
+    <!-- ===== OVERVIEW VIEW ===== -->
+    <div class="view active" id="view-overview">
+      <div class="kpi-grid">
+        <div class="kpi-card blue">
+          <div class="kpi-label">Total Passengers Today</div>
+          <div class="kpi-value" id="kpi-total-passengers">—</div>
+          <div class="kpi-delta" id="kpi-total-delta"></div>
+          <div class="kpi-sub">live via MQTT</div>
+        </div>
+        <div class="kpi-card green">
+          <div class="kpi-label">Active Buses</div>
+          <div class="kpi-value" id="kpi-active-buses">—</div>
+          <div class="kpi-delta" id="kpi-buses-delta"></div>
+          <div class="kpi-sub" id="kpi-fleet-sub">Waiting for MQTT data</div>
+        </div>
+        <div class="kpi-card amber">
+          <div class="kpi-label">Avg Occupancy</div>
+          <div class="kpi-value" id="kpi-avg-occupancy">—</div>
+          <div class="kpi-delta" id="kpi-occ-delta"></div>
+          <div class="kpi-sub">target: 65%</div>
+        </div>
+        <div class="kpi-card purple">
+          <div class="kpi-label">Boardings / Hour</div>
+          <div class="kpi-value" id="kpi-boardings-hr">—</div>
+          <div class="kpi-delta" id="kpi-board-delta"></div>
+          <div class="kpi-sub">current hour avg</div>
+        </div>
+        <div class="kpi-card cyan">
+          <div class="kpi-label">On-Time Performance</div>
+          <div class="kpi-value" id="kpi-ontime">—</div>
+          <div class="kpi-delta"></div>
+          <div class="kpi-sub">within 5 min window</div>
+        </div>
+        <div class="kpi-card pink">
+          <div class="kpi-label">Alightings Today</div>
+          <div class="kpi-value" id="kpi-alightings">—</div>
+          <div class="kpi-delta"></div>
+          <div class="kpi-sub">live via MQTT</div>
+        </div>
+      </div>
+
+      <!-- Map + Fleet List -->
+      <div class="chart-grid map-charts">
+        <div class="chart-panel">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Fleet Live Map</div>
+              <div class="chart-subtitle">Real-time GPS positions</div>
+            </div>
+            <div class="chart-actions">
+              <button class="btn btn-ghost btn-sm" id="mapRefresh" aria-label="Refresh map">
+                <i data-lucide="refresh-cw" style="width:14px;height:14px"></i>
+              </button>
+            </div>
+          </div>
+          <div class="chart-body" style="padding:0">
+            <div class="map-container" id="overviewMap"></div>
+          </div>
+        </div>
+        <div class="chart-panel">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Active Fleet</div>
+              <div class="chart-subtitle" id="fleetCount">0 buses online</div>
+            </div>
+          </div>
+          <div class="fleet-list" id="fleetList"></div>
+        </div>
+      </div>
+
+      <!-- Hourly + Route Charts -->
+      <div class="chart-grid cols-2" style="margin-top:var(--space-4)">
+        <div class="chart-panel">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Hourly Passenger Flow</div>
+              <div class="chart-subtitle">Boardings &amp; alightings by hour</div>
+            </div>
+            <div class="chart-actions">
+              <div class="period-tabs" data-chart="hourlyFlow">
+                <button class="period-tab active" data-period="today">Today</button>
+                <button class="period-tab" data-period="week">Week</button>
+                <button class="period-tab" data-period="month">Month</button>
+              </div>
+            </div>
+          </div>
+          <div class="chart-body">
+            <canvas id="chartHourlyFlow" height="260"></canvas>
+          </div>
+        </div>
+        <div class="chart-panel">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Top Routes by Ridership</div>
+              <div class="chart-subtitle">Total passengers per route</div>
+            </div>
+          </div>
+          <div class="chart-body">
+            <canvas id="chartTopRoutes" height="260"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== LIVE MAP VIEW ===== -->
+    <div class="view" id="view-live-map">
+      <div class="filter-bar">
+        <div class="filter-group">
+          <span class="filter-label">Route</span>
+          <select class="filter-select" id="mapRouteFilter">
+            <option value="all">All Buses</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <span class="filter-label">Status</span>
+          <select class="filter-select" id="mapStatusFilter">
+            <option value="all">All</option>
+            <option value="active">Active</option>
+            <option value="idle">Idle</option>
+          </select>
+        </div>
+        <button class="btn btn-secondary" id="centerMapBtn">
+          <i data-lucide="crosshair" style="width:14px;height:14px"></i> Center Map
+        </button>
+      </div>
+      <div class="chart-panel" style="height:calc(100vh - 180px)">
+        <div class="chart-body" style="padding:0;height:100%">
+          <div class="map-container" id="liveMapFull" style="height:100%"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== RIDERSHIP VIEW ===== -->
+    <div class="view" id="view-ridership">
+      <div class="filter-bar">
+        <div class="filter-group">
+          <span class="filter-label">Period</span>
+          <select class="filter-select" id="ridershipPeriod">
+            <option value="7d">Last 7 Days</option>
+            <option value="30d">Last 30 Days</option>
+            <option value="90d">Last 90 Days</option>
+            <option value="1y">Last 12 Months</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <span class="filter-label">Route</span>
+          <select class="filter-select" id="ridershipRoute">
+            <option value="all">All Buses</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <span class="filter-label">View</span>
+          <div class="period-tabs" id="ridershipViewTabs">
+            <button class="period-tab active" data-view="daily">Daily</button>
+            <button class="period-tab" data-view="weekly">Weekly</button>
+            <button class="period-tab" data-view="monthly">Monthly</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="kpi-grid" style="margin-bottom:var(--space-4)">
+        <div class="kpi-card blue">
+          <div class="kpi-label">Total Ridership</div>
+          <div class="kpi-value" id="ridership-kpi-total">—</div>
+          <div class="kpi-sub" id="ridership-kpi-total-sub">for selected period</div>
+        </div>
+        <div class="kpi-card green">
+          <div class="kpi-label">Avg Boardings/Day</div>
+          <div class="kpi-value" id="ridership-kpi-avg">—</div>
+          <div class="kpi-sub" id="ridership-kpi-avg-sub">avg per day</div>
+        </div>
+        <div class="kpi-card amber">
+          <div class="kpi-label">Peak Hour</div>
+          <div class="kpi-value" id="ridership-kpi-peak">—</div>
+          <div class="kpi-sub" id="ridership-kpi-peak-sub">boardings</div>
+        </div>
+        <div class="kpi-card purple">
+          <div class="kpi-label">Active Buses</div>
+          <div class="kpi-value" id="ridership-kpi-buses">—</div>
+          <div class="kpi-sub">reporting via MQTT</div>
+        </div>
+      </div>
+
+      <div class="chart-grid cols-2">
+        <div class="chart-panel">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Ridership Trend</div>
+              <div class="chart-subtitle">Boardings over time</div>
+            </div>
+          </div>
+          <div class="chart-body">
+            <canvas id="chartRidershipTrend" height="280"></canvas>
+          </div>
+        </div>
+        <div class="chart-panel">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Boardings vs Alightings</div>
+              <div class="chart-subtitle">Daily balance</div>
+            </div>
+          </div>
+          <div class="chart-body">
+            <canvas id="chartBoardAlightRidership" height="280"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="chart-grid cols-2" style="margin-top:var(--space-4)">
+        <div class="chart-panel">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Ridership by Day of Week</div>
+              <div class="chart-subtitle">Average passengers per day</div>
+            </div>
+          </div>
+          <div class="chart-body">
+            <canvas id="chartDayOfWeek" height="260"></canvas>
+          </div>
+        </div>
+        <div class="chart-panel">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Occupancy Distribution</div>
+              <div class="chart-subtitle">Vehicle load factor breakdown</div>
+            </div>
+          </div>
+          <div class="chart-body">
+            <canvas id="chartOccupancyDist" height="260"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== ROUTES & STOPS VIEW ===== -->
+    <div class="view" id="view-routes">
+      <div class="filter-bar">
+        <div class="filter-group">
+          <span class="filter-label">Route</span>
+          <select class="filter-select" id="routeSelect">
+            <option value="all">All Buses</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <span class="filter-label">Date</span>
+          <input type="date" class="filter-input" id="routeDate" value="2026-03-09">
+        </div>
+      </div>
+
+      <div class="chart-grid cols-2">
+        <div class="chart-panel">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Boardings by Stop</div>
+              <div class="chart-subtitle">Live MQTT Data</div>
+            </div>
+          </div>
+          <div class="chart-body">
+            <canvas id="chartStopBoardings" height="300"></canvas>
+          </div>
+        </div>
+        <div class="chart-panel">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Passenger Load Profile</div>
+              <div class="chart-subtitle">Onboard count across stops</div>
+            </div>
+          </div>
+          <div class="chart-body">
+            <canvas id="chartLoadProfile" height="300"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="chart-panel" style="margin-top:var(--space-4)">
+        <div class="chart-header">
+          <div>
+            <div class="chart-title">Hourly Heatmap — Boardings per Stop</div>
+            <div class="chart-subtitle">Stop activity intensity across the day</div>
+          </div>
+        </div>
+        <div class="chart-body">
+          <canvas id="chartHeatmap" height="280"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== COMPARISON VIEW ===== -->
+    <div class="view" id="view-comparison">
+      <div class="comparison-controls">
+        <div class="filter-group">
+          <span class="filter-label">Compare</span>
+          <select class="filter-select" id="compareType">
+            <option value="days">Days</option>
+            <option value="weeks">Weeks</option>
+            <option value="months">Months</option>
+            <option value="years">Years</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <span class="filter-label">Period A</span>
+          <input type="date" class="filter-input" id="compareA" value="2026-03-09">
+        </div>
+        <span class="vs-label">VS</span>
+        <div class="filter-group">
+          <span class="filter-label">Period B</span>
+          <input type="date" class="filter-input" id="compareB" value="2026-03-02">
+        </div>
+        <div class="filter-group">
+          <span class="filter-label">Route</span>
+          <select class="filter-select" id="compareRoute">
+            <option value="all">All Buses</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" id="runComparison">Compare</button>
+      </div>
+
+      <div class="kpi-grid">
+        <div class="kpi-card blue">
+          <div class="kpi-label">Period A — Total</div>
+          <div class="kpi-value" id="compare-kpi-a">—</div>
+          <div class="kpi-sub" id="compare-kpi-a-sub">boardings</div>
+        </div>
+        <div class="kpi-card green">
+          <div class="kpi-label">Period B — Total</div>
+          <div class="kpi-value" id="compare-kpi-b">—</div>
+          <div class="kpi-sub" id="compare-kpi-b-sub">boardings</div>
+        </div>
+        <div class="kpi-card amber">
+          <div class="kpi-label">Difference</div>
+          <div class="kpi-value" id="compare-kpi-diff">—</div>
+          <div class="kpi-sub" id="compare-kpi-diff-sub">change</div>
+        </div>
+      </div>
+
+      <div class="chart-grid cols-2" style="margin-top:var(--space-4)">
+        <div class="chart-panel">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Hourly Comparison</div>
+              <div class="chart-subtitle">Boardings per hour overlay</div>
+            </div>
+          </div>
+          <div class="chart-body">
+            <canvas id="chartCompareHourly" height="300"></canvas>
+          </div>
+        </div>
+        <div class="chart-panel">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Route-Level Comparison</div>
+              <div class="chart-subtitle">Total passengers by route</div>
+            </div>
+          </div>
+          <div class="chart-body">
+            <canvas id="chartCompareRoutes" height="300"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== FLEET STATUS VIEW ===== -->
+    <div class="view" id="view-fleet">
+      <div class="kpi-grid" style="margin-bottom:var(--space-4)">
+        <div class="kpi-card green">
+          <div class="kpi-label">Online</div>
+          <div class="kpi-value" id="fleet-kpi-online">—</div>
+          <div class="kpi-sub">Active in service</div>
+        </div>
+        <div class="kpi-card amber">
+          <div class="kpi-label">Idle</div>
+          <div class="kpi-value" id="fleet-kpi-idle">—</div>
+          <div class="kpi-sub">At depot</div>
+        </div>
+        <div class="kpi-card pink">
+          <div class="kpi-label">Maintenance</div>
+          <div class="kpi-value" id="fleet-kpi-maint">—</div>
+          <div class="kpi-sub">Scheduled service</div>
+        </div>
+      </div>
+
+      <div class="chart-panel">
+        <div class="chart-header">
+          <div>
+            <div class="chart-title">Fleet Overview</div>
+            <div class="chart-subtitle" id="fleet-subtitle">Live fleet data via MQTT</div>
+          </div>
+          <div class="chart-actions">
+            <input type="text" class="filter-input" placeholder="Search bus..." id="fleetSearch" style="width:200px">
+          </div>
+        </div>
+        <div class="table-wrapper">
+          <table class="data-table" id="fleetTable">
+            <thead>
+              <tr>
+                <th>Bus ID <span class="sort-icon">↕</span></th>
+                <th>Route <span class="sort-icon">↕</span></th>
+                <th>Status <span class="sort-icon">↕</span></th>
+                <th>Passengers <span class="sort-icon">↕</span></th>
+                <th>Occupancy <span class="sort-icon">↕</span></th>
+                <th>Speed <span class="sort-icon">↕</span></th>
+                <th>Last Update <span class="sort-icon">↕</span></th>
+                <th>Sensor Status <span class="sort-icon">↕</span></th>
+              </tr>
+            </thead>
+            <tbody id="fleetTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="chart-grid cols-2" style="margin-top:var(--space-4)">
+        <div class="chart-panel">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Fleet Utilisation</div>
+              <div class="chart-subtitle">Average occupancy per bus today</div>
+            </div>
+          </div>
+          <div class="chart-body">
+            <canvas id="chartFleetUtil" height="260"></canvas>
+          </div>
+        </div>
+        <div class="chart-panel">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Fleet Status Breakdown</div>
+              <div class="chart-subtitle">Current fleet distribution</div>
+            </div>
+          </div>
+          <div class="chart-body" style="display:flex;align-items:center;justify-content:center">
+            <canvas id="chartFleetStatus" height="220" style="max-width:280px"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== REPORTS VIEW ===== -->
+    <div class="view" id="view-reports">
+      <div class="filter-bar" style="margin-bottom:var(--space-5)">
+        <h3 style="font-size:var(--text-lg);font-weight:600;color:var(--color-text)">Available Reports</h3>
+      </div>
+
+      <div class="report-grid">
+        <div class="report-card" data-report="daily-summary">
+          <div class="report-icon blue"><i data-lucide="calendar"></i></div>
+          <div class="report-name">Daily Summary</div>
+          <div class="report-desc">Complete daily ridership report with boardings, alightings, occupancy, and route-level breakdown.</div>
+        </div>
+        <div class="report-card" data-report="weekly-analysis">
+          <div class="report-icon green"><i data-lucide="bar-chart-3"></i></div>
+          <div class="report-name">Weekly Analysis</div>
+          <div class="report-desc">Week-over-week trends, peak hours, busiest routes, and fleet performance metrics.</div>
+        </div>
+        <div class="report-card" data-report="monthly-performance">
+          <div class="report-icon amber"><i data-lucide="trending-up"></i></div>
+          <div class="report-name">Monthly Performance</div>
+          <div class="report-desc">Monthly KPIs, capacity utilisation, on-time performance, and service reliability data.</div>
+        </div>
+        <div class="report-card" data-report="route-analysis">
+          <div class="report-icon purple"><i data-lucide="route"></i></div>
+          <div class="report-name">Route Analysis</div>
+          <div class="report-desc">Detailed per-route ridership, stop-level boardings and passenger load profiles.</div>
+        </div>
+        <div class="report-card" data-report="fleet-health">
+          <div class="report-icon blue"><i data-lucide="wrench"></i></div>
+          <div class="report-name">Fleet Health</div>
+          <div class="report-desc">Sensor status, data quality metrics, uptime logs, and maintenance diagnostics.</div>
+        </div>
+        <div class="report-card" data-report="custom-report">
+          <div class="report-icon green"><i data-lucide="sliders-horizontal"></i></div>
+          <div class="report-name">Custom Report</div>
+          <div class="report-desc">Build your own report by selecting date range, routes, metrics, and export format.</div>
+        </div>
+      </div>
+
+      <!-- Report generation panel -->
+      <div class="chart-panel" style="margin-top:var(--space-5)">
+        <div class="chart-header">
+          <div>
+            <div class="chart-title">Generate Report</div>
+            <div class="chart-subtitle">Configure and export your data</div>
+          </div>
+        </div>
+        <div style="padding:var(--space-5)">
+          <div class="filter-bar" style="margin-bottom:var(--space-4)">
+            <div class="filter-group">
+              <span class="filter-label">Report Type</span>
+              <select class="filter-select" id="reportType">
+                <option>Daily Summary</option>
+                <option>Weekly Analysis</option>
+                <option>Monthly Performance</option>
+                <option>Route Analysis</option>
+                <option>Fleet Health</option>
+              </select>
+            </div>
+            <div class="filter-group">
+              <span class="filter-label">From</span>
+              <input type="date" class="filter-input" value="2026-03-01" id="reportFrom">
+            </div>
+            <div class="filter-group">
+              <span class="filter-label">To</span>
+              <input type="date" class="filter-input" value="2026-03-09" id="reportTo">
+            </div>
+            <div class="filter-group">
+              <span class="filter-label">Format</span>
+              <select class="filter-select" id="reportFormat">
+                <option value="pdf">PDF</option>
+                <option value="excel">Excel (.xlsx)</option>
+                <option value="csv">CSV</option>
+              </select>
+            </div>
+          </div>
+          <button class="btn btn-primary" id="generateReport">
+            <i data-lucide="file-down" style="width:14px;height:14px"></i>
+            Generate &amp; Download
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== DATA EXPLORER VIEW ===== -->
+    <div class="view" id="view-data-table">
+      <div class="filter-bar">
+        <div class="filter-group">
+          <span class="filter-label">Date</span>
+          <input type="date" class="filter-input" value="2026-03-09" id="dataDate">
+        </div>
+        <div class="filter-group">
+          <span class="filter-label">Route</span>
+          <select class="filter-select" id="dataRoute">
+            <option value="all">All Buses</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <span class="filter-label">Bus</span>
+          <select class="filter-select" id="dataBus">
+            <option value="all">All Buses</option>
+          </select>
+        </div>
+        <input type="text" class="filter-input" placeholder="Search..." id="dataSearch" style="width:180px">
+        <div style="margin-left:auto">
+          <div class="export-dropdown" id="dataExport">
+            <button class="btn btn-secondary" id="dataExportBtn">
+              <i data-lucide="download" style="width:14px;height:14px"></i> Export
+            </button>
+            <div class="export-menu" id="dataExportMenu">
+              <button class="export-menu-item" data-format="pdf">
+                <i data-lucide="file-text"></i> Export as PDF
+              </button>
+              <button class="export-menu-item" data-format="excel">
+                <i data-lucide="sheet"></i> Export as Excel
+              </button>
+              <button class="export-menu-item" data-format="csv">
+                <i data-lucide="file-spreadsheet"></i> Export as CSV
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="chart-panel">
+        <div class="table-wrapper" style="max-height:calc(100vh - 280px);overflow-y:auto">
+          <table class="data-table" id="dataTable">
+            <thead>
+              <tr>
+                <th>Timestamp <span class="sort-icon">↕</span></th>
+                <th>Bus ID <span class="sort-icon">↕</span></th>
+                <th>Route <span class="sort-icon">↕</span></th>
+                <th>Stop <span class="sort-icon">↕</span></th>
+                <th>Boardings <span class="sort-icon">↕</span></th>
+                <th>Alightings <span class="sort-icon">↕</span></th>
+                <th>Onboard <span class="sort-icon">↕</span></th>
+                <th>Occupancy <span class="sort-icon">↕</span></th>
+                <th>Lat <span class="sort-icon">↕</span></th>
+                <th>Lon <span class="sort-icon">↕</span></th>
+              </tr>
+            </thead>
+            <tbody id="dataTableBody"></tbody>
+          </table>
+        </div>
+        <div class="pagination">
+          <div class="pagination-info" id="dataPageInfo">Waiting for MQTT data</div>
+          <div class="pagination-controls" id="dataPagination"></div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script src="./app.js"></script>
+
+<footer style="display:none">
+  <a href="https://www.perplexity.ai/computer" target="_blank" rel="noopener noreferrer">
+    Created with Perplexity Computer
+  </a>
+</footer>
+</body>
+</html>

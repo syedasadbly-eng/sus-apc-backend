@@ -460,9 +460,8 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Serve static dashboard files from parent directory (optional — for self-hosted mode)
-// If you place the dashboard HTML/CSS/JS files in a 'public' folder next to server.js:
-// app.use(express.static(path.join(__dirname, 'public')));
+// Serve static dashboard files from public/ folder
+app.use(express.static(path.join(__dirname, 'public')));
 
 
 // --- Live State ---
