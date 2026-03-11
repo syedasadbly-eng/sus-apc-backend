@@ -571,16 +571,10 @@ function updateLiveKPIs() {
   const totalOut = BUS_POSITIONS.reduce((s,b) => s + (b.lineOut || 0), 0);
   const avgOcc = active.length > 0 ? Math.round(active.reduce((s,b) => s+b.occupancy, 0)/active.length) : 0;
 
-  // Calculate boardings this hour from hourly buckets
-  const curHour = `${String(new Date().getHours()).padStart(2, '0')}:00`;
-  const curBucket = hourlyBuckets[curHour];
-  const boardingsHr = curBucket ? curBucket.boardings : 0;
-
   setKPI('kpi-total-passengers', totalIn > 0 ? totalIn.toLocaleString() : (mqttState.connected ? '0' : '—'));
   setKPI('kpi-active-buses', BUS_POSITIONS.length > 0 ? active.length : (mqttState.connected ? '0' : '—'));
   setKPI('kpi-avg-occupancy', BUS_POSITIONS.length > 0 ? avgOcc + '%' : (mqttState.connected ? '0%' : '—'));
   setKPI('kpi-alightings', totalOut > 0 ? totalOut.toLocaleString() : (mqttState.connected ? '0' : '—'));
-  setKPI('kpi-boardings-hr', boardingsHr > 0 ? boardingsHr.toLocaleString() : (mqttState.connected ? '0' : '—'));
   const sub = document.getElementById('kpi-fleet-sub');
   if (sub) sub.textContent = BUS_POSITIONS.length > 0 ? `of ${BUS_POSITIONS.length} total fleet` : (mqttState.connected ? 'Waiting for bus data' : 'Waiting for MQTT data');
 }
