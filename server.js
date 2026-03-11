@@ -282,28 +282,42 @@ function handleMessage(topic, rawPayload) {
   if (!hasDailyTotals && !hasPeriodic && !hasTrigger && !hasLegacy) return;
 
   // ---- COMPUTE DELTA for this sensor/topic ----
+  // IMPORTANT: VS125 sends multiple data types in the same JSON payload.
+  // line_total_data = authoritative daily cumulative (most reliable).
+  // line_periodic_data and line_trigger_data are ALSO cumulative.
+  // We ONLY use line_total_data for delta computation (most reliable).
+  // If not available, fall back to periodic, then trigger, then legacy.
   const now = new Date();
   const dateStr = now.toISOString().slice(0, 10);
   let deltaIn = 0, deltaOut = 0, msgType = 'unknown';
 
-  // Get the raw cumulative value from the sensor
+  // Get the raw cumulative value — prefer daily_total (most reliable cumulative)
   let rawIn = 0, rawOut = 0;
   if (hasDailyTotals) {
     msgType = 'daily_total';
     rawIn = Number(dailyIn) || 0;
     rawOut = Number(dailyOut) || 0;
+  } else if (hasPeriodic) {
+    // periodic totals are also cumulative; use only if no daily_total in this payload
+    msgType = 'periodic';
+    rawIn = Number(periodicIn) || 0;
+    rawOut = Number(periodicOut) || 0;
   } else if (hasTrigger) {
     msgType = 'trigger';
     rawIn = Number(triggerIn) || 0;
     rawOut = Number(triggerOut) || 0;
-  } else if (hasPeriodic) {
-    msgType = 'periodic';
-    rawIn = Number(periodicIn) || 0;
-    rawOut = Number(periodicOut) || 0;
   } else if (hasLegacy) {
     msgType = 'legacy';
     rawIn = Number(legacyIn) || 0;
     rawOut = Number(legacyOut) || 0;
+  }
+
+  // If this payload contains daily_total alongside trigger/periodic, ONLY process daily_total.
+  // This prevents double-counting when the same JSON has both data types.
+  if (hasDailyTotals && (hasPeriodic || hasTrigger)) {
+    msgType = 'daily_total';
+    rawIn = Number(dailyIn) || 0;
+    rawOut = Number(dailyOut) || 0;
   }
 
   // Initialize previous state for this sensor if needed
