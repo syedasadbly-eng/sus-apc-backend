@@ -91,6 +91,11 @@ let configStore = {
   gateways: [
     { topic: 'bus/001', label: 'SUS-001', route: '' },
   ],
+  // Topic remapping: sensors on bus/002 are physically on the same bus as bus/001 (SUS-001).
+  // Maps busBase → canonical busBase so all data merges into one device.
+  topicMap: {
+    'bus/002': 'bus/001',
+  },
 };
 
 let mqttState = {
@@ -476,15 +481,19 @@ function nmeaLatLng(coord, dir) {
 }
 
 function resolveGateway(topic, payload) {
-  // Extract bus base from topic: bus/001/gps -> bus/001, bus/001/telemetry -> bus/001
+  // Extract bus base from topic: bus/001/gps -> bus/001, bus/002/door1/telemetry -> bus/002
   const topicParts = topic.split('/');
   if (topicParts.length >= 2 && topicParts[0] === 'bus') {
-    const busBase = topicParts.slice(0, 2).join('/');
+    let busBase = topicParts.slice(0, 2).join('/');
+    // Remap: bus/002 sensors are on the same physical bus as bus/001
+    if (configStore.topicMap && configStore.topicMap[busBase]) {
+      busBase = configStore.topicMap[busBase];
+    }
     // Check if this matches a configured gateway
     for (const gw of configStore.gateways) {
       if (gw.topic && busBase.includes(gw.topic)) return gw.topic;
     }
-    return busBase; // e.g. "bus/001"
+    return busBase;
   }
   // Check if topic matches a configured gateway
   for (const gw of configStore.gateways) {
