@@ -25,9 +25,11 @@ const MQTT_CONFIG = {
   topic: process.env.MQTT_TOPIC || 'bus/#',
 };
 
-// Gateway / bus mapping (mirrors the dashboard config)
+// Gateway / bus mapping — multiple topics can map to the same bus (multi-door)
+// bus/001 = door 1, bus/002 = door 2, both on SUS-001
 const GATEWAYS = [
   { topic: 'bus/001', label: 'SUS-001', route: '' },
+  { topic: 'bus/002', label: 'SUS-001', route: '' },
 ];
 
 // Last-known GPS fallback (UR35 indoors, status 52)
@@ -147,12 +149,20 @@ const upsertDailySummary = db.prepare(`
 
 
 // ============================================
-// IN-MEMORY LIVE STATE (mirrors dashboard)
+// IN-MEMORY LIVE STATE
 // ============================================
 
-const liveDevices = {};  // { busId: { lineIn, lineOut, lat, lng, speed, ts, ... } }
+const liveDevices = {};  // { busId: { totalIn, totalOut, onboard, lat, lng, speed, ts } }
 let mqttClient = null;
 let mqttStats = { connected: false, messageCount: 0, lastMessage: null };
+
+// Per-topic previous cumulative values for delta computation
+// Key: MQTT topic (e.g. 'bus/001'), Value: { totalIn, totalOut, date }
+const prevCumulative = {};
+
+// Per-bus running onboard count (across all doors)
+// Key: busId (e.g. 'SUS-001'), Value: { onboard, totalDeltaIn, totalDeltaOut }
+const busRunningState = {};
 
 
 // ============================================
@@ -204,8 +214,12 @@ function resolveGateway(topic) {
 
 
 // ============================================
-// MQTT MESSAGE HANDLER
+// MQTT MESSAGE HANDLER (Delta-based, multi-door merge)
 // ============================================
+
+// Debounce: collect deltas from all doors, then write one merged record
+const pendingDeltas = {};  // { busId: { deltaIn, deltaOut, lat, lng, speed, msgType, timeout } }
+const MERGE_WINDOW_MS = 2000;  // Wait 2s for all door messages to arrive before writing
 
 function handleMessage(topic, rawPayload) {
   let payload;
@@ -215,7 +229,7 @@ function handleMessage(topic, rawPayload) {
   try {
     payload = JSON.parse(raw);
   } catch {
-    // NMEA sentences from UR35 GPS — just update GPS, no counting data
+    // NMEA sentences from UR35 GPS
     if (raw.startsWith('$GP') || raw.startsWith('$GN')) return;
     return;
   }
@@ -226,10 +240,8 @@ function handleMessage(topic, rawPayload) {
   const gw = resolveGateway(topic);
   const busId = gw.label;
   const route = gw.route || '';
-  const now = new Date();
-  const isoTs = now.toISOString();
-  const dateStr = isoTs.slice(0, 10);
-  const hour = now.getUTCHours();
+  // Use the raw topic as the sensor key (e.g. 'bus/001', 'bus/002')
+  const sensorTopic = gw.topic;
 
   // Extract fields
   const dailyIn    = extractField(payload, FIELD_PATHS.totalIn);
@@ -252,29 +264,13 @@ function handleMessage(topic, rawPayload) {
   const hasTrigger     = triggerIn != null || triggerOut != null;
   const hasLegacy      = legacyIn != null || legacyOut != null;
 
-  // Skip pure GPS messages (no counting data)
-  if (!hasDailyTotals && !hasPeriodic && !hasTrigger && !hasLegacy) {
-    // Still update live GPS
-    if (!liveDevices[busId]) {
-      liveDevices[busId] = { lineIn: 0, lineOut: 0, lat: 0, lng: 0, speed: 0, ts: 0 };
-    }
-    const dev = liveDevices[busId];
-    if (lat != null && Number(lat) !== 0) dev.lat = Number(lat);
-    if (lng != null && Number(lng) !== 0) dev.lng = Number(lng);
-    if (!dev.lat && LAST_KNOWN_GPS.lat) dev.lat = LAST_KNOWN_GPS.lat;
-    if (!dev.lng && LAST_KNOWN_GPS.lng) dev.lng = LAST_KNOWN_GPS.lng;
-    dev.speed = speed;
-    dev.ts = Date.now();
-    return;
-  }
-
-  // Update in-memory live state
+  // Ensure live device state exists
   if (!liveDevices[busId]) {
-    liveDevices[busId] = { lineIn: 0, lineOut: 0, lat: 0, lng: 0, speed: 0, ts: 0 };
+    liveDevices[busId] = { totalIn: 0, totalOut: 0, onboard: 0, lat: 0, lng: 0, speed: 0, ts: 0 };
   }
   const dev = liveDevices[busId];
 
-  // GPS
+  // Update GPS on every message
   if (lat != null && Number(lat) !== 0) dev.lat = Number(lat);
   if (lng != null && Number(lng) !== 0) dev.lng = Number(lng);
   if (!dev.lat && LAST_KNOWN_GPS.lat) dev.lat = LAST_KNOWN_GPS.lat;
@@ -282,52 +278,134 @@ function handleMessage(topic, rawPayload) {
   dev.speed = speed;
   dev.ts = Date.now();
 
-  // Determine counts and message type
-  let boardings = 0, alightings = 0, evtIn = 0, evtOut = 0, msgType = 'unknown';
+  // Skip pure GPS messages (no counting data)
+  if (!hasDailyTotals && !hasPeriodic && !hasTrigger && !hasLegacy) return;
 
+  // ---- COMPUTE DELTA for this sensor/topic ----
+  const now = new Date();
+  const dateStr = now.toISOString().slice(0, 10);
+  let deltaIn = 0, deltaOut = 0, msgType = 'unknown';
+
+  // Get the raw cumulative value from the sensor
+  let rawIn = 0, rawOut = 0;
   if (hasDailyTotals) {
     msgType = 'daily_total';
-    const dIn = Number(dailyIn) || 0;
-    const dOut = Number(dailyOut) || 0;
-    dev.lineIn = Math.max(0, dIn);
-    dev.lineOut = Math.max(0, dOut);
-    boardings = dev.lineIn;
-    alightings = dev.lineOut;
-    evtIn = dev.lineIn;
-    evtOut = dev.lineOut;
+    rawIn = Number(dailyIn) || 0;
+    rawOut = Number(dailyOut) || 0;
   } else if (hasTrigger) {
     msgType = 'trigger';
-    evtIn = Number(triggerIn) || 0;
-    evtOut = Number(triggerOut) || 0;
-    dev.lineIn += evtIn;
-    dev.lineOut += evtOut;
-    boardings = dev.lineIn;
-    alightings = dev.lineOut;
+    rawIn = Number(triggerIn) || 0;
+    rawOut = Number(triggerOut) || 0;
   } else if (hasPeriodic) {
     msgType = 'periodic';
-    evtIn = Number(periodicIn) || 0;
-    evtOut = Number(periodicOut) || 0;
-    // Only accumulate if non-zero (periodic with 0/0 is just a heartbeat)
-    if (evtIn > 0 || evtOut > 0) {
-      dev.lineIn += evtIn;
-      dev.lineOut += evtOut;
-    }
-    boardings = dev.lineIn;
-    alightings = dev.lineOut;
+    rawIn = Number(periodicIn) || 0;
+    rawOut = Number(periodicOut) || 0;
   } else if (hasLegacy) {
     msgType = 'legacy';
-    dev.lineIn = Number(legacyIn) || 0;
-    dev.lineOut = Number(legacyOut) || 0;
-    boardings = dev.lineIn;
-    alightings = dev.lineOut;
-    evtIn = dev.lineIn;
-    evtOut = dev.lineOut;
+    rawIn = Number(legacyIn) || 0;
+    rawOut = Number(legacyOut) || 0;
   }
 
-  const onboard = Math.max(0, boardings - alightings);
+  // Initialize previous state for this sensor if needed
+  if (!prevCumulative[sensorTopic]) {
+    prevCumulative[sensorTopic] = { totalIn: rawIn, totalOut: rawOut, date: dateStr };
+    // First message from this sensor — no delta yet (we need a baseline)
+    console.log(`[MQTT] ${busId} (${sensorTopic}) baseline set: in=${rawIn} out=${rawOut}`);
+    return;
+  }
+
+  const prev = prevCumulative[sensorTopic];
+
+  // Reset if date changed (new day — sensor cumulative resets at midnight)
+  if (prev.date !== dateStr) {
+    console.log(`[MQTT] ${busId} (${sensorTopic}) new day detected — resetting baseline`);
+    prev.totalIn = 0;
+    prev.totalOut = 0;
+    prev.date = dateStr;
+    // Also reset bus running state on new day
+    if (busRunningState[busId]) {
+      busRunningState[busId].onboard = 0;
+      busRunningState[busId].totalDeltaIn = 0;
+      busRunningState[busId].totalDeltaOut = 0;
+    }
+  }
+
+  // Handle sensor reset (cumulative dropped below previous — sensor rebooted)
+  if (rawIn < prev.totalIn || rawOut < prev.totalOut) {
+    console.log(`[MQTT] ${busId} (${sensorTopic}) sensor reset detected: prev in=${prev.totalIn} out=${prev.totalOut}, now in=${rawIn} out=${rawOut}`);
+    // Treat the new values as a fresh baseline, use them as the delta
+    deltaIn = rawIn;
+    deltaOut = rawOut;
+  } else {
+    // Normal case: delta = current - previous
+    deltaIn = rawIn - prev.totalIn;
+    deltaOut = rawOut - prev.totalOut;
+  }
+
+  // Update stored previous values
+  prev.totalIn = rawIn;
+  prev.totalOut = rawOut;
+
+  // Skip if no change (heartbeat with same cumulative values)
+  if (deltaIn === 0 && deltaOut === 0) return;
+
+  // ---- MERGE deltas from multiple doors into one bus record ----
+  if (!pendingDeltas[busId]) {
+    pendingDeltas[busId] = { deltaIn: 0, deltaOut: 0, lat: dev.lat, lng: dev.lng, speed: dev.speed, msgType, route, timeout: null };
+  }
+  const pending = pendingDeltas[busId];
+  pending.deltaIn += deltaIn;
+  pending.deltaOut += deltaOut;
+  pending.lat = dev.lat;
+  pending.lng = dev.lng;
+  pending.speed = dev.speed;
+  if (msgType === 'daily_total') pending.msgType = msgType;  // prefer daily_total type
+
+  // Clear previous timeout and set a new merge window
+  if (pending.timeout) clearTimeout(pending.timeout);
+  pending.timeout = setTimeout(() => flushBusDelta(busId), MERGE_WINDOW_MS);
+
+  console.log(`[MQTT] ${busId} (${sensorTopic}) ${msgType}: raw in=${rawIn} out=${rawOut} Δin=${deltaIn} Δout=${deltaOut}`);
+}
+
+function flushBusDelta(busId) {
+  const pending = pendingDeltas[busId];
+  if (!pending) return;
+  delete pendingDeltas[busId];
+
+  const deltaIn = pending.deltaIn;
+  const deltaOut = pending.deltaOut;
+  if (deltaIn === 0 && deltaOut === 0) return;
+
+  const now = new Date();
+  const isoTs = now.toISOString();
+  const dateStr = isoTs.slice(0, 10);
+  const hour = now.getUTCHours();
+
+  // Update running onboard count
+  if (!busRunningState[busId]) {
+    busRunningState[busId] = { onboard: 0, totalDeltaIn: 0, totalDeltaOut: 0 };
+  }
+  const bus = busRunningState[busId];
+  bus.totalDeltaIn += deltaIn;
+  bus.totalDeltaOut += deltaOut;
+  bus.onboard = Math.max(0, bus.onboard + deltaIn - deltaOut);
+
+  const onboard = bus.onboard;
   const occupancy = BUS_CAPACITY > 0 ? Math.min(100, Math.round((onboard / BUS_CAPACITY) * 100)) : 0;
 
-  // Insert record into database
+  // Update live device state
+  if (liveDevices[busId]) {
+    liveDevices[busId].totalIn = bus.totalDeltaIn;
+    liveDevices[busId].totalOut = bus.totalDeltaOut;
+    liveDevices[busId].onboard = onboard;
+  }
+
+  // Find route from gateway config
+  const gwMatch = GATEWAYS.find(g => g.label === busId);
+  const route = gwMatch ? gwMatch.route || '' : '';
+
+  // Insert merged record into database
   try {
     insertRecord.run({
       timestamp: isoTs,
@@ -336,25 +414,25 @@ function handleMessage(topic, rawPayload) {
       bus_id: busId,
       route,
       stop: '-',
-      boardings,
-      alightings,
-      evt_in: evtIn,
-      evt_out: evtOut,
+      boardings: deltaIn,
+      alightings: deltaOut,
+      evt_in: deltaIn,
+      evt_out: deltaOut,
       onboard,
       occupancy,
-      lat: dev.lat || 0,
-      lng: dev.lng || 0,
-      speed,
-      msg_type: msgType,
+      lat: pending.lat || 0,
+      lng: pending.lng || 0,
+      speed: pending.speed || 0,
+      msg_type: pending.msgType || 'merged',
     });
 
-    // Upsert hourly summary
+    // Upsert hourly summary — use cumulative totals for the day
     upsertHourlySummary.run({
       date: dateStr,
       hour,
       bus_id: busId,
-      boardings,
-      alightings,
+      boardings: bus.totalDeltaIn,
+      alightings: bus.totalDeltaOut,
       max_onboard: onboard,
     });
 
@@ -362,8 +440,8 @@ function handleMessage(topic, rawPayload) {
     upsertDailySummary.run({
       date: dateStr,
       bus_id: busId,
-      total_in: boardings,
-      total_out: alightings,
+      total_in: bus.totalDeltaIn,
+      total_out: bus.totalDeltaOut,
       peak_onboard: onboard,
       peak_hour: hour,
       first_seen: isoTs,
@@ -374,10 +452,7 @@ function handleMessage(topic, rawPayload) {
     console.error('[DB] Insert error:', err.message);
   }
 
-  // Log
-  if (msgType === 'daily_total') {
-    console.log(`[MQTT] ${busId} daily_total: in=${boardings} out=${alightings} onboard=${onboard}`);
-  }
+  console.log(`[FLUSH] ${busId} merged: Δin=${deltaIn} Δout=${deltaOut} onboard=${onboard} dayTotal: in=${bus.totalDeltaIn} out=${bus.totalDeltaOut}`);
 }
 
 
@@ -440,11 +515,24 @@ function scheduleMidnightReset() {
   console.log(`[RESET] Next midnight reset in ${Math.round(msUntilMidnight / 60000)} minutes`);
 
   setTimeout(() => {
-    console.log('[RESET] Midnight — resetting in-memory daily counters');
-    // Reset in-memory accumulators
+    console.log('[RESET] Midnight — resetting all daily counters and baselines');
+    // Reset per-sensor cumulative baselines
+    for (const key of Object.keys(prevCumulative)) {
+      prevCumulative[key].totalIn = 0;
+      prevCumulative[key].totalOut = 0;
+      prevCumulative[key].date = new Date().toISOString().slice(0, 10);
+    }
+    // Reset per-bus running state
+    for (const busId of Object.keys(busRunningState)) {
+      busRunningState[busId].onboard = 0;
+      busRunningState[busId].totalDeltaIn = 0;
+      busRunningState[busId].totalDeltaOut = 0;
+    }
+    // Reset live device counters
     for (const busId of Object.keys(liveDevices)) {
-      liveDevices[busId].lineIn = 0;
-      liveDevices[busId].lineOut = 0;
+      liveDevices[busId].totalIn = 0;
+      liveDevices[busId].totalOut = 0;
+      liveDevices[busId].onboard = 0;
     }
     // Schedule next midnight
     scheduleMidnightReset();
@@ -469,13 +557,14 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.get('/api/live', (req, res) => {
   const buses = Object.entries(liveDevices).map(([busId, dev]) => {
     const ageSeconds = dev.ts ? Math.round((Date.now() - dev.ts) / 1000) : 999;
-    const passengers = Math.max(0, dev.lineIn - dev.lineOut);
+    const passengers = dev.onboard || Math.max(0, dev.totalIn - dev.totalOut);
     const occupancy = BUS_CAPACITY > 0 ? Math.min(100, Math.round((passengers / BUS_CAPACITY) * 100)) : 0;
     return {
       busId,
-      lineIn: dev.lineIn,
-      lineOut: dev.lineOut,
+      lineIn: dev.totalIn,
+      lineOut: dev.totalOut,
       passengers,
+      onboard: dev.onboard || 0,
       occupancy,
       lat: dev.lat || 0,
       lng: dev.lng || 0,
@@ -711,6 +800,24 @@ app.listen(PORT, () => {
   console.log(`[SERVER] APC Backend running on http://localhost:${PORT}`);
   console.log(`[SERVER] Database: ${DB_PATH}`);
   console.log(`[SERVER] API Health: http://localhost:${PORT}/api/health`);
+  console.log('[SERVER] Delta-based counting with multi-door merge enabled');
+
+  // Purge old cumulative-based data from before the delta fix
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const purged = db.prepare('DELETE FROM records WHERE date < ?').run(today);
+    if (purged.changes > 0) console.log(`[DB] Purged ${purged.changes} old records (pre-delta data)`);
+    db.prepare('DELETE FROM hourly_summary WHERE date < ?').run(today);
+    db.prepare('DELETE FROM daily_summary WHERE date < ?').run(today);
+    // Also purge today's data since it was cumulative-based
+    const purgedToday = db.prepare('DELETE FROM records WHERE date = ?').run(today);
+    if (purgedToday.changes > 0) console.log(`[DB] Purged ${purgedToday.changes} today records (resetting for delta-based counting)`);
+    db.prepare('DELETE FROM hourly_summary WHERE date = ?').run(today);
+    db.prepare('DELETE FROM daily_summary WHERE date = ?').run(today);
+  } catch (err) {
+    console.error('[DB] Purge error:', err.message);
+  }
+
   connectMqtt();
   scheduleMidnightReset();
 });
