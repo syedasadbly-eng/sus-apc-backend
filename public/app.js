@@ -53,15 +53,15 @@ const CONFIG = {
   // VS125 JSON payload field mappings (supports real VS125 + flat formats)
   vs125Fields: {
     // Running daily totals (from line_total_data — best source for KPI counts)
-    totalIn: ['line_total_data.0.total.in_counted'],
-    totalOut: ['line_total_data.0.total.out_counted'],
+    totalIn: ['line_total_data.0.total.out_counted'],   // VS125 in/out inverted: sensor 'out' = boarding
+    totalOut: ['line_total_data.0.total.in_counted'],    // VS125 in/out inverted: sensor 'in' = alighting
     totalCapacity: ['line_total_data.0.total.capacity_counted'],
     // Periodic window totals (line_periodic_data — per-minute summary)
-    periodicIn: ['line_periodic_data.0.total.in'],
-    periodicOut: ['line_periodic_data.0.total.out'],
+    periodicIn: ['line_periodic_data.0.total.out'],    // VS125 in/out inverted: sensor 'out' = boarding
+    periodicOut: ['line_periodic_data.0.total.in'],     // VS125 in/out inverted: sensor 'in' = alighting
     // Trigger events (line_trigger_data — individual door events, 0 or 1)
-    triggerIn: ['line_trigger_data.0.total.in'],
-    triggerOut: ['line_trigger_data.0.total.out'],
+    triggerIn: ['line_trigger_data.0.total.out'],      // VS125 in/out inverted: sensor 'out' = boarding
+    triggerOut: ['line_trigger_data.0.total.in'],       // VS125 in/out inverted: sensor 'in' = alighting
     // Legacy / flat format fallbacks
     lineIn: ['line.0.total.in', 'linePeriod.0.total.in', 'line1_in', 'total.in'],
     lineOut: ['line.0.total.out', 'linePeriod.0.total.out', 'line1_out', 'total.out'],

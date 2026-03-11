@@ -37,12 +37,12 @@ const LAST_KNOWN_GPS = { lat: 53.507731, lng: -2.229141 };
 
 // VS125 field extraction paths (same as dashboard)
 const FIELD_PATHS = {
-  totalIn:      ['line_total_data.0.total.in_counted'],
-  totalOut:     ['line_total_data.0.total.out_counted'],
-  periodicIn:   ['line_periodic_data.0.total.in'],
-  periodicOut:  ['line_periodic_data.0.total.out'],
-  triggerIn:    ['line_trigger_data.0.total.in'],
-  triggerOut:   ['line_trigger_data.0.total.out'],
+  totalIn:      ['line_total_data.0.total.out_counted'],   // VS125 inverted: sensor 'out' = boarding
+  totalOut:     ['line_total_data.0.total.in_counted'],    // VS125 inverted: sensor 'in' = alighting
+  periodicIn:   ['line_periodic_data.0.total.out'],        // VS125 inverted: sensor 'out' = boarding
+  periodicOut:  ['line_periodic_data.0.total.in'],         // VS125 inverted: sensor 'in' = alighting
+  triggerIn:    ['line_trigger_data.0.total.out'],         // VS125 inverted: sensor 'out' = boarding
+  triggerOut:   ['line_trigger_data.0.total.in'],          // VS125 inverted: sensor 'in' = alighting
   lineIn:       ['line.0.total.in', 'linePeriod.0.total.in', 'line1_in', 'total.in'],
   lineOut:      ['line.0.total.out', 'linePeriod.0.total.out', 'line1_out', 'total.out'],
   latitude:     ['data.latitude', 'latitude', 'gps.latitude'],
