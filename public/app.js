@@ -316,33 +316,42 @@ function handleMqttMessage(topic, payload) {
   if (capacity != null) dev.capacity = Number(capacity) || CONFIG.busCapacity;
   if (passersby != null) dev.passersby = Number(passersby) || 0;
 
-  // Update passenger counts based on message type
-  if (hasDailyTotals) {
-    // line_total_data: absolute running totals for the day — use directly as headline
-    const dIn = Number(dailyIn);
-    const dOut = Number(dailyOut);
-    if (!isNaN(dIn) && dIn >= 0) dev.lineIn = dIn;
-    if (!isNaN(dOut) && dOut >= 0) dev.lineOut = dOut;
-    dev._hasDailyTotals = true;
-    console.log('[MQTT] Updated daily totals:', { lineIn: dev.lineIn, lineOut: dev.lineOut });
-  } else if (hasPeriodic && !dev._hasDailyTotals) {
-    // line_periodic_data: totals within the periodic window — only if no daily totals yet
+  // Update passenger counts — ALWAYS accumulate periodic & trigger deltas.
+  // line_periodic_data.total.in/out are per-interval deltas — add them every time.
+  // line_trigger_data.total.in/out are per-event counts — add them every time.
+  // line_total_data is cumulative — used ONLY for authoritative onboard count below.
+  // Both door topics (bus/002/door1, bus/002/door2) resolve to same gatewayKey,
+  // so accumulating on the shared dev object naturally merges both doors.
+
+  if (hasPeriodic) {
     const pIn = Number(periodicIn) || 0;
     const pOut = Number(periodicOut) || 0;
     dev.lineIn += pIn;
     dev.lineOut += pOut;
-  } else if (hasTrigger) {
-    // line_trigger_data: individual door events (0 or 1 per event)
+    console.log('[MQTT] Accumulated periodic:', { door: topic, pIn, pOut, dayIn: dev.lineIn, dayOut: dev.lineOut });
+  }
+
+  if (hasTrigger) {
     const tIn = Number(triggerIn) || 0;
     const tOut = Number(triggerOut) || 0;
-    dev.triggerAccumIn += tIn;
-    dev.triggerAccumOut += tOut;
-    // If we also received daily totals, don't override headline numbers
-    if (!dev._hasDailyTotals) {
-      dev.lineIn += tIn;
-      dev.lineOut += tOut;
-    }
-  } else if (hasLegacy) {
+    dev.lineIn += tIn;
+    dev.lineOut += tOut;
+    dev.triggerAccumIn = (dev.triggerAccumIn || 0) + tIn;
+    dev.triggerAccumOut = (dev.triggerAccumOut || 0) + tOut;
+    console.log('[MQTT] Accumulated trigger:', { door: topic, tIn, tOut, dayIn: dev.lineIn, dayOut: dev.lineOut });
+  }
+
+  // line_total_data: store cumulative for onboard calculation, do NOT overwrite lineIn/lineOut
+  if (hasDailyTotals) {
+    dev._lastCumIn = Number(dailyIn) || 0;
+    dev._lastCumOut = Number(dailyOut) || 0;
+    // Authoritative onboard = cumulative in - cumulative out (single door only,
+    // but good signal). We store it; updateLiveBusPositions can use it.
+    dev._onboardFromTotal = Math.max(0, dev._lastCumIn - dev._lastCumOut);
+    console.log('[MQTT] Cumulative totals (for onboard):', { cumIn: dev._lastCumIn, cumOut: dev._lastCumOut, onboard: dev._onboardFromTotal });
+  }
+
+  if (hasLegacy && !hasPeriodic && !hasTrigger && !hasDailyTotals) {
     const lIn = Number(legacyIn);
     const lOut = Number(legacyOut);
     if (!isNaN(lIn) && lIn >= 0) dev.lineIn = lIn;
@@ -359,22 +368,21 @@ function handleMqttMessage(topic, payload) {
   const hourKey = `${String(hourLabel).padStart(2, '0')}:00`;
   if (!hourlyBuckets[hourKey]) hourlyBuckets[hourKey] = { boardings: 0, alightings: 0 };
 
-  if (hasTrigger) {
-    const tIn = Number(triggerIn) || 0;
-    const tOut = Number(triggerOut) || 0;
-    if (tIn > 0) hourlyBuckets[hourKey].boardings += tIn;
-    if (tOut > 0) hourlyBuckets[hourKey].alightings += tOut;
-  } else if (hasDailyTotals) {
-    // Daily totals: set the current hour bucket to the running daily total
-    // This gives visual feedback on the hourly chart showing total activity
-    hourlyBuckets[hourKey].boardings = Number(dailyIn) || 0;
-    hourlyBuckets[hourKey].alightings = Number(dailyOut) || 0;
-  } else if (hasPeriodic) {
+  // Accumulate periodic deltas and trigger events into hourly buckets
+  if (hasPeriodic) {
     const pIn = Number(periodicIn) || 0;
     const pOut = Number(periodicOut) || 0;
     if (pIn > 0) hourlyBuckets[hourKey].boardings += pIn;
     if (pOut > 0) hourlyBuckets[hourKey].alightings += pOut;
   }
+  if (hasTrigger) {
+    const tIn = Number(triggerIn) || 0;
+    const tOut = Number(triggerOut) || 0;
+    if (tIn > 0) hourlyBuckets[hourKey].boardings += tIn;
+    if (tOut > 0) hourlyBuckets[hourKey].alightings += tOut;
+  }
+  // Note: line_total_data (hasDailyTotals) is NOT added to hourly buckets —
+  // it's cumulative and would overwrite the correctly accumulated deltas.
 
   // --- Append to live history ---
   liveHistory.push({ ts: now, lineIn: dev.lineIn, lineOut: dev.lineOut, gatewayKey, lat: dev.lat, lng: dev.lng });
@@ -386,8 +394,9 @@ function handleMqttMessage(topic, payload) {
   const routeId = gwConfig ? (gwConfig.route || '-') : '-';
   const passengers = Math.max(0, dev.lineIn - dev.lineOut);
   const occ = dev.capacity > 0 ? Math.min(100, Math.round((passengers / dev.capacity) * 100)) : 0;
-  const evtIn = hasDailyTotals ? dev.lineIn : (hasTrigger ? (Number(triggerIn) || 0) : (hasPeriodic ? (Number(periodicIn) || 0) : 0));
-  const evtOut = hasDailyTotals ? dev.lineOut : (hasTrigger ? (Number(triggerOut) || 0) : (hasPeriodic ? (Number(periodicOut) || 0) : 0));
+  // Per-record event counts (the delta that just arrived)
+  const evtIn = (hasPeriodic ? (Number(periodicIn) || 0) : 0) + (hasTrigger ? (Number(triggerIn) || 0) : 0);
+  const evtOut = (hasPeriodic ? (Number(periodicOut) || 0) : 0) + (hasTrigger ? (Number(triggerOut) || 0) : 0);
 
   // Only add record if this is a counting message (not just GPS)
   if (hasDailyTotals || hasPeriodic || hasTrigger || hasLegacy) {
