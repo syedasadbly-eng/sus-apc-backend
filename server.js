@@ -221,6 +221,10 @@ function resolveGateway(topic) {
 const pendingDeltas = {};  // { busId: { deltaIn, deltaOut, lat, lng, speed, msgType, timeout } }
 const MERGE_WINDOW_MS = 2000;  // Wait 2s for all door messages to arrive before writing
 
+// Debug: store last N raw MQTT payloads
+const DEBUG_RAW_PAYLOADS = [];
+const DEBUG_MAX = 20;
+
 function handleMessage(topic, rawPayload) {
   let payload;
   const raw = rawPayload.toString();
@@ -233,6 +237,10 @@ function handleMessage(topic, rawPayload) {
     if (raw.startsWith('$GP') || raw.startsWith('$GN')) return;
     return;
   }
+
+  // Store raw payload for debug endpoint
+  DEBUG_RAW_PAYLOADS.unshift({ topic, timestamp: new Date().toISOString(), payload });
+  if (DEBUG_RAW_PAYLOADS.length > DEBUG_MAX) DEBUG_RAW_PAYLOADS.length = DEBUG_MAX;
 
   mqttStats.messageCount++;
   mqttStats.lastMessage = Date.now();
@@ -802,6 +810,32 @@ app.get('/api/health', (req, res) => {
     mqttMessages: mqttStats.messageCount,
     dbRecords: recordCount,
     uptime: Math.round(process.uptime()),
+  });
+});
+
+
+// --- Debug endpoints ---
+
+app.get('/api/debug', (req, res) => {
+  res.json({
+    description: 'Last 20 raw MQTT JSON payloads (newest first)',
+    count: DEBUG_RAW_PAYLOADS.length,
+    payloads: DEBUG_RAW_PAYLOADS,
+  });
+});
+
+app.get('/api/debug/state', (req, res) => {
+  // Serialize pendingDeltas without the timeout handle
+  const pending = {};
+  for (const [k, v] of Object.entries(pendingDeltas)) {
+    pending[k] = { deltaIn: v.deltaIn, deltaOut: v.deltaOut, msgType: v.msgType, lat: v.lat, lng: v.lng };
+  }
+  res.json({
+    prevCumulative,
+    busRunningState,
+    pendingDeltas: pending,
+    liveDevices,
+    gateways: GATEWAYS,
   });
 });
 
