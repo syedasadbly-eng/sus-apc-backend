@@ -48,7 +48,7 @@ async function apiFetch(endpoint, params = {}) {
 }
 
 const CONFIG = {
-  dashPassword: '',
+  dashPassword: 'sus2026',
   busCapacity: 55,
   // VS125 JSON payload field mappings (supports real VS125 + flat formats)
   vs125Fields: {
@@ -670,7 +670,7 @@ function updateMqttStatus(status, text) {
 // PASSWORD GATE
 // ============================================
 
-function initLoginGate() {   // Auto-bypass: hide login screen immediately   document.getElementById('loginScreen').style.display = 'none';   document.getElementById('dashboard').style.display = 'block';   return;
+function initLoginGate() {
   const loginScreen = document.getElementById('loginScreen');
   const loginForm = document.getElementById('loginForm');
   const loginError = document.getElementById('loginError');
