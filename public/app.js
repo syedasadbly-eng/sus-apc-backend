@@ -33,7 +33,7 @@ async function probeBackend() {
 }
 
 async function apiFetch(endpoint, params = {}) {
-  if (backendAvailable === null) await probeBackend();
+  if (backendAvailable === null) await probeBackend().then(() => seedKPIsFromAPI());
   if (!backendAvailable) return null;
   const url = new URL(`${API_BASE}${endpoint}`, window.location.origin);
   Object.entries(params).forEach(([k, v]) => { if (v != null && v !== '') url.searchParams.set(k, v); });
@@ -583,7 +583,7 @@ function formatAge(s) {
   return `${Math.floor(s/3600)}h ago`;
 }
 
-function updateLiveKPIs() {
+async function seedKPIsFromAPI() {   try {     const data = await apiFetch('/api/summary', { period: 'today' });     if (!data || !data.totals) return;     const t = data.totals;     // Only seed if MQTT hasn't already provided values     const curPass = document.getElementById('kpi-total-passengers');     const curAlight = document.getElementById('kpi-alightings');     if (curPass && (curPass.textContent === '0' || curPass.textContent === '—')) {       setKPI('kpi-total-passengers', t.total_boardings > 0 ? t.total_boardings.toLocaleString() : '0');     }     if (curAlight && (curAlight.textContent === '0' || curAlight.textContent === '—')) {       setKPI('kpi-alightings', t.total_alightings > 0 ? t.total_alightings.toLocaleString() : '0');     }     if (t.avg_occupancy > 0) setKPI('kpi-occupancy', t.avg_occupancy + '%');   } catch(e) { /* silent fail */ } }  function updateLiveKPIs() {
   const active = BUS_POSITIONS.filter(b => b.status === 'active');
   const totalIn = BUS_POSITIONS.reduce((s,b) => s + (b.lineIn || 0), 0);
   const totalOut = BUS_POSITIONS.reduce((s,b) => s + (b.lineOut || 0), 0);
@@ -832,7 +832,7 @@ function initDashboard() {
   lucide.createIcons();
 
   // Pre-probe backend so it's cached before any view needs it
-  probeBackend();
+  probeBackend().then(() => seedKPIsFromAPI());
 
   // Auto-connect to MQTT broker if credentials are pre-configured
   if (configStore.mqtt.host) {
@@ -1747,7 +1747,7 @@ async function initDataTable() {
   if (searchInput) searchInput.addEventListener('input', () => { dataCurrentPage = 1; loadDataFromAPI(); });
 
   // Ensure backend probe completes before first data load
-  await probeBackend();
+  await probeBackend().then(() => seedKPIsFromAPI());
 
   // Populate available dates in date picker, then load data
   const datesData = await apiFetch('/api/dates');
