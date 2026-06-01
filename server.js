@@ -6,6 +6,7 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 const Database = require('better-sqlite3');
 const mqtt = require('mqtt');
 
@@ -767,12 +768,18 @@ app.get('/api/buses', (req, res) => {
 
 app.get('/api/health', (req, res) => {
   const recordCount = db.prepare('SELECT COUNT(*) as cnt FROM records').get().cnt;
+  let dbFile = { path: DB_PATH, exists: false, sizeBytes: 0, mtime: null };
+  try {
+    const st = fs.statSync(DB_PATH);
+    dbFile = { path: DB_PATH, exists: true, sizeBytes: st.size, mtime: st.mtime.toISOString() };
+  } catch (e) { /* file missing */ }
   res.json({
     status: 'ok',
     mqtt: mqttStats.connected ? 'connected' : 'disconnected',
     mqttMessages: mqttStats.messageCount,
     dbRecords: recordCount,
     uptime: Math.round(process.uptime()),
+    dbFile,
   });
 });
 
