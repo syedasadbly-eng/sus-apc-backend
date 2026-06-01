@@ -824,6 +824,26 @@ app.listen(PORT, () => {
   // change. It was wiping counts on every redeploy/restart, so it has been
   // removed. Data now persists across restarts on the mounted volume.
 
+  // Rehydrate in-memory day totals from the database so a restart resumes the
+  // running count instead of resetting it to zero (which previously caused the
+  // daily_summary upsert to overwrite the day's total with a near-zero value).
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const rows = db.prepare(
+      'SELECT bus_id, total_in, total_out FROM daily_summary WHERE date = ?'
+    ).all(today);
+    rows.forEach(r => {
+      busDayTotals[r.bus_id] = { dayIn: r.total_in || 0, dayOut: r.total_out || 0, date: today };
+      if (liveDevices[r.bus_id]) {
+        liveDevices[r.bus_id].totalIn = r.total_in || 0;
+        liveDevices[r.bus_id].totalOut = r.total_out || 0;
+      }
+    });
+    if (rows.length) console.log(`[REHYDRATE] Restored day totals for ${rows.length} bus(es) from DB`);
+  } catch (err) {
+    console.error('[REHYDRATE] Failed to restore day totals:', err.message);
+  }
+
   connectMqtt();
   scheduleMidnightReset();
 });
