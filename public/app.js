@@ -670,7 +670,7 @@ function updateMqttStatus(status, text) {
 // PASSWORD GATE
 // ============================================
 
-function initLoginGate() {   // Auto-bypass: hide login screen immediately   document.getElementById('loginScreen').style.display = 'none';   document.getElementById('dashboard').style.display = '';   return;
+function initLoginGate() {   // Auto-bypass: hide login screen immediately   document.getElementById('loginScreen').style.display = 'none';   document.getElementById('dashboard').style.display = 'block';   return;
   const loginScreen = document.getElementById('loginScreen');
   const loginForm = document.getElementById('loginForm');
   const loginError = document.getElementById('loginError');
