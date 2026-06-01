@@ -583,20 +583,21 @@ function formatAge(s) {
   return `${Math.floor(s/3600)}h ago`;
 }
 
+// Authoritative daily totals from the database. These accumulate across the day and
+// never reset, unlike the live-fleet snapshot counters. The KPI cards read from these.
+let dailyTotals = { boardings: null, alightings: null };
+
 async function seedKPIsFromAPI() {
   try {
     const data = await apiFetch('/api/summary', { period: 'today' });
     if (!data || !data.totals) return;
     const t = data.totals;
-    // Only seed if MQTT hasn't already provided values
-    const curPass = document.getElementById('kpi-total-passengers');
-    const curAlight = document.getElementById('kpi-alightings');
-    if (curPass && (curPass.textContent === '0' || curPass.textContent === '—')) {
-      setKPI('kpi-total-passengers', t.total_boardings > 0 ? t.total_boardings.toLocaleString() : '0');
-    }
-    if (curAlight && (curAlight.textContent === '0' || curAlight.textContent === '—')) {
-      setKPI('kpi-alightings', t.total_alightings > 0 ? t.total_alightings.toLocaleString() : '0');
-    }
+    // The DB daily total is authoritative for these two cards. Update unconditionally
+    // so a momentary 0 from the live MQTT snapshot can never wipe the real day total.
+    dailyTotals.boardings = t.total_boardings || 0;
+    dailyTotals.alightings = t.total_alightings || 0;
+    setKPI('kpi-total-passengers', dailyTotals.boardings.toLocaleString());
+    setKPI('kpi-alightings', dailyTotals.alightings.toLocaleString());
     if (t.avg_occupancy > 0) setKPI('kpi-occupancy', t.avg_occupancy + '%');
   } catch(e) { /* silent fail */ }
 }
@@ -607,10 +608,21 @@ function updateLiveKPIs() {
   const totalOut = BUS_POSITIONS.reduce((s,b) => s + (b.lineOut || 0), 0);
   const avgOcc = active.length > 0 ? Math.round(active.reduce((s,b) => s+b.occupancy, 0)/active.length) : 0;
 
-  setKPI('kpi-total-passengers', totalIn > 0 ? totalIn.toLocaleString() : (mqttState.connected ? '0' : '—'));
+  // "Total Passengers Today" and "Alightings Today" reflect the authoritative daily DB
+  // total (set by seedKPIsFromAPI). The live-fleet snapshot (totalIn/totalOut) can be 0
+  // momentarily, so we only ever raise the card above the known daily total, never below it.
+  if (dailyTotals.boardings !== null) {
+    setKPI('kpi-total-passengers', Math.max(dailyTotals.boardings, totalIn).toLocaleString());
+  } else {
+    setKPI('kpi-total-passengers', totalIn > 0 ? totalIn.toLocaleString() : (mqttState.connected ? '0' : '—'));
+  }
+  if (dailyTotals.alightings !== null) {
+    setKPI('kpi-alightings', Math.max(dailyTotals.alightings, totalOut).toLocaleString());
+  } else {
+    setKPI('kpi-alightings', totalOut > 0 ? totalOut.toLocaleString() : (mqttState.connected ? '0' : '—'));
+  }
   setKPI('kpi-active-buses', BUS_POSITIONS.length > 0 ? active.length : (mqttState.connected ? '0' : '—'));
   setKPI('kpi-avg-occupancy', BUS_POSITIONS.length > 0 ? avgOcc + '%' : (mqttState.connected ? '0%' : '—'));
-  setKPI('kpi-alightings', totalOut > 0 ? totalOut.toLocaleString() : (mqttState.connected ? '0' : '—'));
   const sub = document.getElementById('kpi-fleet-sub');
   if (sub) sub.textContent = BUS_POSITIONS.length > 0 ? `of ${BUS_POSITIONS.length} total fleet` : (mqttState.connected ? 'Waiting for bus data' : 'Waiting for MQTT data');
 }
@@ -851,6 +863,8 @@ function initDashboard() {
 
   // Pre-probe backend so it's cached before any view needs it
   probeBackend().then(() => seedKPIsFromAPI());
+  // Keep the authoritative daily totals fresh as new boardings accumulate.
+  setInterval(() => seedKPIsFromAPI(), 30000);
 
   // Auto-connect to MQTT broker if credentials are pre-configured
   if (configStore.mqtt.host) {
