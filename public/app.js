@@ -1045,29 +1045,15 @@ let hourlyFlowPeriod = 'today';
 
 async function refreshHourlyFlowChart() {
   if (!charts.hourlyFlow) return;
-
-  // Build the list of dates to aggregate based on the selected period.
   const now = new Date();
-  let dayCount = 1;
-  if (hourlyFlowPeriod === 'week') dayCount = 7;
-  else if (hourlyFlowPeriod === 'month') dayCount = 30;
 
-  const dates = [];
-  for (let i = dayCount - 1; i >= 0; i--) {
-    const d = new Date(now);
-    d.setUTCDate(d.getUTCDate() - i);
-    dates.push(d.toISOString().slice(0, 10));
-  }
-
-  // Fetch hourly data for each date in the range, in parallel.
-  const results = await Promise.all(dates.map(date => apiFetch('/api/hourly', { date })));
-
-  // Always use full 24-hour range: 00:00 through 23:00
-  const labels = Array.from({length: 24}, (_, i) => `${String(i).padStart(2, '0')}:00`);
-  const hourMap = {};
-  let hasAny = false;
-
-  results.forEach(apiData => {
+  if (hourlyFlowPeriod === 'today') {
+    // --- TODAY: one bar per hour (00:00 - 23:00) ---
+    const today = now.toISOString().slice(0, 10);
+    const apiData = await apiFetch('/api/hourly', { date: today });
+    const labels = Array.from({length: 24}, (_, i) => `${String(i).padStart(2, '0')}:00`);
+    const hourMap = {};
+    let hasAny = false;
     if (apiData && apiData.hourly && apiData.hourly.length > 0) {
       hasAny = true;
       apiData.hourly.forEach(row => {
@@ -1078,22 +1064,64 @@ async function refreshHourlyFlowChart() {
         hourMap[dh].alightings += row.alightings || 0;
       });
     }
-  });
-
-  let boardings, alightings;
-  if (hasAny) {
-    boardings = Array.from({length: 24}, (_, h) => hourMap[h]?.boardings || 0);
-    alightings = Array.from({length: 24}, (_, h) => hourMap[h]?.alightings || 0);
-  } else {
-    // Fallback to live MQTT hourly buckets (today only)
-    boardings = labels.map(h => hourlyBuckets[h]?.boardings || 0);
-    alightings = labels.map(h => hourlyBuckets[h]?.alightings || 0);
+    let boardings, alightings;
+    if (hasAny) {
+      boardings = Array.from({length: 24}, (_, h) => hourMap[h]?.boardings || 0);
+      alightings = Array.from({length: 24}, (_, h) => hourMap[h]?.alightings || 0);
+    } else {
+      boardings = labels.map(h => hourlyBuckets[h]?.boardings || 0);
+      alightings = labels.map(h => hourlyBuckets[h]?.alightings || 0);
+    }
+    setHourlyFlowAxis('Hour of day');
+    charts.hourlyFlow.data.labels = labels;
+    charts.hourlyFlow.data.datasets[0].data = boardings;
+    charts.hourlyFlow.data.datasets[1].data = alightings;
+    charts.hourlyFlow.update('active');
+    return;
   }
 
+  // --- WEEK / MONTH: one bar per day ---
+  const dayCount = hourlyFlowPeriod === 'month' ? 30 : 7;
+  const dates = [];
+  for (let i = dayCount - 1; i >= 0; i--) {
+    const d = new Date(now);
+    d.setUTCDate(d.getUTCDate() - i);
+    dates.push(d.toISOString().slice(0, 10));
+  }
+  const from = dates[0];
+  const to = dates[dates.length - 1];
+
+  const dailyData = await apiFetch('/api/daily', { from, to });
+  const dataMap = {};
+  if (dailyData && dailyData.daily) {
+    dailyData.daily.forEach(r => {
+      if (!dataMap[r.date]) dataMap[r.date] = { boardings: 0, alightings: 0 };
+      dataMap[r.date].boardings += r.total_in || 0;
+      dataMap[r.date].alightings += r.total_out || 0;
+    });
+  }
+
+  // Day labels (calendar dates, no timezone shift).
+  const labels = dates.map(dt => {
+    const dd = new Date(dt + 'T12:00:00Z');
+    return dd.toLocaleDateString('en-US', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' });
+  });
+  const boardings = dates.map(dt => dataMap[dt]?.boardings || 0);
+  const alightings = dates.map(dt => dataMap[dt]?.alightings || 0);
+
+  setHourlyFlowAxis('Day');
   charts.hourlyFlow.data.labels = labels;
   charts.hourlyFlow.data.datasets[0].data = boardings;
   charts.hourlyFlow.data.datasets[1].data = alightings;
   charts.hourlyFlow.update('active');
+}
+
+// Update the x-axis title on the Hourly Flow chart (Hour of day vs Day).
+function setHourlyFlowAxis(xTitle) {
+  const opts = charts.hourlyFlow.options;
+  if (opts && opts.scales && opts.scales.x) {
+    opts.scales.x.title = { display: true, text: xTitle, color: '#8b8ea5', font: { size: 11, family: 'Inter' } };
+  }
 }
 
 function initTopRoutesChart() {
