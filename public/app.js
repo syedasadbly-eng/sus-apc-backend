@@ -920,7 +920,7 @@ function initView(view) {
 // ============================================
 
 function initClock() {
-  function update() { document.getElementById('headerTime').textContent = new Date().toLocaleTimeString('en-GB'); }
+  function update() { document.getElementById('headerTime').textContent = new Date().toLocaleTimeString('en-US', { timeZone: 'America/Chicago', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }); }
   update(); setInterval(update, 1000);
 }
 
@@ -1278,7 +1278,7 @@ function renderRidershipCharts(rows, viewMode, fromDate, now) {
     rows.forEach(r => { dataMap[r.date] = r; });
     const labels = allDates.map(dt => {
       const dd = new Date(dt + 'T00:00:00');
-      return dd.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+      return dd.toLocaleDateString('en-US', { timeZone: 'America/Chicago', weekday: 'short', day: 'numeric', month: 'short' });
     });
     const boardings = allDates.map(dt => dataMap[dt] ? dataMap[dt].total_in : 0);
     const alightings = allDates.map(dt => dataMap[dt] ? dataMap[dt].total_out : 0);
@@ -1318,7 +1318,7 @@ function renderRidershipCharts(rows, viewMode, fromDate, now) {
     const months = Object.keys(monthMap).sort();
     const monthLabels = months.map(m => {
       const [y, mo] = m.split('-');
-      return new Date(y, mo - 1).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
+      return new Date(y, mo - 1).toLocaleDateString('en-US', { timeZone: 'America/Chicago', month: 'short', year: 'numeric' });
     });
     charts.ridershipTrend.data.labels = monthLabels;
     charts.ridershipTrend.data.datasets[0].data = months.map(m => monthMap[m].boardings);
@@ -1349,7 +1349,7 @@ function renderRidershipChartsFromLive(viewMode, fromDate, now) {
   const hours = Array.from({length: 24}, (_, i) => `${String(i).padStart(2, '0')}:00`);
   const boardings = hours.map(h => hourlyBuckets[h] ? hourlyBuckets[h].boardings : 0);
   const alightings = hours.map(h => hourlyBuckets[h] ? hourlyBuckets[h].alightings : 0);
-  const todayLabel = now.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+  const todayLabel = now.toLocaleDateString('en-US', { timeZone: 'America/Chicago', weekday: 'short', day: 'numeric', month: 'short' });
 
   // Trend chart — show hourly breakdown for today
   charts.ridershipTrend.data.labels = hours;
