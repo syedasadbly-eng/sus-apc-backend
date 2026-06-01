@@ -1026,6 +1026,20 @@ function initHourlyFlowChart() {
   setInterval(() => refreshHourlyFlowChart(), 30000);
 }
 
+// Display timezone for the whole dashboard (matches the header clock).
+const DISPLAY_TZ = 'America/Chicago';
+
+// The backend stores each record's hour in UTC (server uses getUTCHours()).
+// This converts a UTC hour (0-23) into the equivalent hour in DISPLAY_TZ,
+// automatically accounting for daylight saving (CST/CDT).
+function utcHourToDisplayHour(utcHour) {
+  // Build a UTC date at the given hour today, then read its hour in DISPLAY_TZ.
+  const ref = new Date();
+  const d = new Date(Date.UTC(ref.getUTCFullYear(), ref.getUTCMonth(), ref.getUTCDate(), utcHour, 0, 0));
+  const local = parseInt(d.toLocaleString('en-US', { timeZone: DISPLAY_TZ, hour: '2-digit', hour12: false }), 10);
+  return ((local % 24) + 24) % 24;
+}
+
 async function refreshHourlyFlowChart() {
   if (!charts.hourlyFlow) return;
   const today = new Date().toISOString().slice(0, 10);
@@ -1037,7 +1051,13 @@ async function refreshHourlyFlowChart() {
 
   if (apiData && apiData.hourly && apiData.hourly.length > 0) {
     const hourMap = {};
-    apiData.hourly.forEach(row => { hourMap[row.hour] = row; });
+    // Remap backend UTC hours into the display timezone so bars line up with the clock.
+    apiData.hourly.forEach(row => {
+      const dh = utcHourToDisplayHour(row.hour);
+      if (!hourMap[dh]) hourMap[dh] = { boardings: 0, alightings: 0 };
+      hourMap[dh].boardings += row.boardings || 0;
+      hourMap[dh].alightings += row.alightings || 0;
+    });
     boardings = Array.from({length: 24}, (_, h) => hourMap[h]?.boardings || 0);
     alightings = Array.from({length: 24}, (_, h) => hourMap[h]?.alightings || 0);
   } else {
@@ -1491,7 +1511,7 @@ async function loadRoutesData() {
   if (hourlyData && hourlyData.hourly && hourlyData.hourly.length > 0) {
     const hours = Array.from({length:24},(_,i)=>`${String(i).padStart(2,'0')}:00`);
     const hourMap = {};
-    hourlyData.hourly.forEach(h => { hourMap[h.hour] = (hourMap[h.hour] || 0) + h.boardings; });
+    hourlyData.hourly.forEach(h => { const dh = utcHourToDisplayHour(h.hour); hourMap[dh] = (hourMap[dh] || 0) + h.boardings; });
     const hourData = hours.map((_, i) => hourMap[i] || 0);
     charts.heatmap.data.labels = hours;
     charts.heatmap.data.datasets[0].data = hourData;
