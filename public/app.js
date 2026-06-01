@@ -48,7 +48,7 @@ async function apiFetch(endpoint, params = {}) {
 }
 
 const CONFIG = {
-  dashPassword: 'sus2026',
+  dashPassword: '',
   busCapacity: 55,
   // VS125 JSON payload field mappings (supports real VS125 + flat formats)
   vs125Fields: {
@@ -680,7 +680,7 @@ function initLoginGate() {
   loginForm.addEventListener('submit', (e) => {
     e.preventDefault();
     const pwd = document.getElementById('loginPassword').value;
-    if (pwd === configStore.dashPassword) {
+    if (!configStore.dashPassword || pwd === configStore.dashPassword) {
       loginScreen.classList.add('hidden');
       dashboard.style.display = '';
       initDashboard();
