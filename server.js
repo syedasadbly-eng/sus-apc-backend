@@ -819,21 +819,10 @@ app.listen(PORT, () => {
   console.log(`[SERVER] API Health: http://localhost:${PORT}/api/health`);
   console.log('[SERVER] Delta-based counting with multi-door merge enabled');
 
-  // Purge old cumulative-based data from before the delta fix
-  try {
-    const today = new Date().toISOString().slice(0, 10);
-    const purged = db.prepare('DELETE FROM records WHERE date < ?').run(today);
-    if (purged.changes > 0) console.log(`[DB] Purged ${purged.changes} old records (pre-delta data)`);
-    db.prepare('DELETE FROM hourly_summary WHERE date < ?').run(today);
-    db.prepare('DELETE FROM daily_summary WHERE date < ?').run(today);
-    // Also purge today's data since it was cumulative-based
-    const purgedToday = db.prepare('DELETE FROM records WHERE date = ?').run(today);
-    if (purgedToday.changes > 0) console.log(`[DB] Purged ${purgedToday.changes} today records (resetting for delta-based counting)`);
-    db.prepare('DELETE FROM hourly_summary WHERE date = ?').run(today);
-    db.prepare('DELETE FROM daily_summary WHERE date = ?').run(today);
-  } catch (err) {
-    console.error('[DB] Purge error:', err.message);
-  }
+  // NOTE: Previously this block deleted ALL records (including the current day)
+  // on every server start — a one-time migration hack for the delta-counting
+  // change. It was wiping counts on every redeploy/restart, so it has been
+  // removed. Data now persists across restarts on the mounted volume.
 
   connectMqtt();
   scheduleMidnightReset();
