@@ -33,7 +33,7 @@ async function probeBackend() {
 }
 
 async function apiFetch(endpoint, params = {}) {
-  if (backendAvailable === null) await probeBackend().then(() => seedKPIsFromAPI());
+  if (backendAvailable === null) await probeBackend();
   if (!backendAvailable) return null;
   const url = new URL(`${API_BASE}${endpoint}`, window.location.origin);
   Object.entries(params).forEach(([k, v]) => { if (v != null && v !== '') url.searchParams.set(k, v); });
@@ -1747,7 +1747,7 @@ async function initDataTable() {
   if (searchInput) searchInput.addEventListener('input', () => { dataCurrentPage = 1; loadDataFromAPI(); });
 
   // Ensure backend probe completes before first data load
-  await probeBackend().then(() => seedKPIsFromAPI());
+  await probeBackend();
 
   // Populate available dates in date picker, then load data
   const datesData = await apiFetch('/api/dates');
