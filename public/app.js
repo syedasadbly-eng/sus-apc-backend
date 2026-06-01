@@ -1246,7 +1246,7 @@ async function loadRidershipData() {
     setKPI('ridership-kpi-buses', t.bus_count > 0 ? t.bus_count : '0');
     const ph = summary.peakHour;
     if (ph && ph.total > 0) {
-      setKPI('ridership-kpi-peak', `${String(ph.hour).padStart(2,'0')}:00`);
+      setKPI('ridership-kpi-peak', `${String(utcHourToDisplayHour(ph.hour)).padStart(2,'0')}:00`);
       const peakSub = document.getElementById('ridership-kpi-peak-sub');
       if (peakSub) peakSub.textContent = `${ph.total} boardings`;
     } else {
@@ -1315,8 +1315,10 @@ function renderRidershipCharts(rows, viewMode, fromDate, now) {
     const dataMap = {};
     rows.forEach(r => { dataMap[r.date] = r; });
     const labels = allDates.map(dt => {
-      const dd = new Date(dt + 'T00:00:00');
-      return dd.toLocaleDateString('en-US', { timeZone: 'America/Chicago', weekday: 'short', day: 'numeric', month: 'short' });
+      // dt is a calendar date string (YYYY-MM-DD). Format it directly with no
+      // timezone shift, otherwise a tz like America/Chicago rolls it back a day.
+      const dd = new Date(dt + 'T12:00:00Z');
+      return dd.toLocaleDateString('en-US', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' });
     });
     const boardings = allDates.map(dt => dataMap[dt] ? dataMap[dt].total_in : 0);
     const alightings = allDates.map(dt => dataMap[dt] ? dataMap[dt].total_out : 0);
@@ -1330,9 +1332,9 @@ function renderRidershipCharts(rows, viewMode, fromDate, now) {
   } else if (viewMode === 'weekly') {
     const weekMap = {};
     rows.forEach(r => {
-      const d = new Date(r.date + 'T00:00:00');
+      const d = new Date(r.date + 'T12:00:00Z');
       const week = getISOWeek(d);
-      const key = `${d.getFullYear()}-W${String(week).padStart(2, '0')}`;
+      const key = `${d.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
       if (!weekMap[key]) weekMap[key] = { boardings: 0, alightings: 0 };
       weekMap[key].boardings += r.total_in;
       weekMap[key].alightings += r.total_out;
@@ -1370,7 +1372,7 @@ function renderRidershipCharts(rows, viewMode, fromDate, now) {
   const dowTotals = [0,0,0,0,0,0,0];
   const dowCounts = [0,0,0,0,0,0,0];
   rows.forEach(r => {
-    const dow = new Date(r.date + 'T00:00:00').getDay();
+    const dow = new Date(r.date + 'T12:00:00Z').getUTCDay();
     const idx = dow === 0 ? 6 : dow - 1;
     dowTotals[idx] += r.total_in;
     dowCounts[idx]++;
