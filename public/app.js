@@ -1040,28 +1040,52 @@ function utcHourToDisplayHour(utcHour) {
   return ((local % 24) + 24) % 24;
 }
 
+// Currently selected period for the Hourly Passenger Flow chart (today | week | month).
+let hourlyFlowPeriod = 'today';
+
 async function refreshHourlyFlowChart() {
   if (!charts.hourlyFlow) return;
-  const today = new Date().toISOString().slice(0, 10);
-  const apiData = await apiFetch('/api/hourly', { date: today });
+
+  // Build the list of dates to aggregate based on the selected period.
+  const now = new Date();
+  let dayCount = 1;
+  if (hourlyFlowPeriod === 'week') dayCount = 7;
+  else if (hourlyFlowPeriod === 'month') dayCount = 30;
+
+  const dates = [];
+  for (let i = dayCount - 1; i >= 0; i--) {
+    const d = new Date(now);
+    d.setUTCDate(d.getUTCDate() - i);
+    dates.push(d.toISOString().slice(0, 10));
+  }
+
+  // Fetch hourly data for each date in the range, in parallel.
+  const results = await Promise.all(dates.map(date => apiFetch('/api/hourly', { date })));
 
   // Always use full 24-hour range: 00:00 through 23:00
   const labels = Array.from({length: 24}, (_, i) => `${String(i).padStart(2, '0')}:00`);
-  let boardings, alightings;
+  const hourMap = {};
+  let hasAny = false;
 
-  if (apiData && apiData.hourly && apiData.hourly.length > 0) {
-    const hourMap = {};
-    // Remap backend UTC hours into the display timezone so bars line up with the clock.
-    apiData.hourly.forEach(row => {
-      const dh = utcHourToDisplayHour(row.hour);
-      if (!hourMap[dh]) hourMap[dh] = { boardings: 0, alightings: 0 };
-      hourMap[dh].boardings += row.boardings || 0;
-      hourMap[dh].alightings += row.alightings || 0;
-    });
+  results.forEach(apiData => {
+    if (apiData && apiData.hourly && apiData.hourly.length > 0) {
+      hasAny = true;
+      apiData.hourly.forEach(row => {
+        // Remap backend UTC hours into the display timezone so bars line up with the clock.
+        const dh = utcHourToDisplayHour(row.hour);
+        if (!hourMap[dh]) hourMap[dh] = { boardings: 0, alightings: 0 };
+        hourMap[dh].boardings += row.boardings || 0;
+        hourMap[dh].alightings += row.alightings || 0;
+      });
+    }
+  });
+
+  let boardings, alightings;
+  if (hasAny) {
     boardings = Array.from({length: 24}, (_, h) => hourMap[h]?.boardings || 0);
     alightings = Array.from({length: 24}, (_, h) => hourMap[h]?.alightings || 0);
   } else {
-    // Fallback to live MQTT hourly buckets
+    // Fallback to live MQTT hourly buckets (today only)
     boardings = labels.map(h => hourlyBuckets[h]?.boardings || 0);
     alightings = labels.map(h => hourlyBuckets[h]?.alightings || 0);
   }
@@ -1115,8 +1139,9 @@ function initPeriodTabs() {
   });
 }
 
-function updateHourlyFlowChart() {
-  // Refresh from backend API (or MQTT fallback)
+function updateHourlyFlowChart(period) {
+  // Remember the selected period so auto-refresh keeps it, then refresh.
+  if (period) hourlyFlowPeriod = period;
   refreshHourlyFlowChart();
 }
 
