@@ -583,7 +583,25 @@ function formatAge(s) {
   return `${Math.floor(s/3600)}h ago`;
 }
 
-async function seedKPIsFromAPI() {   try {     const data = await apiFetch('/api/summary', { period: 'today' });     if (!data || !data.totals) return;     const t = data.totals;     // Only seed if MQTT hasn't already provided values     const curPass = document.getElementById('kpi-total-passengers');     const curAlight = document.getElementById('kpi-alightings');     if (curPass && (curPass.textContent === '0' || curPass.textContent === '—')) {       setKPI('kpi-total-passengers', t.total_boardings > 0 ? t.total_boardings.toLocaleString() : '0');     }     if (curAlight && (curAlight.textContent === '0' || curAlight.textContent === '—')) {       setKPI('kpi-alightings', t.total_alightings > 0 ? t.total_alightings.toLocaleString() : '0');     }     if (t.avg_occupancy > 0) setKPI('kpi-occupancy', t.avg_occupancy + '%');   } catch(e) { /* silent fail */ } }  function updateLiveKPIs() {
+async function seedKPIsFromAPI() {
+  try {
+    const data = await apiFetch('/api/summary', { period: 'today' });
+    if (!data || !data.totals) return;
+    const t = data.totals;
+    // Only seed if MQTT hasn't already provided values
+    const curPass = document.getElementById('kpi-total-passengers');
+    const curAlight = document.getElementById('kpi-alightings');
+    if (curPass && (curPass.textContent === '0' || curPass.textContent === '—')) {
+      setKPI('kpi-total-passengers', t.total_boardings > 0 ? t.total_boardings.toLocaleString() : '0');
+    }
+    if (curAlight && (curAlight.textContent === '0' || curAlight.textContent === '—')) {
+      setKPI('kpi-alightings', t.total_alightings > 0 ? t.total_alightings.toLocaleString() : '0');
+    }
+    if (t.avg_occupancy > 0) setKPI('kpi-occupancy', t.avg_occupancy + '%');
+  } catch(e) { /* silent fail */ }
+}
+
+function updateLiveKPIs() {
   const active = BUS_POSITIONS.filter(b => b.status === 'active');
   const totalIn = BUS_POSITIONS.reduce((s,b) => s + (b.lineIn || 0), 0);
   const totalOut = BUS_POSITIONS.reduce((s,b) => s + (b.lineOut || 0), 0);
