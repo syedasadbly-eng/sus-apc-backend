@@ -1043,6 +1043,13 @@ function initHourlyFlowChart() {
 // Display timezone for the whole dashboard (matches the header clock).
 const DISPLAY_TZ = 'America/Chicago';
 
+// Calendar date (YYYY-MM-DD) in DISPLAY_TZ. The backend buckets days by this same
+// zone, so the frontend must ask for dates in Central time — not UTC — or it will
+// query the wrong (often empty) day after UTC midnight.
+function displayDateStr(d = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: DISPLAY_TZ }).format(d);
+}
+
 // The backend stores each record's hour in UTC (server uses getUTCHours()).
 // This converts a UTC hour (0-23) into the equivalent hour in DISPLAY_TZ,
 // automatically accounting for daylight saving (CST/CDT).
@@ -1063,7 +1070,7 @@ async function refreshHourlyFlowChart() {
 
   if (hourlyFlowPeriod === 'today') {
     // --- TODAY: one bar per hour (00:00 - 23:00) ---
-    const today = now.toISOString().slice(0, 10);
+    const today = displayDateStr(now); // Central calendar date, matches backend
     const apiData = await apiFetch('/api/hourly', { date: today });
     const labels = Array.from({length: 24}, (_, i) => `${String(i).padStart(2, '0')}:00`);
     const hourMap = {};
@@ -1100,7 +1107,7 @@ async function refreshHourlyFlowChart() {
   for (let i = dayCount - 1; i >= 0; i--) {
     const d = new Date(now);
     d.setUTCDate(d.getUTCDate() - i);
-    dates.push(d.toISOString().slice(0, 10));
+    dates.push(displayDateStr(d)); // Central calendar dates
   }
   const from = dates[0];
   const to = dates[dates.length - 1];
@@ -1300,8 +1307,8 @@ async function loadRidershipData() {
     case '1y': fromDate = new Date(now); fromDate.setFullYear(fromDate.getFullYear() - 1); break;
     default: fromDate = new Date(now); fromDate.setDate(fromDate.getDate() - 6);
   }
-  const from = fromDate.toISOString().slice(0, 10);
-  const to = now.toISOString().slice(0, 10);
+  const from = displayDateStr(fromDate);
+  const to = displayDateStr(now);
 
   // Fetch summary KPIs from API; fall back to live MQTT data
   const summary = await apiFetch('/api/summary', { period: from });
@@ -1376,7 +1383,7 @@ function renderRidershipCharts(rows, viewMode, fromDate, now) {
     const allDates = [];
     const d = new Date(fromDate);
     while (d <= now) {
-      allDates.push(d.toISOString().slice(0, 10));
+      allDates.push(displayDateStr(d));
       d.setDate(d.getDate() + 1);
     }
     const dataMap = {};
@@ -1502,7 +1509,7 @@ function updateRidershipKPIs() {
   if (currentView !== 'ridership') return;
   // Refresh KPIs from live data if backend is not available
   if (!backendAvailable) {
-    updateRidershipKPIsFromLive(new Date().toISOString().slice(0, 10), new Date().toISOString().slice(0, 10));
+    updateRidershipKPIsFromLive(displayDateStr(), displayDateStr());
     renderRidershipChartsFromLive('daily', new Date(), new Date());
   }
   // Always refresh occupancy doughnut from live data
@@ -1542,7 +1549,7 @@ function initRoutes() {
 }
 
 async function loadRoutesData() {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = displayDateStr();
 
   // Fetch today's daily data per bus
   const dailyData = await apiFetch('/api/daily', { from: today, to: today });
@@ -1647,7 +1654,7 @@ function initComparison() {
       else if (dateB) dateB.value = data.dates[0];
     } else {
       // Fallback: set both to today
-      const today = new Date().toISOString().slice(0, 10);
+      const today = displayDateStr();
       if (dateA) dateA.value = today;
       if (dateB) dateB.value = today;
     }
@@ -1861,7 +1868,7 @@ async function initDataTable() {
   if (datesData && datesData.dates && datesData.dates.length > 0 && dateInput) {
     dateInput.value = datesData.dates[0];
   } else if (dateInput) {
-    dateInput.value = new Date().toISOString().slice(0, 10);
+    dateInput.value = displayDateStr();
   }
 
   // Also populate bus dropdown for Data Explorer
@@ -1988,7 +1995,7 @@ function initExportMenus() {
   document.querySelectorAll('.export-menu-item').forEach(item => {
     item.addEventListener('click', (e) => {
       e.stopPropagation();
-      const today = new Date().toISOString().slice(0,10);
+      const today = displayDateStr();
       const f = item.dataset.format;
       if (f==='pdf') exportToPDF('Dashboard Summary',today,today);
       else if (f==='excel') exportToExcel('Dashboard Data',today,today);
