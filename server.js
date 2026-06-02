@@ -18,6 +18,15 @@ const PORT = process.env.PORT || 3001;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'apc_data.db');
 const BUS_CAPACITY = Number(process.env.BUS_CAPACITY) || 55;
 
+// Display timezone — all "day" buckets roll over at local midnight in this zone
+// so the dashboard's date boundary matches its clock (Minnesota / US Central).
+const DISPLAY_TZ = process.env.DISPLAY_TZ || 'America/Chicago';
+// Returns the calendar date (YYYY-MM-DD) in DISPLAY_TZ for the given Date (defaults to now).
+function displayDateStr(d = new Date()) {
+  // en-CA locale yields YYYY-MM-DD formatting
+  return new Intl.DateTimeFormat('en-CA', { timeZone: DISPLAY_TZ }).format(d);
+}
+
 const MQTT_CONFIG = {
   host: process.env.MQTT_HOST || '492260d5d94c4b4e87ade94ae81925e6.s1.eu.hivemq.cloud',
   port: Number(process.env.MQTT_PORT) || 8883,
@@ -358,7 +367,7 @@ function flushBusDelta(busId) {
 
   const now = new Date();
   const isoTs = now.toISOString();
-  const dateStr = isoTs.slice(0, 10);
+  const dateStr = displayDateStr(now); // Central calendar date
   const hour = now.getUTCHours();
 
   // ---- Update bus day totals ----
@@ -497,17 +506,28 @@ function connectMqtt() {
 // MIDNIGHT RESET
 // ============================================
 
-function scheduleMidnightReset() {
+// Milliseconds until the next local midnight in DISPLAY_TZ.
+function msUntilDisplayMidnight() {
   const now = new Date();
-  const midnight = new Date(now);
-  midnight.setUTCHours(24, 0, 0, 0); // next UTC midnight
-  const msUntilMidnight = midnight.getTime() - now.getTime();
+  const todayStr = displayDateStr(now);
+  // Probe forward in 15-min steps (max 26h) to find when the Central date changes.
+  for (let m = 1; m <= 26 * 60; m++) {
+    const probe = new Date(now.getTime() + m * 60000);
+    if (displayDateStr(probe) !== todayStr) {
+      return probe.getTime() - now.getTime();
+    }
+  }
+  return 24 * 60 * 60000; // fallback
+}
 
-  console.log(`[RESET] Next midnight reset in ${Math.round(msUntilMidnight / 60000)} minutes`);
+function scheduleMidnightReset() {
+  const msUntilMidnight = msUntilDisplayMidnight();
+
+  console.log(`[RESET] Next ${DISPLAY_TZ} midnight reset in ${Math.round(msUntilMidnight / 60000)} minutes`);
 
   setTimeout(() => {
     console.log('[RESET] Midnight — resetting all daily counters');
-    const newDate = new Date().toISOString().slice(0, 10);
+    const newDate = displayDateStr();
     // Reset per-bus day totals
     for (const busId of Object.keys(busDayTotals)) {
       busDayTotals[busId].dayIn = 0;
@@ -658,31 +678,31 @@ app.get('/api/summary', (req, res) => {
 
   switch (period) {
     case 'today':
-      fromDate = now.toISOString().slice(0, 10);
+      fromDate = displayDateStr(now);
       break;
     case 'week': {
       const d = new Date(now);
       d.setDate(d.getDate() - 7);
-      fromDate = d.toISOString().slice(0, 10);
+      fromDate = displayDateStr(d);
       break;
     }
     case 'month': {
       const d = new Date(now);
       d.setDate(d.getDate() - 30);
-      fromDate = d.toISOString().slice(0, 10);
+      fromDate = displayDateStr(d);
       break;
     }
     case 'year': {
       const d = new Date(now);
       d.setFullYear(d.getFullYear() - 1);
-      fromDate = d.toISOString().slice(0, 10);
+      fromDate = displayDateStr(d);
       break;
     }
     default:
       fromDate = period; // Allow raw date
   }
 
-  const toDate = now.toISOString().slice(0, 10);
+  const toDate = displayDateStr(now);
 
   const totals = db.prepare(`
     SELECT
@@ -828,7 +848,7 @@ app.listen(PORT, () => {
   // running count instead of resetting it to zero (which previously caused the
   // daily_summary upsert to overwrite the day's total with a near-zero value).
   try {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = displayDateStr();
     const rows = db.prepare(
       'SELECT bus_id, total_in, total_out FROM daily_summary WHERE date = ?'
     ).all(today);
