@@ -139,8 +139,8 @@ const upsertHourlySummary = db.prepare(`
   INSERT INTO hourly_summary (date, hour, bus_id, boardings, alightings, max_onboard, msg_count)
   VALUES (@date, @hour, @bus_id, @boardings, @alightings, @max_onboard, 1)
   ON CONFLICT(date, hour, bus_id) DO UPDATE SET
-    boardings   = @boardings,
-    alightings  = @alightings,
+    boardings   = hourly_summary.boardings + @boardings,
+    alightings  = hourly_summary.alightings + @alightings,
     max_onboard = MAX(hourly_summary.max_onboard, @max_onboard),
     msg_count   = hourly_summary.msg_count + 1
 `);
@@ -426,13 +426,14 @@ function flushBusDelta(busId) {
       msg_type: pending.msgType || 'merged',
     });
 
-    // Upsert hourly summary — cumulative day totals
+    // Upsert hourly summary — accumulate the PER-HOUR deltas (not the running day
+    // total) so each hour bucket reflects passenger flow within that hour.
     upsertHourlySummary.run({
       date: dateStr,
       hour,
       bus_id: busId,
-      boardings: dayState.dayIn,
-      alightings: dayState.dayOut,
+      boardings: deltaIn,
+      alightings: deltaOut,
       max_onboard: onboard,
     });
 
@@ -843,6 +844,34 @@ app.listen(PORT, () => {
   // on every server start — a one-time migration hack for the delta-counting
   // change. It was wiping counts on every redeploy/restart, so it has been
   // removed. Data now persists across restarts on the mounted volume.
+
+  // One-time repair: earlier builds wrote the running DAY total into each hourly
+  // bucket (so later hours showed the whole day's total). Rebuild hourly_summary
+  // from the per-event deltas in `records`, which are the source of truth, so the
+  // Hourly Passenger Flow chart shows true per-hour flow.
+  try {
+    const rebuilt = db.prepare(`
+      SELECT date, hour, bus_id,
+             SUM(boardings)  AS boardings,
+             SUM(alightings) AS alightings,
+             MAX(onboard)    AS max_onboard,
+             COUNT(*)        AS msg_count
+      FROM records
+      GROUP BY date, hour, bus_id
+    `).all();
+    const tx = db.transaction(() => {
+      db.prepare('DELETE FROM hourly_summary').run();
+      const ins = db.prepare(`
+        INSERT INTO hourly_summary (date, hour, bus_id, boardings, alightings, max_onboard, msg_count)
+        VALUES (@date, @hour, @bus_id, @boardings, @alightings, @max_onboard, @msg_count)
+      `);
+      rebuilt.forEach(r => ins.run(r));
+    });
+    tx();
+    console.log(`[REPAIR] Rebuilt ${rebuilt.length} hourly buckets from raw records`);
+  } catch (err) {
+    console.error('[REPAIR] Hourly rebuild failed:', err.message);
+  }
 
   // Rehydrate in-memory day totals from the database so a restart resumes the
   // running count instead of resetting it to zero (which previously caused the
