@@ -126,7 +126,7 @@ let isLiveMode = true;
 
 // Route colours assigned dynamically to live buses
 const ROUTE_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316', '#84cc16'];
-const MANCHESTER_CENTER = [53.4808, -2.2426];
+const MINNESOTA_CENTER = [53.4808, -2.2426];
 // Last known GPS position from UR35 (used as fallback when GPS has no fix, status 52)
 const LAST_KNOWN_GPS = { lat: 53.507731, lng: -2.229141 };
 
@@ -988,7 +988,7 @@ function initOverview() {
 
 function initOverviewMap() {
   if (maps.overview) return;
-  const map = L.map('overviewMap', { zoomControl: true, attributionControl: false }).setView(MANCHESTER_CENTER, 12);
+  const map = L.map('overviewMap', { zoomControl: true, attributionControl: false }).setView(MINNESOTA_CENTER, 12);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
   updateMapBusMarkers(map, 'overview');
   maps.overview = map;
@@ -1201,7 +1201,7 @@ function updateHourlyFlowChart(period) {
 
 function initLiveMap() {
   if (maps.liveMap) return;
-  const map = L.map('liveMapFull', { zoomControl: true, attributionControl: false }).setView(MANCHESTER_CENTER, 12);
+  const map = L.map('liveMapFull', { zoomControl: true, attributionControl: false }).setView(MINNESOTA_CENTER, 12);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
   updateMapBusMarkers(map, 'liveMap');
   maps.liveMap = map;
@@ -1209,7 +1209,7 @@ function initLiveMap() {
   document.getElementById('centerMapBtn').addEventListener('click', () => {
     const active = BUS_POSITIONS.filter(b => b.lat !== 0 && b.lng !== 0);
     if (active.length > 0) { map.fitBounds(L.latLngBounds(active.map(b => [b.lat, b.lng])), { padding: [50, 50] }); return; }
-    map.setView(MANCHESTER_CENTER, 12);
+    map.setView(MINNESOTA_CENTER, 12);
   });
 }
 
