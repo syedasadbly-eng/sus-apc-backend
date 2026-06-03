@@ -49,7 +49,7 @@ async function apiFetch(endpoint, params = {}) {
 
 const CONFIG = {
   dashPassword: 'sus2026',
-  busCapacity: 16,  // ========================================== // COUNTER RESET FUNCTION (Frontend) // ========================================== async function resetBusCounter(busId) {   if (!confirm(`Reset onboard counter to 0 for bus ${busId}?`)) return;   try {     const res = await fetch(`${API_BASE}/api/reset-counter/${encodeURIComponent(busId)}`, {       method: 'POST',       headers: { 'Content-Type': 'application/json' }     });     const data = await res.json();     if (data.success) {       alert(`Counter reset successfully for ${busId}. Onboard: 0`);       // Refresh fleet status view       if (typeof renderFleetTable === 'function') renderFleetTable();     } else {       alert('Reset failed: ' + (data.error || 'Unknown error'));     }   } catch (e) {     alert('Error resetting counter: ' + e.message);   } }
+  busCapacity: 16,
   // VS125 JSON payload field mappings (supports real VS125 + flat formats)
   vs125Fields: {
     // Running daily totals (from line_total_data — best source for KPI counts)
@@ -67,7 +67,7 @@ const CONFIG = {
     lineOut: ['line.0.total.out', 'linePeriod.0.total.out', 'line1_out', 'total.out'],
     capacity: ['capacity', 'lineTotal.capacity'],
     passersby: ['passersby'],
-    // UR35 GPS format: data.latitude = "53.48076 N", data.longitude = "2.23743 W"
+    // UR35 GPS format: data.latitude = "44.97780 N", data.longitude = "93.26500 W"
     latitude: ['data.latitude', 'latitude', 'gps.latitude'],
     longitude: ['data.longitude', 'longitude', 'gps.longtitude', 'gps.longitude'],
     speed: ['data.speed', 'speed', 'gps.speed'],
@@ -126,9 +126,11 @@ let isLiveMode = true;
 
 // Route colours assigned dynamically to live buses
 const ROUTE_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316', '#84cc16'];
-const MINNESOTA_CENTER = [44.9778, -93.2650];
-// Last known GPS position from UR35 (used as fallback when GPS has no fix, status 52)
-const LAST_KNOWN_GPS = { lat: 53.507731, lng: -2.229141 };
+// Default map centre (USA — Minneapolis/Minnesota), used before any live GPS fix arrives
+const MAP_DEFAULT_CENTER = [44.9778, -93.2650];
+// Last known GPS position from UR35 (used as fallback when GPS has no fix, status 52).
+// Must match server.js LAST_KNOWN_GPS so the dashboard and the database agree.
+const LAST_KNOWN_GPS = { lat: 44.9778, lng: -93.2650 };
 
 let BUS_POSITIONS = []; // Populated exclusively from MQTT
 let liveRecords = [];   // Populated exclusively from MQTT
@@ -273,6 +275,15 @@ function handleMqttMessage(topic, payload) {
   let lng = extractField(payload, F.longitude);
   if (typeof lat === 'string' && lat.match(/[NSEW]/i)) lat = parseGpsCoord(lat);
   if (typeof lng === 'string' && lng.match(/[NSEW]/i)) lng = parseGpsCoord(lng);
+  lat = (lat != null) ? Number(lat) : null;
+  lng = (lng != null) ? Number(lng) : null;
+  // UR35 GPS status: 53 = valid fix, 52 = no fix (use stale/last-known instead)
+  const gpsStatusRaw = extractField(payload, F.gpsStatus);
+  const gpsStatus = (gpsStatusRaw != null) ? Number(gpsStatusRaw) : null;
+  const hasValidFix = gpsStatus == null ? true : gpsStatus !== 52;
+  // Reject impossible coordinates (sensor glitches / partial NMEA parses)
+  const inRange = (v, max) => v != null && !isNaN(v) && Math.abs(v) <= max && v !== 0;
+  const validLat = inRange(lat, 90) && inRange(lng, 180) && hasValidFix;
   const speed = extractField(payload, F.speed);
   const capacity = extractField(payload, F.capacity);
   const passersby = extractField(payload, F.passersby);
@@ -311,11 +322,19 @@ function handleMqttMessage(topic, payload) {
   }
   const dev = liveDeviceData[gatewayKey];
 
-  // Update GPS — use valid coordinates, fall back to last known position
-  if (lat != null && Number(lat) !== 0) dev.lat = Number(lat) || dev.lat;
-  if (lng != null && Number(lng) !== 0) dev.lng = Number(lng) || dev.lng;
-  // If device has never had GPS and we have a last-known position, use it
-  if ((!dev.lat || dev.lat === 0) && LAST_KNOWN_GPS.lat) dev.lat = LAST_KNOWN_GPS.lat;
+  // Update GPS — only accept a real, in-range fix; otherwise keep the previous
+  // position. Fall back to last-known only if we have never had a fix.
+  if (validLat) {
+    dev.lat = lat;
+    dev.lng = lng;
+    dev.gpsValid = true;
+    dev.gpsFixTs = now;
+  } else if (lat != null || lng != null) {
+    // Coordinates present but invalid (no fix / out of range) — log once for debugging
+    console.warn('[GPS] Ignoring invalid coordinates', { gatewayKey, lat, lng, gpsStatus });
+  }
+  // If device has never had a valid fix, seed with the configured last-known position
+  if ((!dev.lat || dev.lat === 0) && LAST_KNOWN_GPS.lat) { dev.lat = LAST_KNOWN_GPS.lat; dev.gpsValid = dev.gpsValid || false; }
   if ((!dev.lng || dev.lng === 0) && LAST_KNOWN_GPS.lng) dev.lng = LAST_KNOWN_GPS.lng;
   if (speed != null) dev.speed = Number(speed) || 0;
   if (capacity != null) dev.capacity = Number(capacity) || CONFIG.busCapacity;
@@ -566,6 +585,8 @@ function updateLiveBusPositions() {
       id: gw.label || key,
       route: gw.route || '', routeName: gw.route || '', routeColor: color,
       lat: data.lat || 0, lng: data.lng || 0,
+      gpsValid: data.gpsValid === true,
+      gpsAge: data.gpsFixTs ? Math.round((Date.now() - data.gpsFixTs) / 1000) : null,
       passengers, capacity, occupancy,
       speed: data.speed || 0, status: ageSeconds < 300 ? 'active' : 'idle',
       sensorStatus: ageSeconds < 300 ? 'Online' : ageSeconds < 600 ? 'Degraded' : 'Offline',
@@ -582,6 +603,31 @@ function formatAge(s) {
   if (s < 3600) return `${Math.floor(s/60)}m ago`;
   return `${Math.floor(s/3600)}h ago`;
 }
+
+// ==========================================
+// COUNTER RESET FUNCTION (Frontend)
+// ==========================================
+async function resetBusCounter(busId) {
+  if (!confirm(`Reset onboard counter to 0 for bus ${busId}?`)) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/reset-counter/${encodeURIComponent(busId)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    const data = await res.json();
+    if (data.success) {
+      alert(`Counter reset successfully for ${busId}. Onboard: 0`);
+      // Refresh fleet status view
+      if (typeof renderFleetTable === 'function') renderFleetTable();
+    } else {
+      alert('Reset failed: ' + (data.error || 'Unknown error'));
+    }
+  } catch (e) {
+    alert('Error resetting counter: ' + e.message);
+  }
+}
+// Expose for inline onclick handlers in dynamically-rendered fleet rows
+window.resetBusCounter = resetBusCounter;
 
 // Authoritative daily totals from the database. These accumulate across the day and
 // never reset, unlike the live-fleet snapshot counters. The KPI cards read from these.
@@ -639,11 +685,16 @@ function updateLiveMapMarkers() {
   if (maps.liveMap) updateMapBusMarkers(maps.liveMap, 'liveMap');
 }
 
+// Tracks which maps have already auto-centred on a live bus, so we only do it once
+// (and never fight the user's manual pan/zoom afterwards).
+const mapAutoFitted = {};
+
 function updateMapBusMarkers(map, mapKey) {
   if (mapMarkers[mapKey]) mapMarkers[mapKey].forEach(m => map.removeLayer(m));
   mapMarkers[mapKey] = [];
 
-  BUS_POSITIONS.filter(b => (b.status === 'active' || b.status === 'idle') && b.lat !== 0 && b.lng !== 0).forEach(bus => {
+  const plotted = BUS_POSITIONS.filter(b => (b.status === 'active' || b.status === 'idle') && b.lat !== 0 && b.lng !== 0);
+  plotted.forEach(bus => {
     const occClass = bus.occupancy > 75 ? 'high-occupancy' : bus.occupancy > 50 ? 'medium-occupancy' : '';
     const shortId = bus.id.length > 3 ? bus.id.slice(-3) : bus.id;
     const icon = L.divIcon({
@@ -662,12 +713,25 @@ function updateMapBusMarkers(map, mapKey) {
             <span class="popup-label">In (Total)</span><span class="popup-value">${bus.lineIn || 0}</span>
             <span class="popup-label">Out (Total)</span><span class="popup-value">${bus.lineOut || 0}</span>
             <span class="popup-label">Sensor</span><span class="popup-value">${bus.sensorStatus}</span>
+            <span class="popup-label">GPS</span><span class="popup-value">${bus.gpsValid ? 'Live fix' + (bus.gpsAge != null ? ' (' + formatAge(bus.gpsAge) + ')' : '') : 'No fix — last known'}</span>
+            <span class="popup-label">Position</span><span class="popup-value">${bus.lat.toFixed(5)}, ${bus.lng.toFixed(5)}</span>
             <span class="popup-label">Last Update</span><span class="popup-value">${bus.lastUpdate}</span>
           </div>
         </div>
       `);
     mapMarkers[mapKey].push(marker);
   });
+
+  // Auto-centre on the live bus the first time we have a real position.
+  if (!mapAutoFitted[mapKey] && plotted.length > 0) {
+    const bounds = L.latLngBounds(plotted.map(b => [b.lat, b.lng]));
+    if (plotted.length === 1) {
+      map.setView([plotted[0].lat, plotted[0].lng], 14);
+    } else {
+      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
+    }
+    mapAutoFitted[mapKey] = true;
+  }
 }
 
 
@@ -988,7 +1052,7 @@ function initOverview() {
 
 function initOverviewMap() {
   if (maps.overview) return;
-  const map = L.map('overviewMap', { zoomControl: true, attributionControl: false }).setView(MINNESOTA_CENTER, 12);
+  const map = L.map('overviewMap', { zoomControl: true, attributionControl: false }).setView(MAP_DEFAULT_CENTER, 12);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
   updateMapBusMarkers(map, 'overview');
   maps.overview = map;
@@ -1201,7 +1265,7 @@ function updateHourlyFlowChart(period) {
 
 function initLiveMap() {
   if (maps.liveMap) return;
-  const map = L.map('liveMapFull', { zoomControl: true, attributionControl: false }).setView(MINNESOTA_CENTER, 12);
+  const map = L.map('liveMapFull', { zoomControl: true, attributionControl: false }).setView(MAP_DEFAULT_CENTER, 12);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
   updateMapBusMarkers(map, 'liveMap');
   maps.liveMap = map;
@@ -1209,7 +1273,7 @@ function initLiveMap() {
   document.getElementById('centerMapBtn').addEventListener('click', () => {
     const active = BUS_POSITIONS.filter(b => b.lat !== 0 && b.lng !== 0);
     if (active.length > 0) { map.fitBounds(L.latLngBounds(active.map(b => [b.lat, b.lng])), { padding: [50, 50] }); return; }
-    map.setView(MINNESOTA_CENTER, 12);
+    map.setView(MAP_DEFAULT_CENTER, 12);
   });
 }
 

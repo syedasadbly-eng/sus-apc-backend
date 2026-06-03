@@ -273,10 +273,19 @@ function handleMessage(topic, rawPayload) {
   let lng = extractField(payload, FIELD_PATHS.longitude);
   if (typeof lat === 'string' && lat.match(/[NSEW]/i)) lat = parseGpsCoord(lat);
   if (typeof lng === 'string' && lng.match(/[NSEW]/i)) lng = parseGpsCoord(lng);
+  lat = (lat != null) ? Number(lat) : null;
+  lng = (lng != null) ? Number(lng) : null;
   const speed = Number(extractField(payload, FIELD_PATHS.speed)) || 0;
 
-  if (lat != null && Number(lat) !== 0) dev.lat = Number(lat);
-  if (lng != null && Number(lng) !== 0) dev.lng = Number(lng);
+  // UR35 GPS status: 53 = valid fix, 52 = no fix. Only accept a real, in-range fix.
+  const gpsStatusRaw = extractField(payload, FIELD_PATHS.gpsStatus);
+  const gpsStatus = (gpsStatusRaw != null) ? Number(gpsStatusRaw) : null;
+  const hasValidFix = gpsStatus == null ? true : gpsStatus !== 52;
+  const inRange = (v, max) => v != null && !isNaN(v) && Math.abs(v) <= max && v !== 0;
+  const validFix = inRange(lat, 90) && inRange(lng, 180) && hasValidFix;
+
+  if (validFix) { dev.lat = lat; dev.lng = lng; dev.gpsValid = true; }
+  else if (lat != null || lng != null) console.warn(`[GPS] ${busId} ignoring invalid coords lat=${lat} lng=${lng} status=${gpsStatus}`);
   if (!dev.lat && LAST_KNOWN_GPS.lat) dev.lat = LAST_KNOWN_GPS.lat;
   if (!dev.lng && LAST_KNOWN_GPS.lng) dev.lng = LAST_KNOWN_GPS.lng;
   dev.speed = speed;
@@ -291,9 +300,14 @@ function handleMessage(topic, rawPayload) {
 
   const hasPeriodic    = periodicIn != null || periodicOut != null;
   const totalDataStartTime = extractField(payload, ['time_info.start_time']);
-   const totalDataDate = totalDataStartTime ? totalDataStartTime.slice(0, 10) : null;
-   const todayDateStr = displayDateStr(new Date());
-   const hasDailyTotals = dailyIn != null || dailyOut != null;   // Skip stale MQTT messages from previous days entirely   if (totalDataDate !== null && totalDataDate !== todayDateStr) {     console.log(`[SKIP] Stale message from ${totalDataDate}, today is ${todayDateStr}`);     return;   }
+  const totalDataDate = totalDataStartTime ? totalDataStartTime.slice(0, 10) : null;
+  const todayDateStr = displayDateStr(new Date());
+  const hasDailyTotals = dailyIn != null || dailyOut != null;
+  // Skip stale MQTT messages from previous days entirely
+  if (totalDataDate !== null && totalDataDate !== todayDateStr) {
+    console.log(`[SKIP] Stale message from ${totalDataDate}, today is ${todayDateStr}`);
+    return;
+  }
   const hasTrigger     = triggerIn != null || triggerOut != null;
 
   // If no counting data at all, this is a pure GPS/status message — done
@@ -790,7 +804,41 @@ app.get('/api/buses', (req, res) => {
 
 // --- Health check ---
 
-// =========================================== // COUNTER RESET ENDPOINT // ===========================================  // POST /api/reset-counter/:busId // Resets the live onboard counter for a specific bus to 0 // Also inserts a reset event record into the database app.post('/api/reset-counter/:busId', (req, res) => {   const busId = req.params.busId;   if (!busId) return res.status(400).json({ error: 'busId required' });    // Reset live in-memory state   if (liveDevices[busId]) {     liveDevices[busId].onboard = 0;     liveDevices[busId].occupancy = 0;     liveDevices[busId].lastReset = new Date().toISOString();     console.log(`[RESET] Onboard counter reset to 0 for bus: ${busId}`);   }    // Insert a reset marker record into the database   try {     const now = new Date();     const ts = now.toISOString().slice(0, 16).replace('T', ' ');     const dateStr = now.toISOString().slice(0, 10);     const hour = now.getHours();     db.prepare(`       INSERT INTO records (timestamp, date, hour, bus_id, route, stop, boardings, alightings, onboard, occupancy, lat, lng, msg_type)       VALUES (?, ?, ?, ?, '-', '-', 0, 0, 0, 0, 0, 0, 'RESET')     `).run(ts, dateStr, hour, busId);   } catch (e) {     console.warn('[RESET] DB insert failed:', e.message);   }    res.json({ success: true, busId, onboard: 0, resetAt: new Date().toISOString() }); }
+// ===========================================
+// COUNTER RESET ENDPOINT
+// ===========================================
+// POST /api/reset-counter/:busId
+// Resets the live onboard counter for a specific bus to 0
+// Also inserts a reset event record into the database
+app.post('/api/reset-counter/:busId', (req, res) => {
+  const busId = req.params.busId;
+  if (!busId) return res.status(400).json({ error: 'busId required' });
+
+  // Reset live in-memory state
+  if (liveDevices[busId]) {
+    liveDevices[busId].onboard = 0;
+    liveDevices[busId].occupancy = 0;
+    liveDevices[busId].lastReset = new Date().toISOString();
+    console.log(`[RESET] Onboard counter reset to 0 for bus: ${busId}`);
+  }
+
+  // Insert a reset marker record into the database
+  try {
+    const now = new Date();
+    const ts = now.toISOString().slice(0, 16).replace('T', ' ');
+    const dateStr = now.toISOString().slice(0, 10);
+    const hour = now.getHours();
+    db.prepare(`
+      INSERT INTO records (timestamp, date, hour, bus_id, route, stop, boardings, alightings, onboard, occupancy, lat, lng, msg_type)
+      VALUES (?, ?, ?, ?, '-', '-', 0, 0, 0, 0, 0, 0, 'RESET')
+    `).run(ts, dateStr, hour, busId);
+  } catch (e) {
+    console.warn('[RESET] DB insert failed:', e.message);
+  }
+
+  res.json({ success: true, busId, onboard: 0, resetAt: new Date().toISOString() });
+});
+
 app.get('/api/health', (req, res) => {
   const recordCount = db.prepare('SELECT COUNT(*) as cnt FROM records').get().cnt;
   let dbFile = { path: DB_PATH, exists: false, sizeBytes: 0, mtime: null };
@@ -859,7 +907,22 @@ app.get('/api/debug/state', (req, res) => {
 
 
 // ============================================
-// Recalculate today's daily_summary from busDayTotals app.post('/api/recalculate-daily', (req, res) => {   const today = displayDateStr();   let updated = 0;   for (const [busId, ds] of Object.entries(busDayTotals)) {     if (ds.date !== today) continue;     const onboard = Math.max(0, ds.dayIn - ds.dayOut);     const occ = BUS_CAPACITY > 0 ? Math.min(100, Math.round((onboard / BUS_CAPACITY) * 100)) : 0;     upsertDailySummary.run({ date: today, bus_id: busId, total_in: ds.dayIn, total_out: ds.dayOut, peak_onboard: onboard, peak_hour: new Date().getHours(), avg_occupancy: occ });     updated++;   }   res.json({ success: true, updated, date: today }); });  // START
+// Recalculate today's daily_summary from busDayTotals
+app.post('/api/recalculate-daily', (req, res) => {
+  const today = displayDateStr();
+  let updated = 0;
+  for (const [busId, ds] of Object.entries(busDayTotals)) {
+    if (ds.date !== today) continue;
+    const onboard = Math.max(0, ds.dayIn - ds.dayOut);
+    const occ = BUS_CAPACITY > 0 ? Math.min(100, Math.round((onboard / BUS_CAPACITY) * 100)) : 0;
+    upsertDailySummary.run({ date: today, bus_id: busId, total_in: ds.dayIn, total_out: ds.dayOut, peak_onboard: onboard, peak_hour: new Date().getHours(), avg_occupancy: occ });
+    updated++;
+  }
+  res.json({ success: true, updated, date: today });
+});
+
+// ============================================
+// START
 // ============================================
 
 app.listen(PORT, () => {
