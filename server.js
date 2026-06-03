@@ -809,6 +809,30 @@ app.get('/api/health', (req, res) => {
 });
 
 
+// POST /api/clear-today — wipe today's DB records and reset in-memory day totals
+app.post('/api/clear-today', (req, res) => {
+     const today = displayDateStr(new Date());
+     try {
+            db.prepare('DELETE FROM records WHERE date = ?').run(today);
+            db.prepare('DELETE FROM hourly_summary WHERE date = ?').run(today);
+            db.prepare('DELETE FROM daily_summary WHERE date = ?').run(today);
+            // Reset in-memory day totals for all buses
+            for (const busId of Object.keys(busDayTotals)) {
+                     busDayTotals[busId] = { dayIn: 0, dayOut: 0, date: today };
+                     if (liveDevices[busId]) {
+                                liveDevices[busId].totalIn = 0;
+                                liveDevices[busId].totalOut = 0;
+                                liveDevices[busId].onboard = 0;
+                              }
+                   }
+            console.log(`[CLEAR-TODAY] Cleared all records for ${today}`);
+            res.json({ ok: true, date: today, message: 'Today data cleared and counters reset' });
+          } catch (err) {
+            console.error('[CLEAR-TODAY] Error:', err.message);
+            res.status(500).json({ ok: false, error: err.message });
+          }
+   });
+
 // --- Debug endpoints ---
 
 app.get('/api/debug', (req, res) => {
