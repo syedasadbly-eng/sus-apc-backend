@@ -557,7 +557,7 @@ function updateLiveBusPositions() {
     if (!data) return;
 
     const color = ROUTE_COLORS[idx % ROUTE_COLORS.length];
-    const passengers = ((data.onboardata._onboardFromTotal != null ? data._onboardFromTotal : Math.max(0, data.lineIn - data.lineOut)) : Math.max(0, data.lineIn - data.lineOut));
+    const passengers = ((data._onboardFromTotal != null ? data._onboardFromTotal : Math.max(0, data.lineIn - data.lineOut)) : Math.max(0, data.lineIn - data.lineOut));
     const capacity = data.capacity || CONFIG.busCapacity;
     const occupancy = capacity > 0 ? Math.min(100, Math.round((passengers / capacity) * 100)) : 0;
     const ageSeconds = data.ts ? Math.round((Date.now() - data.ts) / 1000) : 999;
