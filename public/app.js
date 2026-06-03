@@ -49,7 +49,7 @@ async function apiFetch(endpoint, params = {}) {
 
 const CONFIG = {
   dashPassword: 'sus2026',
-  busCapacity: 16,
+  busCapacity: 16,  // ========================================== // COUNTER RESET FUNCTION (Frontend) // ========================================== async function resetBusCounter(busId) {   if (!confirm(`Reset onboard counter to 0 for bus ${busId}?`)) return;   try {     const res = await fetch(`${API_BASE}/api/reset-counter/${encodeURIComponent(busId)}`, {       method: 'POST',       headers: { 'Content-Type': 'application/json' }     });     const data = await res.json();     if (data.success) {       alert(`Counter reset successfully for ${busId}. Onboard: 0`);       // Refresh fleet status view       if (typeof renderFleetTable === 'function') renderFleetTable();     } else {       alert('Reset failed: ' + (data.error || 'Unknown error'));     }   } catch (e) {     alert('Error resetting counter: ' + e.message);   } }
   // VS125 JSON payload field mappings (supports real VS125 + flat formats)
   vs125Fields: {
     // Running daily totals (from line_total_data — best source for KPI counts)
