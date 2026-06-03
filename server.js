@@ -121,6 +121,15 @@ db.exec(`
     UNIQUE(date, bus_id)
   );
 
+  -- Persistent per-bus running state (survives restarts/redeploys).
+  -- running_onboard is a CONTINUOUS occupancy tally that carries across
+  -- midnight and does NOT reset daily (continuous running-tally model).
+  CREATE TABLE IF NOT EXISTS bus_state (
+    bus_id          TEXT    PRIMARY KEY,
+    running_onboard INTEGER NOT NULL DEFAULT 0,
+    updated_at      TEXT
+  );
+
   -- Indexes for fast queries
   CREATE INDEX IF NOT EXISTS idx_records_date ON records(date);
   CREATE INDEX IF NOT EXISTS idx_records_bus_date ON records(bus_id, date);
@@ -157,6 +166,15 @@ const upsertDailySummary = db.prepare(`
     avg_occupancy = @avg_occupancy
 `);
 
+// Persist the continuous running-onboard tally so it survives restarts/redeploys.
+const upsertBusState = db.prepare(`
+  INSERT INTO bus_state (bus_id, running_onboard, updated_at)
+  VALUES (@bus_id, @running_onboard, @updated_at)
+  ON CONFLICT(bus_id) DO UPDATE SET
+    running_onboard = @running_onboard,
+    updated_at      = @updated_at
+`);
+
 
 // ============================================
 // IN-MEMORY LIVE STATE
@@ -169,6 +187,12 @@ let mqttStats = { connected: false, messageCount: 0, lastMessage: null };
 // Per-bus daily cumulative boardings/alightings (sum of all periodic deltas)
 // Key: busId (e.g. 'SUS-001'), Value: { dayIn, dayOut, date }
 const busDayTotals = {};
+
+// Per-bus CONTINUOUS running occupancy (running-tally model). This carries
+// across midnight and is NOT reset by the daily counter reset. Rehydrated
+// from the bus_state table on startup so redeploys/restarts resume the count.
+// Key: busId, Value: integer (clamped 0..BUS_CAPACITY)
+const busRunningOnboard = {};
 
 
 // ============================================
@@ -260,9 +284,12 @@ function handleMessage(topic, rawPayload) {
   const busId = gw.label;  // e.g. 'SUS-001'
   const route = gw.route || '';
 
-  // Ensure live device state exists
+  // Ensure live device state exists. Seed onboard from the persisted running
+  // tally (running-tally model) so a freshly-created device reflects the
+  // continuous occupancy rather than starting at 0.
   if (!liveDevices[busId]) {
-    liveDevices[busId] = { totalIn: 0, totalOut: 0, onboard: 0, lastEventIn: 0, lastEventOut: 0, lat: 0, lng: 0, speed: 0, ts: 0 };
+    const seedOnboard = busRunningOnboard[busId] != null ? busRunningOnboard[busId] : 0;
+    liveDevices[busId] = { totalIn: 0, totalOut: 0, onboard: seedOnboard, lastEventIn: 0, lastEventOut: 0, lat: 0, lng: 0, speed: 0, ts: 0 };
   }
   const dev = liveDevices[busId];
   dev.ts = Date.now();
@@ -404,13 +431,24 @@ function flushBusDelta(busId) {
   dayState.dayIn += deltaIn;
   dayState.dayOut += deltaOut;
 
-  // ---- Determine onboard count ----
-  // Prefer line_total_data onboard (authoritative). Fallback: day cumulative.
+  // ---- Determine onboard count (CONTINUOUS RUNNING TALLY) ----
+  // Onboard is a running occupancy that carries across midnight and does NOT
+  // reset with the daily counters. On each event we apply the net delta to the
+  // prior running value, clamped to [0, capacity]. If the sensor reports its
+  // own onboard value we trust it and resync the running tally to it.
   let onboard;
+  const prevRunning = busRunningOnboard[busId] != null ? busRunningOnboard[busId] : 0;
   if (pending.onboard !== null) {
-    onboard = pending.onboard;
+    onboard = Math.max(0, Math.min(BUS_CAPACITY, pending.onboard));
   } else {
-    onboard = Math.max(0, dayState.dayIn - dayState.dayOut);
+    onboard = Math.max(0, Math.min(BUS_CAPACITY, prevRunning + deltaIn - deltaOut));
+  }
+  busRunningOnboard[busId] = onboard;
+  // Persist running tally so a restart/redeploy resumes from here.
+  try {
+    upsertBusState.run({ bus_id: busId, running_onboard: onboard, updated_at: isoTs });
+  } catch (err) {
+    console.error('[DB] bus_state upsert error:', err.message);
   }
   const occupancy = BUS_CAPACITY > 0 ? Math.min(100, Math.round((onboard / BUS_CAPACITY) * 100)) : 0;
 
@@ -557,11 +595,13 @@ function scheduleMidnightReset() {
       busDayTotals[busId].dayOut = 0;
       busDayTotals[busId].date = newDate;
     }
-    // Reset live device counters
+    // Reset live device DAILY counters only. The running onboard occupancy
+    // is a continuous tally that CARRIES OVER midnight, so we deliberately
+    // leave liveDevices[busId].onboard and busRunningOnboard untouched.
     for (const busId of Object.keys(liveDevices)) {
       liveDevices[busId].totalIn = 0;
       liveDevices[busId].totalOut = 0;
-      liveDevices[busId].onboard = 0;
+      // onboard intentionally preserved (running-tally model)
     }
     // Schedule next midnight
     scheduleMidnightReset();
@@ -827,6 +867,16 @@ app.post('/api/reset-counter/:busId', (req, res) => {
     console.log(`[RESET] Onboard counter reset to 0 for bus: ${busId}`);
   }
 
+  // Reset the continuous running-onboard tally (in-memory + persisted) so the
+  // running-tally model genuinely starts from 0 and does not resurrect on the
+  // next flush from the stored bus_state value.
+  busRunningOnboard[busId] = 0;
+  try {
+    upsertBusState.run({ bus_id: busId, running_onboard: 0, updated_at: new Date().toISOString() });
+  } catch (err) {
+    console.error('[RESET] bus_state reset error:', err.message);
+  }
+
   // Insert a reset marker record into the database
   try {
     const now = new Date();
@@ -987,6 +1037,20 @@ app.listen(PORT, () => {
     if (rows.length) console.log(`[REHYDRATE] Restored day totals for ${rows.length} bus(es) from DB`);
   } catch (err) {
     console.error('[REHYDRATE] Failed to restore day totals:', err.message);
+  }
+
+  // Rehydrate the CONTINUOUS running-onboard tally from bus_state so the
+  // occupancy count resumes across restarts/redeploys (running-tally model).
+  try {
+    const stateRows = db.prepare('SELECT bus_id, running_onboard FROM bus_state').all();
+    stateRows.forEach(r => {
+      const val = Math.max(0, Math.min(BUS_CAPACITY, r.running_onboard || 0));
+      busRunningOnboard[r.bus_id] = val;
+      if (liveDevices[r.bus_id]) liveDevices[r.bus_id].onboard = val;
+    });
+    if (stateRows.length) console.log(`[REHYDRATE] Restored running onboard for ${stateRows.length} bus(es) from bus_state`);
+  } catch (err) {
+    console.error('[REHYDRATE] Failed to restore running onboard:', err.message);
   }
 
   connectMqtt();

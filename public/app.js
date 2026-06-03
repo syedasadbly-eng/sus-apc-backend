@@ -318,6 +318,10 @@ function handleMqttMessage(topic, payload) {
     liveDeviceData[gatewayKey] = {
       lineIn: 0, lineOut: 0, lat: 0, lng: 0, ts: 0,
       capacity: CONFIG.busCapacity, triggerAccumIn: 0, triggerAccumOut: 0,
+      // Continuous running occupancy (running-tally model). Seeded from the
+      // server's persisted value via /api/live on load (see seedRunningOnboard),
+      // then adjusted by each live delta below. Carries across midnight.
+      runningOnboard: 0, runningSeeded: false,
     };
   }
   const dev = liveDeviceData[gatewayKey];
@@ -347,12 +351,19 @@ function handleMqttMessage(topic, payload) {
   // Both door topics (bus/002/door1, bus/002/door2) resolve to same gatewayKey,
   // so accumulating on the shared dev object naturally merges both doors.
 
+  const _cap = dev.capacity || CONFIG.busCapacity;
+  const _applyRunning = (dIn, dOut) => {
+    // Apply net delta to the continuous running occupancy, clamped [0, capacity].
+    dev.runningOnboard = Math.max(0, Math.min(_cap, (dev.runningOnboard || 0) + dIn - dOut));
+  };
+
   if (hasPeriodic) {
     const pIn = Number(periodicIn) || 0;
     const pOut = Number(periodicOut) || 0;
     dev.lineIn += pIn;
     dev.lineOut += pOut;
-    console.log('[MQTT] Accumulated periodic:', { door: topic, pIn, pOut, dayIn: dev.lineIn, dayOut: dev.lineOut });
+    _applyRunning(pIn, pOut);
+    console.log('[MQTT] Accumulated periodic:', { door: topic, pIn, pOut, dayIn: dev.lineIn, dayOut: dev.lineOut, onboard: dev.runningOnboard });
   }
 
   if (hasTrigger) {
@@ -362,7 +373,8 @@ function handleMqttMessage(topic, payload) {
     dev.lineOut += tOut;
     dev.triggerAccumIn = (dev.triggerAccumIn || 0) + tIn;
     dev.triggerAccumOut = (dev.triggerAccumOut || 0) + tOut;
-    console.log('[MQTT] Accumulated trigger:', { door: topic, tIn, tOut, dayIn: dev.lineIn, dayOut: dev.lineOut });
+    _applyRunning(tIn, tOut);
+    console.log('[MQTT] Accumulated trigger:', { door: topic, tIn, tOut, dayIn: dev.lineIn, dayOut: dev.lineOut, onboard: dev.runningOnboard });
   }
 
   // line_total_data: store cumulative for onboard calculation, do NOT overwrite lineIn/lineOut
@@ -576,13 +588,14 @@ function updateLiveBusPositions() {
     if (!data) return;
 
     const color = ROUTE_COLORS[idx % ROUTE_COLORS.length];
-    // Onboard = accumulated boardings - alightings (periodic/trigger deltas summed
-    // across both doors this session), clamped >= 0. We intentionally do NOT use
-    // line_total_data (_onboardFromTotal): it is the VS125 device LIFETIME cumulative
-    // (never resets daily) and only reflects the last door that reported, so it
-    // produces wrong/negative occupancy. Accumulated deltas are the correct signal.
-    const passengers = Math.max(0, (data.lineIn || 0) - (data.lineOut || 0));
+    // Onboard = CONTINUOUS running occupancy (running-tally model). Seeded from
+    // the server's persisted value (/api/live) on load, then adjusted by live
+    // deltas. This carries across midnight and matches the backend, unlike a
+    // daily (lineIn - lineOut) net which floors to 0 when the day starts full.
     const capacity = data.capacity || CONFIG.busCapacity;
+    const passengers = Math.max(0, Math.min(capacity,
+      data.runningOnboard != null ? data.runningOnboard
+        : Math.max(0, (data.lineIn || 0) - (data.lineOut || 0))));
     const occupancy = capacity > 0 ? Math.min(100, Math.round((passengers / capacity) * 100)) : 0;
     const ageSeconds = data.ts ? Math.round((Date.now() - data.ts) / 1000) : 999;
 
@@ -624,6 +637,15 @@ async function resetBusCounter(busId) {
     });
     const data = await res.json();
     if (data.success) {
+      // Zero the local continuous running-onboard for every device mapping to
+      // this bus so the dashboard reflects the reset immediately (and keep it
+      // seeded so the next /api/live poll doesn't re-pull a stale value).
+      const gws = (configStore && configStore.gateways) ? configStore.gateways : [];
+      gws.filter(g => g.label === busId).forEach(g => {
+        const dev = liveDeviceData[g.topic];
+        if (dev) { dev.runningOnboard = 0; dev.runningSeeded = true; }
+      });
+      if (typeof updateLiveBusPositions === 'function') updateLiveBusPositions();
       alert(`Counter reset successfully for ${busId}. Onboard: 0`);
       // Refresh fleet status view
       if (typeof renderFleetTable === 'function') renderFleetTable();
@@ -654,6 +676,35 @@ async function seedKPIsFromAPI() {
     setKPI('kpi-alightings', dailyTotals.alightings.toLocaleString());
     if (t.avg_occupancy > 0) setKPI('kpi-occupancy', t.avg_occupancy + '%');
   } catch(e) { /* silent fail */ }
+}
+
+// Seed the frontend's continuous running-onboard from the server's persisted
+// value (/api/live). Runs once per device: the server holds the authoritative
+// running tally (carried across midnight & redeploys); the browser only sees
+// deltas since it loaded, so it must adopt the server baseline before applying
+// its own live deltas. Guarded by runningSeeded so we never clobber live counts.
+async function seedRunningOnboardFromAPI() {
+  try {
+    const res = await fetch(`${API_BASE}/api/live`, { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data || !Array.isArray(data.buses)) return;
+    // Map server busId -> onboard, then apply to matching local devices by label.
+    const byBus = {};
+    data.buses.forEach(b => { byBus[b.busId] = b.onboard || 0; });
+    const gws = (configStore && configStore.gateways) ? configStore.gateways : [];
+    Object.keys(liveDeviceData).forEach(key => {
+      const dev = liveDeviceData[key];
+      if (dev.runningSeeded) return;
+      // Resolve this device's label the same way updateLiveBusPositions does.
+      const gw = gws.find(g => g.topic === key);
+      const label = gw ? gw.label : null;
+      if (label && byBus[label] != null) {
+        dev.runningOnboard = byBus[label];
+        dev.runningSeeded = true;
+      }
+    });
+  } catch (e) { /* silent fail — live deltas still work without a seed */ }
 }
 
 function updateLiveKPIs() {
@@ -934,9 +985,13 @@ function initDashboard() {
   lucide.createIcons();
 
   // Pre-probe backend so it's cached before any view needs it
-  probeBackend().then(() => seedKPIsFromAPI());
+  probeBackend().then(() => { seedKPIsFromAPI(); seedRunningOnboardFromAPI(); });
   // Keep the authoritative daily totals fresh as new boardings accumulate.
   setInterval(() => seedKPIsFromAPI(), 30000);
+  // Seed the continuous running-onboard from the server once each device is
+  // known. Devices only appear after their first MQTT message, so retry on an
+  // interval; the function is a no-op for devices already seeded.
+  setInterval(() => seedRunningOnboardFromAPI(), 30000);
 
   // Auto-connect to MQTT broker if credentials are pre-configured
   if (configStore.mqtt.host) {
