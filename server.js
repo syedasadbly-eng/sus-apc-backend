@@ -293,7 +293,7 @@ function handleMessage(topic, rawPayload) {
   const totalDataStartTime = extractField(payload, ['time_info.start_time']);
    const totalDataDate = totalDataStartTime ? totalDataStartTime.slice(0, 10) : null;
    const todayDateStr = displayDateStr(new Date());
-   const hasDailyTotals = (dailyIn != null || dailyOut != null) && (totalDataDate === null || totalDataDate === todayDateStr);
+   // Skip stale MQTT messages from previous days entirely   if (totalDataDate !== null && totalDataDate !== todayDateStr) {     console.log(`[SKIP] Stale message from ${totalDataDate}, today is ${todayDateStr}`);     return;   }   const hasDailyTotals = dailyIn != null || dailyOut != null;
   const hasTrigger     = triggerIn != null || triggerOut != null;
 
   // If no counting data at all, this is a pure GPS/status message — done
