@@ -20,7 +20,7 @@ const BUS_CAPACITY = Number(process.env.BUS_CAPACITY) || 16;
 
 // Display timezone — all "day" buckets roll over at local midnight in this zone
 // so the dashboard's date boundary matches its clock (Minnesota / US Central).
-const DISPLAY_TZ = process.env.DISPLAY_TZ || 'Europe/London';
+const DISPLAY_TZ = process.env.DISPLAY_TZ || 'America/Chicago';
 // Returns the calendar date (YYYY-MM-DD) in DISPLAY_TZ for the given Date (defaults to now).
 function displayDateStr(d = new Date()) {
   // en-CA locale yields YYYY-MM-DD formatting
@@ -43,7 +43,7 @@ const GATEWAYS = [
 ];
 
 // Last-known GPS fallback (UR35 indoors, status 52)
-const LAST_KNOWN_GPS = { lat: 53.507731, lng: -2.229141 };
+const LAST_KNOWN_GPS = { lat: 44.9778, lng: -93.2650 };
 
 // VS125 field extraction paths (same as dashboard)
 const FIELD_PATHS = {
@@ -293,7 +293,7 @@ function handleMessage(topic, rawPayload) {
   const totalDataStartTime = extractField(payload, ['time_info.start_time']);
    const totalDataDate = totalDataStartTime ? totalDataStartTime.slice(0, 10) : null;
    const todayDateStr = displayDateStr(new Date());
-   // Skip stale MQTT messages from previous days entirely   if (totalDataDate !== null && totalDataDate !== todayDateStr) {     console.log(`[SKIP] Stale message from ${totalDataDate}, today is ${todayDateStr}`);     return;   }   const hasDailyTotals = dailyIn != null || dailyOut != null;
+   const hasDailyTotals = dailyIn != null || dailyOut != null;   // Skip stale MQTT messages from previous days entirely   if (totalDataDate !== null && totalDataDate !== todayDateStr) {     console.log(`[SKIP] Stale message from ${totalDataDate}, today is ${todayDateStr}`);     return;   }
   const hasTrigger     = triggerIn != null || triggerOut != null;
 
   // If no counting data at all, this is a pure GPS/status message — done
