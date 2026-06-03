@@ -357,7 +357,10 @@ function handleMessage(topic, rawPayload) {
     };
   }
   const pending = pendingDeltas[busId];
-  // Only add delta if not a periodic message when a trigger already counted this event     if (hasTrigger || !pending.hasTrigger) {       pending.deltaIn += deltaIn;       pending.deltaOut += deltaOut;       if (hasTrigger) pending.hasTrigger = true;     }
+  // Accumulate BOTH boardings and alightings for this merge window.
+  // periodicIn/triggerIn = boardings, periodicOut/triggerOut = alightings
+  // (VS125 in/out already de-inverted upstream via FIELD_PATHS).
+  pending.deltaIn += deltaIn;
   pending.deltaOut += deltaOut;
   pending.lat = dev.lat;
   pending.lng = dev.lng;
@@ -414,7 +417,9 @@ function flushBusDelta(busId) {
   // ---- Update live device state ----
   if (liveDevices[busId]) {
     liveDevices[busId].totalIn = dayState.dayIn;
-    liveDevices[busId].totalOut = dayState.dayOut;       liveDevices[busId].lastEventIn = pending.deltaIn || 0;       liveDevices[busId].lastEventOut = pending.deltaOut || 0;
+    liveDevices[busId].totalOut = dayState.dayOut;
+    liveDevices[busId].lastEventIn = deltaIn || 0;
+    liveDevices[busId].lastEventOut = deltaOut || 0;
     liveDevices[busId].onboard = onboard;
   }
 

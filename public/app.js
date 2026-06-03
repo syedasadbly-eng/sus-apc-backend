@@ -576,7 +576,12 @@ function updateLiveBusPositions() {
     if (!data) return;
 
     const color = ROUTE_COLORS[idx % ROUTE_COLORS.length];
-    const passengers = (data._onboardFromTotal != null ? data._onboardFromTotal : Math.max(0, data.lineIn - data.lineOut));
+    // Onboard = accumulated boardings - alightings (periodic/trigger deltas summed
+    // across both doors this session), clamped >= 0. We intentionally do NOT use
+    // line_total_data (_onboardFromTotal): it is the VS125 device LIFETIME cumulative
+    // (never resets daily) and only reflects the last door that reported, so it
+    // produces wrong/negative occupancy. Accumulated deltas are the correct signal.
+    const passengers = Math.max(0, (data.lineIn || 0) - (data.lineOut || 0));
     const capacity = data.capacity || CONFIG.busCapacity;
     const occupancy = capacity > 0 ? Math.min(100, Math.round((passengers / capacity) * 100)) : 0;
     const ageSeconds = data.ts ? Math.round((Date.now() - data.ts) / 1000) : 999;
@@ -591,7 +596,10 @@ function updateLiveBusPositions() {
       speed: data.speed || 0, status: ageSeconds < 300 ? 'active' : 'idle',
       sensorStatus: ageSeconds < 300 ? 'Online' : ageSeconds < 600 ? 'Degraded' : 'Offline',
       lastUpdate: formatAge(ageSeconds),
-      lineIn: data.lineIn,         lastEventIn: data.lastEventIn != null ? data.lastEventIn : (data.triggerAccumIn || 0),         lastEventOut: data.lastEventOut != null ? data.lastEventOut : (data.triggerAccumOut || 0), lineOut: data.lineOut,
+      lineIn: data.lineIn || 0,
+      lineOut: data.lineOut || 0,
+      lastEventIn: data.lastEventIn != null ? data.lastEventIn : (data.triggerAccumIn || 0),
+      lastEventOut: data.lastEventOut != null ? data.lastEventOut : (data.triggerAccumOut || 0),
     });
   });
 
