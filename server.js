@@ -340,7 +340,7 @@ function handleMessage(topic, rawPayload) {
     };
   }
   const pending = pendingDeltas[busId];
-  pending.deltaIn += deltaIn;
+  // Only add delta if not a periodic message when a trigger already counted this event     if (hasTrigger || !pending.hasTrigger) {       pending.deltaIn += deltaIn;       pending.deltaOut += deltaOut;       if (hasTrigger) pending.hasTrigger = true;     }
   pending.deltaOut += deltaOut;
   pending.lat = dev.lat;
   pending.lng = dev.lng;
@@ -832,7 +832,7 @@ app.get('/api/debug/state', (req, res) => {
 
 
 // ============================================
-// START
+// Recalculate today's daily_summary from busDayTotals app.post('/api/recalculate-daily', (req, res) => {   const today = displayDateStr();   let updated = 0;   for (const [busId, ds] of Object.entries(busDayTotals)) {     if (ds.date !== today) continue;     const onboard = Math.max(0, ds.dayIn - ds.dayOut);     const occ = BUS_CAPACITY > 0 ? Math.min(100, Math.round((onboard / BUS_CAPACITY) * 100)) : 0;     upsertDailySummary.run({ date: today, bus_id: busId, total_in: ds.dayIn, total_out: ds.dayOut, peak_onboard: onboard, peak_hour: new Date().getHours(), avg_occupancy: occ });     updated++;   }   res.json({ success: true, updated, date: today }); });  // START
 // ============================================
 
 app.listen(PORT, () => {
