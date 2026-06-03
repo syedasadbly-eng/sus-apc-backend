@@ -290,7 +290,10 @@ function handleMessage(topic, rawPayload) {
   const triggerOut  = extractField(payload, FIELD_PATHS.triggerOut);
 
   const hasPeriodic    = periodicIn != null || periodicOut != null;
-  const hasDailyTotals = dailyIn != null || dailyOut != null;
+  const totalDataStartTime = extractField(payload, ['time_info.start_time']);
+   const totalDataDate = totalDataStartTime ? totalDataStartTime.slice(0, 10) : null;
+   const todayDateStr = displayDateStr(new Date());
+   const hasDailyTotals = (dailyIn != null || dailyOut != null) && (totalDataDate === null || totalDataDate === todayDateStr);
   const hasTrigger     = triggerIn != null || triggerOut != null;
 
   // If no counting data at all, this is a pure GPS/status message — done
