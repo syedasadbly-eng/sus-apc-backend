@@ -126,7 +126,7 @@ let isLiveMode = true;
 
 // Route colours assigned dynamically to live buses
 const ROUTE_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316', '#84cc16'];
-const MINNESOTA_CENTER = [53.4808, -2.2426];
+const MINNESOTA_CENTER = [44.9778, -93.2650];
 // Last known GPS position from UR35 (used as fallback when GPS has no fix, status 52)
 const LAST_KNOWN_GPS = { lat: 53.507731, lng: -2.229141 };
 
