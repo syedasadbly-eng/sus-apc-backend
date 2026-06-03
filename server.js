@@ -262,7 +262,7 @@ function handleMessage(topic, rawPayload) {
 
   // Ensure live device state exists
   if (!liveDevices[busId]) {
-    liveDevices[busId] = { totalIn: 0, totalOut: 0, onboard: 0, lat: 0, lng: 0, speed: 0, ts: 0 };
+    liveDevices[busId] = { totalIn: 0, totalOut: 0, onboard: 0, lastEventIn: 0, lastEventOut: 0, lat: 0, lng: 0, speed: 0, ts: 0 };
   }
   const dev = liveDevices[busId];
   dev.ts = Date.now();
@@ -397,7 +397,7 @@ function flushBusDelta(busId) {
   // ---- Update live device state ----
   if (liveDevices[busId]) {
     liveDevices[busId].totalIn = dayState.dayIn;
-    liveDevices[busId].totalOut = dayState.dayOut;
+    liveDevices[busId].totalOut = dayState.dayOut;       liveDevices[busId].lastEventIn = pending.deltaIn || 0;       liveDevices[busId].lastEventOut = pending.deltaOut || 0;
     liveDevices[busId].onboard = onboard;
   }
 
@@ -568,7 +568,7 @@ app.get('/api/live', (req, res) => {
     const occupancy = BUS_CAPACITY > 0 ? Math.min(100, Math.round((passengers / BUS_CAPACITY) * 100)) : 0;
     return {
       busId,
-      lineIn: dev.totalIn,
+      lineIn: dev.totalIn,       lastEventIn: dev.lastEventIn || 0,       lastEventOut: dev.lastEventOut || 0,
       lineOut: dev.totalOut,
       passengers,
       onboard: dev.onboard || 0,
