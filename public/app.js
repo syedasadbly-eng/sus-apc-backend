@@ -49,7 +49,7 @@ async function apiFetch(endpoint, params = {}) {
 
 const CONFIG = {
   dashPassword: 'sus2026',
-  busCapacity: 55,
+  busCapacity: 16,
   // VS125 JSON payload field mappings (supports real VS125 + flat formats)
   vs125Fields: {
     // Running daily totals (from line_total_data — best source for KPI counts)
