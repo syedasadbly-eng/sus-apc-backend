@@ -20,7 +20,7 @@ const BUS_CAPACITY = Number(process.env.BUS_CAPACITY) || 16;
 
 // Display timezone — all "day" buckets roll over at local midnight in this zone
 // so the dashboard's date boundary matches its clock (Minnesota / US Central).
-const DISPLAY_TZ = process.env.DISPLAY_TZ || 'America/Chicago';
+const DISPLAY_TZ = process.env.DISPLAY_TZ || 'Europe/London';
 // Returns the calendar date (YYYY-MM-DD) in DISPLAY_TZ for the given Date (defaults to now).
 function displayDateStr(d = new Date()) {
   // en-CA locale yields YYYY-MM-DD formatting
