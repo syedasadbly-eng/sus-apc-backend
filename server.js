@@ -810,7 +810,7 @@ app.get('/api/health', (req, res) => {
 
 
 // POST /api/clear-today — wipe today's DB records and reset in-memory day totals
-app.post('/api/clear-today', (req, res) => {
+app.all('/api/clear-today', (req, res) => {
      const today = displayDateStr(new Date());
      try {
             db.prepare('DELETE FROM records WHERE date = ?').run(today);
