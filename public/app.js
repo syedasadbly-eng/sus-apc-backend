@@ -570,7 +570,7 @@ function updateLiveBusPositions() {
       speed: data.speed || 0, status: ageSeconds < 300 ? 'active' : 'idle',
       sensorStatus: ageSeconds < 300 ? 'Online' : ageSeconds < 600 ? 'Degraded' : 'Offline',
       lastUpdate: formatAge(ageSeconds),
-      lineIn: data.lineIn, lineOut: data.lineOut,
+      lineIn: data.lineIn,         lastEventIn: data.lastEventIn != null ? data.lastEventIn : (data.triggerAccumIn || 0),         lastEventOut: data.lastEventOut != null ? data.lastEventOut : (data.triggerAccumOut || 0), lineOut: data.lineOut,
     });
   });
 
