@@ -16,7 +16,7 @@ const mqtt = require('mqtt');
 
 const PORT = process.env.PORT || 3001;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'apc_data.db');
-const BUS_CAPACITY = Number(process.env.BUS_CAPACITY) || 55;
+const BUS_CAPACITY = Number(process.env.BUS_CAPACITY) || 16;
 
 // Display timezone — all "day" buckets roll over at local midnight in this zone
 // so the dashboard's date boundary matches its clock (Minnesota / US Central).
@@ -787,7 +787,7 @@ app.get('/api/buses', (req, res) => {
 
 // --- Health check ---
 
-app.get('/api/health', (req, res) => {
+// =========================================== // COUNTER RESET ENDPOINT // ===========================================  // POST /api/reset-counter/:busId // Resets the live onboard counter for a specific bus to 0 // Also inserts a reset event record into the database app.post('/api/reset-counter/:busId', (req, res) => {   const busId = req.params.busId;   if (!busId) return res.status(400).json({ error: 'busId required' });    // Reset live in-memory state   if (liveDevices[busId]) {     liveDevices[busId].onboard = 0;     liveDevices[busId].occupancy = 0;     liveDevices[busId].lastReset = new Date().toISOString();     console.log(`[RESET] Onboard counter reset to 0 for bus: ${busId}`);   }    // Insert a reset marker record into the database   try {     const now = new Date();     const ts = now.toISOString().slice(0, 16).replace('T', ' ');     const dateStr = now.toISOString().slice(0, 10);     const hour = now.getHours();     db.prepare(`       INSERT INTO records (timestamp, date, hour, bus_id, route, stop, boardings, alightings, onboard, occupancy, lat, lng, msg_type)       VALUES (?, ?, ?, ?, '-', '-', 0, 0, 0, 0, 0, 0, 'RESET')     `).run(ts, dateStr, hour, busId);   } catch (e) {     console.warn('[RESET] DB insert failed:', e.message);   }    res.json({ success: true, busId, onboard: 0, resetAt: new Date().toISOString() }); });  app.get('/api/health', (req, res) => {
   const recordCount = db.prepare('SELECT COUNT(*) as cnt FROM records').get().cnt;
   let dbFile = { path: DB_PATH, exists: false, sizeBytes: 0, mtime: null };
   try {
