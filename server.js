@@ -322,9 +322,9 @@ function handleMessage(topic, rawPayload) {
   }
 
   // ---- ONBOARD COUNT (from line_total_data cumulative) ----
-  // line_total_data.in_counted - out_counted = current onboard
+  // onboard is always computed from dayIn-dayOut in flushBusDelta (line_total_data totals are stale device lifetime counts)
   let onboardFromTotal = null;
-  if (hasDailyTotals) {
+  if (false) { // disabled: hasDailyTotals stale
     const cumIn = Number(dailyIn) || 0;
     const cumOut = Number(dailyOut) || 0;
     onboardFromTotal = Math.max(0, cumIn - cumOut);
