@@ -1034,6 +1034,43 @@ app.listen(PORT, () => {
   // change. It was wiping counts on every redeploy/restart, so it has been
   // removed. Data now persists across restarts on the mounted volume.
 
+  // One-time repair: earlier builds wrote physically impossible onboard / occupancy
+  // snapshots into raw `records` (e.g. 263, 429 on a 16-seat bus) from device
+  // heartbeats. Recompute ONLY the onboard + occupancy columns from the
+  // running-tally model (clamp(prev + in - out, 0, capacity)) in timestamp order
+  // per bus, using the per-event deltas. Boarding/alighting counts are left
+  // exactly as logged (per user's decision: fix onboard only, keep counts).
+  // Idempotent: re-running on already-correct data reproduces the same values.
+  try {
+    const buses = db.prepare('SELECT DISTINCT bus_id FROM records').all().map(r => r.bus_id);
+    let fixedRows = 0;
+    const fixTx = db.transaction(() => {
+      const upd = db.prepare('UPDATE records SET onboard = ?, occupancy = ? WHERE id = ?');
+      for (const busId of buses) {
+        // Walk this bus's records in chronological order, carrying the tally
+        // across days (matches the live continuous running-tally model).
+        const rows = db.prepare(`
+          SELECT id, evt_in, evt_out, onboard, occupancy
+          FROM records WHERE bus_id = ?
+          ORDER BY timestamp ASC, id ASC
+        `).all(busId);
+        let running = 0;
+        for (const row of rows) {
+          running = Math.max(0, Math.min(BUS_CAPACITY, running + (row.evt_in || 0) - (row.evt_out || 0)));
+          const occ = BUS_CAPACITY > 0 ? Math.round((running / BUS_CAPACITY) * 100) : 0;
+          if (row.onboard !== running || Math.round(row.occupancy) !== occ) {
+            upd.run(running, occ, row.id);
+            fixedRows++;
+          }
+        }
+      }
+    });
+    fixTx();
+    if (fixedRows > 0) console.log(`[REPAIR] Recomputed onboard/occupancy on ${fixedRows} raw records (running-tally, clamped to ${BUS_CAPACITY})`);
+  } catch (err) {
+    console.error('[REPAIR] Raw onboard recompute failed:', err.message);
+  }
+
   // One-time repair: earlier builds wrote the running DAY total into each hourly
   // bucket (so later hours showed the whole day's total). Rebuild hourly_summary
   // from the per-event deltas in `records`, which are the source of truth, so the
