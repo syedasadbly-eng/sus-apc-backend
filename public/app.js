@@ -87,11 +87,11 @@ let configStore = {
     topic: 'bus/#',
   },
   dashPassword: CONFIG.dashPassword,
-  // Gateway-to-bus mapping: [{topic: 'bus/001', label: 'SUS-001', route: '101'}, ...]
+  // Gateway-to-bus mapping: [{topic: 'bus/001', label: '515', route: '101'}, ...]
   gateways: [
-    { topic: 'bus/001', label: 'SUS-001', route: '' },
+    { topic: 'bus/001', label: '515', route: '' },
   ],
-  // Topic remapping: sensors on bus/002 are physically on the same bus as bus/001 (SUS-001).
+  // Topic remapping: sensors on bus/002 are physically on the same bus as bus/001 (515).
   // Maps busBase → canonical busBase so all data merges into one device.
   topicMap: {
     'bus/002': 'bus/001',
@@ -428,7 +428,11 @@ function handleMqttMessage(topic, payload) {
   const gwConfig = configStore.gateways.find(g => g.topic === gatewayKey || g.label === gatewayKey);
   const busId = gwConfig ? gwConfig.label : gatewayKey;
   const routeId = gwConfig ? (gwConfig.route || '-') : '-';
-  const passengers = Math.max(0, dev.lineIn - dev.lineOut);
+  // Use the continuous running-onboard (running-tally model) so the Data
+  // Explorer record matches the live dashboard occupancy, not the daily net.
+  const passengers = (dev.runningOnboard != null)
+    ? Math.max(0, Math.min(dev.capacity || CONFIG.busCapacity, dev.runningOnboard))
+    : Math.max(0, dev.lineIn - dev.lineOut);
   const occ = dev.capacity > 0 ? Math.min(100, Math.round((passengers / dev.capacity) * 100)) : 0;
   // Per-record event counts (the delta that just arrived)
   const evtIn = (hasPeriodic ? (Number(periodicIn) || 0) : 0) + (hasTrigger ? (Number(triggerIn) || 0) : 0);
@@ -730,6 +734,16 @@ function updateLiveKPIs() {
   setKPI('kpi-avg-occupancy', BUS_POSITIONS.length > 0 ? avgOcc + '%' : (mqttState.connected ? '0%' : '—'));
   const sub = document.getElementById('kpi-fleet-sub');
   if (sub) sub.textContent = BUS_POSITIONS.length > 0 ? `of ${BUS_POSITIONS.length} total fleet` : (mqttState.connected ? 'Waiting for bus data' : 'Waiting for MQTT data');
+
+  // Current Onboard KPI — sum of live running occupancy across the fleet.
+  const totalOnboard = BUS_POSITIONS.reduce((s, b) => s + (b.passengers || 0), 0);
+  const totalCap = BUS_POSITIONS.reduce((s, b) => s + (b.capacity || CONFIG.busCapacity), 0);
+  setKPI('kpi-onboard', BUS_POSITIONS.length > 0 ? totalOnboard.toLocaleString() : (mqttState.connected ? '0' : '—'));
+  const onboardSub = document.getElementById('kpi-onboard-sub');
+  if (onboardSub && totalCap > 0) onboardSub.textContent = `of ${totalCap} seats (${Math.round((totalOnboard/totalCap)*100)}%)`;
+
+  // Refresh the live overview analytics (gauge + cumulative + net flow).
+  updateOverviewAnalytics();
 }
 
 function setKPI(id, value) { const el = document.getElementById(id); if (el) el.textContent = value; }
@@ -929,7 +943,7 @@ function renderGatewayList() {
     <div class="device-row" data-idx="${i}">
       <div>
         <label>Bus Label</label>
-        <input type="text" class="gw-label" value="${gw.label || ''}" placeholder="e.g. SUS-001">
+        <input type="text" class="gw-label" value="${gw.label || ''}" placeholder="e.g. 515">
       </div>
       <div>
         <label>MQTT Topic / ID</label>
@@ -1110,7 +1124,7 @@ function animateValue(id, start, end, duration, suffix) {
 // ============================================
 
 function initOverview() {
-  initOverviewMap(); renderFleetList(); initHourlyFlowChart(); initTopRoutesChart(); initPeriodTabs();
+  initOverviewMap(); renderFleetList(); initHourlyFlowChart(); initOverviewAnalyticsCharts(); initPeriodTabs();
 }
 
 function initOverviewMap() {
@@ -1272,34 +1286,136 @@ function setHourlyFlowAxis(xTitle) {
   }
 }
 
-function initTopRoutesChart() {
-  const ctx = document.getElementById('chartTopRoutes').getContext('2d');
-  // Populated from live data; starts empty
-  const busLabels = BUS_POSITIONS.map(b => b.id);
-  const busData = BUS_POSITIONS.map(b => b.lineIn || b.passengers || 0);
-  const busColors = BUS_POSITIONS.map((b, i) => (b.routeColor || ROUTE_COLORS[i % ROUTE_COLORS.length]) + 'cc');
-  charts.topRoutes = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: busLabels.length > 0 ? busLabels : ['No data yet'],
-      datasets: [{ label: 'Passengers', data: busData.length > 0 ? busData : [0], backgroundColor: busColors.length > 0 ? busColors : ['#3b82f6cc'], borderRadius: 4 }],
-    },
-    options: { ...chartDefaults('Passengers'), indexAxis: 'y' },
-  });
-  // Auto-refresh every 30s from live data
-  setInterval(() => {
-    if (charts.topRoutes) {
-      const labels = BUS_POSITIONS.map(b => b.id);
-      const data = BUS_POSITIONS.map(b => b.lineIn || b.passengers || 0);
-      const colors = BUS_POSITIONS.map((b, i) => (b.routeColor || ROUTE_COLORS[i % ROUTE_COLORS.length]) + 'cc');
-      if (labels.length > 0) {
-        charts.topRoutes.data.labels = labels;
-        charts.topRoutes.data.datasets[0].data = data;
-        charts.topRoutes.data.datasets[0].backgroundColor = colors;
-        charts.topRoutes.update('active');
-      }
+// ==========================================
+// OVERVIEW ANALYTICS (gauge + cumulative load + net flow)
+// Single bus, rich counting data: these replace the empty "Top Routes" and
+// the static occupancy pie with live, meaningful occupancy analytics.
+// ==========================================
+function initOverviewAnalyticsCharts() {
+  // 1) Live Occupancy Gauge — a half-doughnut showing onboard vs free seats.
+  const gctx = document.getElementById('chartOccGauge');
+  if (gctx) {
+    charts.occGauge = new Chart(gctx.getContext('2d'), {
+      type: 'doughnut',
+      data: {
+        labels: ['Onboard', 'Free seats'],
+        datasets: [{ data: [0, CONFIG.busCapacity], backgroundColor: ['#3b82f6', 'rgba(255,255,255,0.06)'], borderWidth: 0, circumference: 180, rotation: 270 }],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: true, cutout: '74%',
+        plugins: { legend: { display: false }, tooltip: { ...tooltipDefaults() } },
+      },
+    });
+  }
+
+  // 2) Cumulative Load Today — running onboard occupancy across the day.
+  const cctx = document.getElementById('chartCumulativeLoad');
+  if (cctx) {
+    charts.cumulativeLoad = new Chart(cctx.getContext('2d'), {
+      type: 'line',
+      data: {
+        labels: Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2, '0')}:00`),
+        datasets: [
+          { label: 'Onboard', data: new Array(24).fill(null), borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.12)', borderWidth: 2, fill: true, tension: 0.35, pointRadius: 0, spanGaps: true },
+          { label: 'Capacity', data: new Array(24).fill(CONFIG.busCapacity), borderColor: '#ef4444', borderDash: [8, 4], borderWidth: 1.5, pointRadius: 0, fill: false },
+        ],
+      },
+      options: { ...chartDefaults('Onboard'), scales: { ...chartDefaults('Onboard').scales, y: { ...chartDefaults('Onboard').scales.y, beginAtZero: true, suggestedMax: CONFIG.busCapacity } } },
+    });
+  }
+
+  // 3) Net Passenger Flow by Hour — boardings minus alightings per hour.
+  const nctx = document.getElementById('chartNetFlow');
+  if (nctx) {
+    charts.netFlow = new Chart(nctx.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2, '0')}:00`),
+        datasets: [{ label: 'Net flow', data: new Array(24).fill(0), backgroundColor: [], borderRadius: 4, barPercentage: 0.7 }],
+      },
+      options: chartDefaults('Net passengers'),
+    });
+  }
+
+  // Initial paint + periodic refresh of the hour-based charts from the DB.
+  refreshNetAndCumulativeCharts();
+  setInterval(() => refreshNetAndCumulativeCharts(), 30000);
+}
+
+// Update the live gauge from current fleet occupancy (called on every MQTT tick).
+function updateOverviewAnalytics() {
+  if (charts.occGauge) {
+    const onboard = BUS_POSITIONS.reduce((s, b) => s + (b.passengers || 0), 0);
+    const cap = BUS_POSITIONS.reduce((s, b) => s + (b.capacity || CONFIG.busCapacity), 0) || CONFIG.busCapacity;
+    const free = Math.max(0, cap - onboard);
+    const pct = cap > 0 ? Math.round((onboard / cap) * 100) : 0;
+    // Colour shifts green -> amber -> red as the bus fills.
+    const fill = pct >= 90 ? '#ef4444' : pct >= 70 ? '#f59e0b' : pct >= 40 ? '#3b82f6' : '#10b981';
+    charts.occGauge.data.datasets[0].data = [onboard, free];
+    charts.occGauge.data.datasets[0].backgroundColor = [fill, 'rgba(255,255,255,0.06)'];
+    charts.occGauge.update('none');
+    const valEl = document.getElementById('occGaugeValue');
+    const subEl = document.getElementById('occGaugeSub');
+    if (valEl) valEl.textContent = `${onboard}/${cap}`;
+    if (subEl) subEl.textContent = `${pct}% full · ${free} seats free`;
+  }
+}
+
+// Pull today's hourly data from the API and render the net-flow bars and the
+// cumulative running-load line. Falls back to live MQTT buckets if API is down.
+async function refreshNetAndCumulativeCharts() {
+  if (!charts.netFlow && !charts.cumulativeLoad) return;
+  const today = displayDateStr();
+  const apiData = await apiFetch('/api/hourly', { date: today });
+  const board = new Array(24).fill(0);
+  const alight = new Array(24).fill(0);
+  let hasAny = false;
+  if (apiData && apiData.hourly && apiData.hourly.length > 0) {
+    hasAny = true;
+    apiData.hourly.forEach(row => {
+      const dh = utcHourToDisplayHour(row.hour);
+      board[dh] += row.boardings || 0;
+      alight[dh] += row.alightings || 0;
+    });
+  } else {
+    // Live fallback from in-browser hourly buckets.
+    for (let h = 0; h < 24; h++) {
+      const k = `${String(h).padStart(2, '0')}:00`;
+      board[h] = hourlyBuckets[k]?.boardings || 0;
+      alight[h] = hourlyBuckets[k]?.alightings || 0;
+      if (board[h] || alight[h]) hasAny = true;
     }
-  }, 30000);
+  }
+
+  // Cache today's hourly series so the Ridership occupancy bands can be
+  // time-weighted from the same authoritative data.
+  _occHourlyCache = { board: board.slice(), alight: alight.slice() };
+
+  const cap = CONFIG.busCapacity;
+  // Net flow per hour and the running cumulative load (clamped to [0, capacity]).
+  const net = board.map((b, h) => b - alight[h]);
+  let running = 0;
+  const cumulative = [];
+  let lastActiveHour = -1;
+  for (let h = 0; h < 24; h++) {
+    running = Math.max(0, Math.min(cap, running + net[h]));
+    cumulative.push(running);
+    if (board[h] || alight[h]) lastActiveHour = h;
+  }
+
+  if (charts.netFlow) {
+    charts.netFlow.data.datasets[0].data = net;
+    // Positive net = filling (blue), negative = emptying (green).
+    charts.netFlow.data.datasets[0].backgroundColor = net.map(v => v >= 0 ? 'rgba(59,130,246,0.85)' : 'rgba(16,185,129,0.85)');
+    charts.netFlow.update('active');
+  }
+  if (charts.cumulativeLoad) {
+    // Only draw the line up to the last hour with activity so the trailing
+    // hours don't show a flat zero for a day still in progress.
+    const series = cumulative.map((v, h) => (hasAny && lastActiveHour >= 0 && h <= lastActiveHour) ? v : null);
+    charts.cumulativeLoad.data.datasets[0].data = series;
+    charts.cumulativeLoad.update('active');
+  }
 }
 
 function initPeriodTabs() {
@@ -1472,7 +1588,9 @@ async function loadRidershipData() {
     renderRidershipChartsFromLive(viewMode, fromDate, now);
   }
 
-  // Occupancy distribution from live data
+  // Time-at-occupancy distribution. Refresh the hourly cache first so the bands
+  // are time-weighted from authoritative DB data (not just the live snapshot).
+  await refreshOccHourlyCache();
   const bands = computeOccupancyBands();
   charts.occDist.data.datasets[0].data = bands;
   charts.occDist.update('active');
@@ -1620,15 +1738,61 @@ function getISOWeek(date) {
   return 1 + Math.round(((d - week1) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
 }
 
+// Cache of the day's hourly board/alight series, refreshed from the API by
+// refreshNetAndCumulativeCharts(). Used to time-weight the occupancy bands.
+let _occHourlyCache = null;
+
+// Fetch today's hourly board/alight series from the API into _occHourlyCache.
+async function refreshOccHourlyCache() {
+  try {
+    const today = displayDateStr();
+    const apiData = await apiFetch('/api/hourly', { date: today });
+    if (apiData && apiData.hourly && apiData.hourly.length > 0) {
+      const board = new Array(24).fill(0), alight = new Array(24).fill(0);
+      apiData.hourly.forEach(row => {
+        const dh = utcHourToDisplayHour(row.hour);
+        board[dh] += row.boardings || 0;
+        alight[dh] += row.alightings || 0;
+      });
+      _occHourlyCache = { board, alight };
+    }
+  } catch (e) { /* keep prior cache / live fallback */ }
+}
+
+// Time-weighted occupancy distribution for the (single) bus: how many active
+// hours today the running load sat in each band. This is meaningful for one
+// vehicle, unlike the old "count buses per band" which always showed 1 slice.
 function computeOccupancyBands() {
-  const bands = [0,0,0,0]; // 0-25, 26-50, 51-75, 76-100
-  BUS_POSITIONS.forEach(b => {
-    if (b.occupancy <= 25) bands[0]++;
-    else if (b.occupancy <= 50) bands[1]++;
-    else if (b.occupancy <= 75) bands[2]++;
-    else bands[3]++;
-  });
-  return bands.some(v => v > 0) ? bands : [1,0,0,0];
+  const cap = CONFIG.busCapacity || 16;
+  const bands = [0, 0, 0, 0]; // 0-25, 26-50, 51-75, 76-100 (% of capacity)
+
+  // Build board/alight per hour from the API cache, else live buckets.
+  const board = new Array(24).fill(0);
+  const alight = new Array(24).fill(0);
+  if (_occHourlyCache) {
+    for (let h = 0; h < 24; h++) { board[h] = _occHourlyCache.board[h] || 0; alight[h] = _occHourlyCache.alight[h] || 0; }
+  } else {
+    for (let h = 0; h < 24; h++) {
+      const k = `${String(h).padStart(2, '0')}:00`;
+      board[h] = hourlyBuckets[k]?.boardings || 0;
+      alight[h] = hourlyBuckets[k]?.alightings || 0;
+    }
+  }
+
+  // Walk the running load hour-by-hour; count hours that had activity into bands.
+  let running = 0, anyActive = false;
+  for (let h = 0; h < 24; h++) {
+    running = Math.max(0, Math.min(cap, running + board[h] - alight[h]));
+    if (board[h] || alight[h]) {
+      anyActive = true;
+      const pct = cap > 0 ? (running / cap) * 100 : 0;
+      if (pct <= 25) bands[0]++;
+      else if (pct <= 50) bands[1]++;
+      else if (pct <= 75) bands[2]++;
+      else bands[3]++;
+    }
+  }
+  return anyActive ? bands : [1, 0, 0, 0];
 }
 
 function updateRidershipKPIs() {

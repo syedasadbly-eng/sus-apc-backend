@@ -309,10 +309,10 @@
           <div class="kpi-sub">target: 65%</div>
         </div>
         <div class="kpi-card cyan">
-          <div class="kpi-label">On-Time Performance</div>
-          <div class="kpi-value" id="kpi-ontime">—</div>
-          <div class="kpi-delta"></div>
-          <div class="kpi-sub">within 5 min window</div>
+          <div class="kpi-label">Current Onboard</div>
+          <div class="kpi-value" id="kpi-onboard">—</div>
+          <div class="kpi-delta" id="kpi-onboard-delta"></div>
+          <div class="kpi-sub" id="kpi-onboard-sub">live occupancy</div>
         </div>
         <div class="kpi-card pink">
           <div class="kpi-label">Alightings Today</div>
@@ -373,17 +373,47 @@
         </div>
       </div>
 
-      <!-- Route Charts -->
+      <!-- Analytical Row: Live Occupancy Gauge + Net Passenger Flow -->
+      <div class="chart-grid cols-2" style="margin-top:var(--space-4)">
+        <div class="chart-panel">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Live Occupancy</div>
+              <div class="chart-subtitle" id="occGaugeSub">Current load vs capacity</div>
+            </div>
+          </div>
+          <div class="chart-body" style="position:relative">
+            <canvas id="chartOccGauge" height="260"></canvas>
+            <div id="occGaugeCenter" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-60%);text-align:center;pointer-events:none">
+              <div id="occGaugeValue" style="font-size:34px;font-weight:700;color:#e4e5ed;line-height:1">—</div>
+              <div id="occGaugeLabel" style="font-size:11px;color:#8b8ea5;margin-top:4px;letter-spacing:.04em;text-transform:uppercase">onboard</div>
+            </div>
+          </div>
+        </div>
+        <div class="chart-panel">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Cumulative Load Today</div>
+              <div class="chart-subtitle">Running onboard occupancy through the day</div>
+            </div>
+          </div>
+          <div class="chart-body">
+            <canvas id="chartCumulativeLoad" height="260"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Net Passenger Flow by Hour -->
       <div class="chart-grid" style="margin-top:var(--space-4)">
         <div class="chart-panel">
           <div class="chart-header">
             <div>
-              <div class="chart-title">Top Routes by Ridership</div>
-              <div class="chart-subtitle">Total passengers per route</div>
+              <div class="chart-title">Net Passenger Flow by Hour</div>
+              <div class="chart-subtitle">Boardings minus alightings — net change in load each hour</div>
             </div>
           </div>
           <div class="chart-body">
-            <canvas id="chartTopRoutes" height="260"></canvas>
+            <canvas id="chartNetFlow" height="240"></canvas>
           </div>
         </div>
       </div>
@@ -508,8 +538,8 @@
         <div class="chart-panel">
           <div class="chart-header">
             <div>
-              <div class="chart-title">Occupancy Distribution</div>
-              <div class="chart-subtitle">Vehicle load factor breakdown</div>
+              <div class="chart-title">Time at Occupancy Level</div>
+              <div class="chart-subtitle">Share of operating time by load band</div>
             </div>
           </div>
           <div class="chart-body">

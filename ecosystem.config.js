@@ -17,7 +17,7 @@ module.exports = {
       MQTT_PASS: 'SuS-Mqtt#2026!Secure',
       MQTT_TOPIC: 'bus/#',
       DB_PATH: './apc_data.db',
-      BUS_CAPACITY: 55,
+      BUS_CAPACITY: 16,
     },
     // Log files
     error_file: './logs/err.log',

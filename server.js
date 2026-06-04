@@ -36,10 +36,10 @@ const MQTT_CONFIG = {
 };
 
 // Gateway / bus mapping — multiple topics can map to the same bus (multi-door)
-// bus/001 = door 1, bus/002 = door 2, both on SUS-001
+// bus/001 = door 1, bus/002 = door 2, both on bus 515
 const GATEWAYS = [
-  { topic: 'bus/001', label: 'SUS-001', route: '' },
-  { topic: 'bus/002', label: 'SUS-001', route: '' },
+  { topic: 'bus/001', label: '515', route: '' },
+  { topic: 'bus/002', label: '515', route: '' },
 ];
 
 // Last-known GPS fallback (UR35 indoors, status 52)
@@ -137,6 +137,49 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_hourly_date ON hourly_summary(date);
   CREATE INDEX IF NOT EXISTS idx_daily_date ON daily_summary(date);
 `);
+
+// ----- One-time label migration: SUS-001 -> 515 -----
+// The canonical bus label was renamed. Carry existing history and the
+// persisted running-onboard tally over to the new label so nothing is lost.
+// Idempotent: only runs while old-label rows still exist.
+try {
+  const OLD_LABEL = 'SUS-001';
+  const NEW_LABEL = '515';
+  const cnt = db.prepare('SELECT COUNT(*) AS n FROM records WHERE bus_id = ?').get(OLD_LABEL).n;
+  const stateCnt = db.prepare('SELECT COUNT(*) AS n FROM bus_state WHERE bus_id = ?').get(OLD_LABEL).n;
+  if (cnt > 0 || stateCnt > 0) {
+    const migrate = db.transaction(() => {
+      db.prepare('UPDATE records SET bus_id = ? WHERE bus_id = ?').run(NEW_LABEL, OLD_LABEL);
+      db.prepare('UPDATE hourly_summary SET bus_id = ? WHERE bus_id = ?').run(NEW_LABEL, OLD_LABEL);
+      // daily_summary has UNIQUE(date,bus_id): merge instead of blind rename.
+      db.prepare(`
+        INSERT INTO daily_summary (date, bus_id, total_in, total_out, peak_onboard, peak_hour, first_seen, last_seen, avg_occupancy)
+        SELECT date, ?, total_in, total_out, peak_onboard, peak_hour, first_seen, last_seen, avg_occupancy
+        FROM daily_summary WHERE bus_id = ?
+        ON CONFLICT(date, bus_id) DO UPDATE SET
+          total_in      = daily_summary.total_in  + excluded.total_in,
+          total_out     = daily_summary.total_out + excluded.total_out,
+          peak_onboard  = MAX(daily_summary.peak_onboard, excluded.peak_onboard),
+          last_seen     = excluded.last_seen,
+          avg_occupancy = (daily_summary.avg_occupancy + excluded.avg_occupancy) / 2
+      `).run(NEW_LABEL, OLD_LABEL);
+      db.prepare('DELETE FROM daily_summary WHERE bus_id = ?').run(OLD_LABEL);
+      // bus_state PRIMARY KEY: keep the larger running value if both exist.
+      db.prepare(`
+        INSERT INTO bus_state (bus_id, running_onboard, updated_at)
+        SELECT ?, running_onboard, updated_at FROM bus_state WHERE bus_id = ?
+        ON CONFLICT(bus_id) DO UPDATE SET
+          running_onboard = MAX(bus_state.running_onboard, excluded.running_onboard),
+          updated_at      = excluded.updated_at
+      `).run(NEW_LABEL, OLD_LABEL);
+      db.prepare('DELETE FROM bus_state WHERE bus_id = ?').run(OLD_LABEL);
+    });
+    migrate();
+    console.log(`[MIGRATE] Renamed bus label ${OLD_LABEL} -> ${NEW_LABEL} (${cnt} records, ${stateCnt} state rows)`);
+  }
+} catch (err) {
+  console.error('[MIGRATE] Label rename failed:', err.message);
+}
 
 // Prepared statements for fast inserts
 const insertRecord = db.prepare(`
@@ -1017,6 +1060,65 @@ app.listen(PORT, () => {
     console.log(`[REPAIR] Rebuilt ${rebuilt.length} hourly buckets from raw records`);
   } catch (err) {
     console.error('[REPAIR] Hourly rebuild failed:', err.message);
+  }
+
+  // One-time repair: earlier (broken) builds wrote impossible values into
+  // daily_summary — e.g. peak_onboard 429 and avg_occupancy pinned at 100 on a
+  // 16-seat bus — which made the Ridership graphs look wrong. Rebuild
+  // daily_summary from the raw `records` (source of truth), clamping onboard to
+  // [0, capacity] so peak occupancy and averages are realistic.
+  try {
+    const dailyRebuilt = db.prepare(`
+      SELECT date, bus_id,
+             SUM(boardings)  AS total_in,
+             SUM(alightings) AS total_out,
+             MIN(onboard)    AS min_ob,
+             MAX(onboard)    AS max_ob,
+             AVG(onboard)    AS avg_ob,
+             MIN(timestamp)  AS first_seen,
+             MAX(timestamp)  AS last_seen
+      FROM records
+      GROUP BY date, bus_id
+    `).all();
+    // Peak hour per (date,bus): the hour with the most boardings.
+    const peakHourRows = db.prepare(`
+      SELECT date, bus_id, hour, SUM(boardings) AS b
+      FROM records GROUP BY date, bus_id, hour
+    `).all();
+    const peakHourMap = {};
+    peakHourRows.forEach(r => {
+      const k = r.date + '|' + r.bus_id;
+      if (!peakHourMap[k] || r.b > peakHourMap[k].b) peakHourMap[k] = { hour: r.hour, b: r.b };
+    });
+    const tx2 = db.transaction(() => {
+      db.prepare('DELETE FROM daily_summary').run();
+      const ins = db.prepare(`
+        INSERT INTO daily_summary (date, bus_id, total_in, total_out, peak_onboard, peak_hour, first_seen, last_seen, avg_occupancy)
+        VALUES (@date, @bus_id, @total_in, @total_out, @peak_onboard, @peak_hour, @first_seen, @last_seen, @avg_occupancy)
+      `);
+      dailyRebuilt.forEach(r => {
+        const peakOnboard = Math.max(0, Math.min(BUS_CAPACITY, r.max_ob || 0));
+        // True average occupancy = mean onboard across the day's records,
+        // clamped to capacity, expressed as a percentage of capacity.
+        const avgOnboard = Math.max(0, Math.min(BUS_CAPACITY, r.avg_ob != null ? r.avg_ob : 0));
+        const avgOccupancy = BUS_CAPACITY > 0
+          ? Math.min(100, Math.round((avgOnboard / BUS_CAPACITY) * 100))
+          : 0;
+        const k = r.date + '|' + r.bus_id;
+        ins.run({
+          date: r.date, bus_id: r.bus_id,
+          total_in: r.total_in || 0, total_out: r.total_out || 0,
+          peak_onboard: peakOnboard,
+          peak_hour: peakHourMap[k] ? peakHourMap[k].hour : 0,
+          first_seen: r.first_seen, last_seen: r.last_seen,
+          avg_occupancy: avgOccupancy,
+        });
+      });
+    });
+    tx2();
+    console.log(`[REPAIR] Rebuilt ${dailyRebuilt.length} daily_summary rows from raw records (onboard clamped to ${BUS_CAPACITY})`);
+  } catch (err) {
+    console.error('[REPAIR] Daily rebuild failed:', err.message);
   }
 
   // Rehydrate in-memory day totals from the database so a restart resumes the
