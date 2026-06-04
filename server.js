@@ -36,10 +36,13 @@ const MQTT_CONFIG = {
 };
 
 // Gateway / bus mapping — multiple topics can map to the same bus (multi-door)
-// bus/001 = door 1, bus/002 = door 2, both on bus 515
+// Bus 515 (first bus): bus/001 = door 1, bus/002 = door 2 (merged into one record).
+// Bus 002 (second bus): bus/003 (+ bus/004 if it gains a second door later).
 const GATEWAYS = [
   { topic: 'bus/001', label: '515', route: '' },
   { topic: 'bus/002', label: '515', route: '' },
+  { topic: 'bus/003', label: '002', route: '' },
+  { topic: 'bus/004', label: '002', route: '' },
 ];
 
 // Last-known GPS fallback (UR35 indoors, status 52)
@@ -302,6 +305,11 @@ const MERGE_WINDOW_MS = 2000;  // Wait 2s for all door messages to arrive
 const DEBUG_RAW_PAYLOADS = [];
 const DEBUG_MAX = 20;
 
+// Debug: track every distinct topic seen since boot, with the sensor serial,
+// resolved bus label, message count and last-seen time. This is the single
+// source of truth for "is a given bus/door actually transmitting?".
+const TOPIC_REGISTRY = {};  // { topic: { deviceSn, busLabel, count, firstSeen, lastSeen } }
+
 function handleMessage(topic, rawPayload) {
   let payload;
   const raw = rawPayload.toString();
@@ -318,6 +326,19 @@ function handleMessage(topic, rawPayload) {
   // Store raw payload for debug endpoint
   DEBUG_RAW_PAYLOADS.unshift({ topic, timestamp: new Date().toISOString(), payload });
   if (DEBUG_RAW_PAYLOADS.length > DEBUG_MAX) DEBUG_RAW_PAYLOADS.length = DEBUG_MAX;
+
+  // Track this topic in the connectivity registry
+  {
+    const sn = (payload && payload.device_info && payload.device_info.device_sn) || null;
+    const lbl = resolveGateway(topic).label;
+    const nowIso = new Date().toISOString();
+    const reg = TOPIC_REGISTRY[topic] || { deviceSn: sn, busLabel: lbl, count: 0, firstSeen: nowIso, lastSeen: nowIso };
+    reg.count++;
+    reg.lastSeen = nowIso;
+    if (sn) reg.deviceSn = sn;
+    reg.busLabel = lbl;
+    TOPIC_REGISTRY[topic] = reg;
+  }
 
   mqttStats.messageCount++;
   mqttStats.lastMessage = Date.now();
@@ -992,6 +1013,31 @@ app.get('/api/debug', (req, res) => {
     description: 'Last 20 raw MQTT JSON payloads (newest first)',
     count: DEBUG_RAW_PAYLOADS.length,
     payloads: DEBUG_RAW_PAYLOADS,
+  });
+});
+
+app.get('/api/debug/topics', (req, res) => {
+  // Connectivity view: which topics/sensors are transmitting and which bus they map to.
+  const now = Date.now();
+  const topics = Object.entries(TOPIC_REGISTRY)
+    .map(([topic, r]) => ({
+      topic,
+      deviceSn: r.deviceSn,
+      busLabel: r.busLabel,
+      count: r.count,
+      firstSeen: r.firstSeen,
+      lastSeen: r.lastSeen,
+      secondsSinceLastSeen: Math.round((now - new Date(r.lastSeen).getTime()) / 1000),
+    }))
+    .sort((a, b) => a.topic.localeCompare(b.topic));
+  // Summarise which configured buses are live
+  const busesSeen = [...new Set(topics.map(t => t.busLabel))];
+  const configuredBuses = [...new Set(GATEWAYS.map(g => g.label))];
+  res.json({
+    description: 'Distinct MQTT topics/sensors seen since boot, with resolved bus label',
+    configuredBuses,
+    busesSeen,
+    topics,
   });
 });
 

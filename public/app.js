@@ -88,13 +88,19 @@ let configStore = {
   },
   dashPassword: CONFIG.dashPassword,
   // Gateway-to-bus mapping: [{topic: 'bus/001', label: '515', route: '101'}, ...]
+  // Bus 515 (first bus): bus/001 (+ bus/002 door merged in via topicMap).
+  // Bus 002 (second bus): bus/003 (+ bus/004 door merged in via topicMap).
   gateways: [
     { topic: 'bus/001', label: '515', route: '' },
+    { topic: 'bus/003', label: '002', route: '' },
   ],
-  // Topic remapping: sensors on bus/002 are physically on the same bus as bus/001 (515).
-  // Maps busBase → canonical busBase so all data merges into one device.
+  // Topic remapping: a bus's second door sensor is physically on the same bus as
+  // its first door. Maps busBase → canonical busBase so doors merge into one device.
+  //   bus/002 -> bus/001  (second door of bus 515)
+  //   bus/004 -> bus/003  (second door of bus 002, if/when added)
   topicMap: {
     'bus/002': 'bus/001',
+    'bus/004': 'bus/003',
   },
 };
 
