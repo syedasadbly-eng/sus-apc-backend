@@ -386,23 +386,29 @@ function handleMessage(topic, rawPayload) {
     return;
   }
 
-  // ---- BOARDINGS & ALIGHTINGS (per-interval deltas) ----
-  // line_periodic_data.total.in / .out are ALREADY deltas for the reporting interval.
-  // Use them DIRECTLY — do NOT compute deltas from cumulative values.
+  // ---- BOARDINGS & ALIGHTINGS (per-event deltas) ----
+  // line_trigger_data is the authoritative per-event counting source. The device
+  // ALSO emits line_periodic_data that re-reports the same movement over a fixed
+  // interval; counting both as separate messages double-counts ridership (this
+  // caused June 2's impossible 1262 boardings). So trigger is primary, and
+  // periodic movement is IGNORED for counting (periodic messages are still kept
+  // for GPS / onboard snapshots, just with zero count delta).
   let deltaIn = 0, deltaOut = 0, msgType = 'unknown';
 
-  if (hasPeriodic) {
-    // Primary source: periodic data is the per-interval delta
-    deltaIn = Number(periodicIn) || 0;
-    deltaOut = Number(periodicOut) || 0;
-    msgType = 'periodic';
-    console.log(`[MQTT] ${busId} (${topic}) periodic: in=${deltaIn} out=${deltaOut}`);
-  } else if (hasTrigger) {
-    // line_trigger_data: real-time single-person events (already per-event)
+  if (hasTrigger) {
+    // Primary source: real-time single-person events (already per-event).
     deltaIn = Number(triggerIn) || 0;
     deltaOut = Number(triggerOut) || 0;
     msgType = 'trigger';
     console.log(`[MQTT] ${busId} (${topic}) trigger: in=${deltaIn} out=${deltaOut}`);
+  } else if (hasPeriodic) {
+    // Periodic data exists but no trigger data on this message: treat it as a
+    // heartbeat only — do NOT count its movement (avoids double-counting the
+    // trigger events that report the same passengers).
+    deltaIn = 0;
+    deltaOut = 0;
+    msgType = 'periodic';
+    console.log(`[MQTT] ${busId} (${topic}) periodic heartbeat (movement ignored for counting)`);
   }
 
   // ---- ONBOARD COUNT (from line_total_data cumulative) ----
@@ -1034,12 +1040,31 @@ app.listen(PORT, () => {
   // change. It was wiping counts on every redeploy/restart, so it has been
   // removed. Data now persists across restarts on the mounted volume.
 
+  // One-time repair: on June 1-2 the device's `periodic` heartbeat messages
+  // carried boarding/alighting movement that the `trigger` events had already
+  // recorded, double-counting ridership (e.g. June 2 showed an impossible 1262
+  // boardings on a 16-seat bus). Triggers are the authoritative per-event
+  // source, so zero out all movement fields on `periodic` records. Heartbeats
+  // are kept as rows (for GPS/onboard snapshots) but contribute no counts.
+  // Idempotent: already-zeroed rows are skipped.
+  try {
+    const zeroed = db.prepare(`
+      UPDATE records
+      SET boardings = 0, alightings = 0, evt_in = 0, evt_out = 0
+      WHERE msg_type = 'periodic'
+        AND (boardings <> 0 OR alightings <> 0 OR evt_in <> 0 OR evt_out <> 0)
+    `).run();
+    if (zeroed.changes > 0) console.log(`[REPAIR] Zeroed movement on ${zeroed.changes} periodic heartbeat records (counts now trigger-only)`);
+  } catch (err) {
+    console.error('[REPAIR] Periodic movement zeroing failed:', err.message);
+  }
+
   // One-time repair: earlier builds wrote physically impossible onboard / occupancy
   // snapshots into raw `records` (e.g. 263, 429 on a 16-seat bus) from device
   // heartbeats. Recompute ONLY the onboard + occupancy columns from the
   // running-tally model (clamp(prev + in - out, 0, capacity)) in timestamp order
-  // per bus, using the per-event deltas. Boarding/alighting counts are left
-  // exactly as logged (per user's decision: fix onboard only, keep counts).
+  // per bus, using the per-event deltas. With periodic movement zeroed above,
+  // the tally is driven purely by trigger events.
   // Idempotent: re-running on already-correct data reproduces the same values.
   try {
     const buses = db.prepare('SELECT DISTINCT bus_id FROM records').all().map(r => r.bus_id);
