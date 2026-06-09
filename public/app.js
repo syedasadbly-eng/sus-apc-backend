@@ -1184,10 +1184,15 @@ function initHourlyFlowChart() {
         { label: 'Bus 419 · Alightings', data: [...zeros], backgroundColor: 'rgba(245, 158, 11, 0.4)', borderRadius: 4, barPercentage: 0.9, categoryPercentage: 0.7, stack: 'bus419' },
         // Combined total boardings (both buses) — faint line overlay so the
         // overall trend stays visible above the per-bus bars.
-        { type: 'line', label: 'Total Boardings', data: [...zeros], borderColor: 'rgba(226, 232, 240, 0.55)', backgroundColor: 'rgba(226, 232, 240, 0.55)', borderWidth: 2, borderDash: [5, 4], tension: 0.35, pointRadius: 0, fill: false, order: 0 },
+        { type: 'line', label: 'Total Boardings', data: [...zeros], borderColor: 'rgba(226, 232, 240, 0.7)', backgroundColor: 'rgba(226, 232, 240, 0.7)', borderWidth: 2.5, borderDash: [5, 4], tension: 0.35, pointRadius: 0, fill: false, order: 0 },
       ],
     },
-    options: chartDefaults('Passengers'),
+    options: {
+      ...chartDefaults('Passengers'),
+      // Sharper on high-DPI displays + a bit taller (lower ratio = bigger height).
+      devicePixelRatio: Math.max(2, window.devicePixelRatio || 1),
+      aspectRatio: 2.4,
+    },
   });
   // Load data immediately and auto-refresh every 30s
   refreshHourlyFlowChart();
