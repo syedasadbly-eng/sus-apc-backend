@@ -1176,8 +1176,15 @@ function initHourlyFlowChart() {
     data: {
       labels: labels24,
       datasets: [
-        { label: 'Boardings', data: [...zeros], backgroundColor: 'rgba(59, 130, 246, 0.8)', borderRadius: 4, barPercentage: 0.7 },
-        { label: 'Alightings', data: [...zeros], backgroundColor: 'rgba(16, 185, 129, 0.8)', borderRadius: 4, barPercentage: 0.7 },
+        // Per-bus boardings (515 = blue family, 419 = amber family). Stacked
+        // within each bus group so the bar height reads as that bus's boardings.
+        { label: 'Bus 515 · Boardings', data: [...zeros], backgroundColor: 'rgba(59, 130, 246, 0.85)', borderRadius: 4, barPercentage: 0.9, categoryPercentage: 0.7, stack: 'bus515' },
+        { label: 'Bus 515 · Alightings', data: [...zeros], backgroundColor: 'rgba(59, 130, 246, 0.35)', borderRadius: 4, barPercentage: 0.9, categoryPercentage: 0.7, stack: 'bus515' },
+        { label: 'Bus 419 · Boardings', data: [...zeros], backgroundColor: 'rgba(245, 158, 11, 0.9)', borderRadius: 4, barPercentage: 0.9, categoryPercentage: 0.7, stack: 'bus419' },
+        { label: 'Bus 419 · Alightings', data: [...zeros], backgroundColor: 'rgba(245, 158, 11, 0.4)', borderRadius: 4, barPercentage: 0.9, categoryPercentage: 0.7, stack: 'bus419' },
+        // Combined total boardings (both buses) — faint line overlay so the
+        // overall trend stays visible above the per-bus bars.
+        { type: 'line', label: 'Total Boardings', data: [...zeros], borderColor: 'rgba(226, 232, 240, 0.55)', backgroundColor: 'rgba(226, 232, 240, 0.55)', borderWidth: 2, borderDash: [5, 4], tension: 0.35, pointRadius: 0, fill: false, order: 0 },
       ],
     },
     options: chartDefaults('Passengers'),
@@ -1220,30 +1227,40 @@ async function refreshHourlyFlowChart() {
     const today = displayDateStr(now); // Central calendar date, matches backend
     const apiData = await apiFetch('/api/hourly', { date: today });
     const labels = Array.from({length: 24}, (_, i) => `${String(i).padStart(2, '0')}:00`);
-    const hourMap = {};
+    // Per-bus hour maps keyed by bus label, so each bus gets its own series.
+    const perBus = { '515': {}, '419': {} };
     let hasAny = false;
     if (apiData && apiData.hourly && apiData.hourly.length > 0) {
       hasAny = true;
       apiData.hourly.forEach(row => {
         // Remap backend UTC hours into the display timezone so bars line up with the clock.
         const dh = utcHourToDisplayHour(row.hour);
-        if (!hourMap[dh]) hourMap[dh] = { boardings: 0, alightings: 0 };
-        hourMap[dh].boardings += row.boardings || 0;
-        hourMap[dh].alightings += row.alightings || 0;
+        const bus = perBus[row.bus_id] ? row.bus_id : null;
+        if (!bus) return; // ignore unexpected labels
+        if (!perBus[bus][dh]) perBus[bus][dh] = { boardings: 0, alightings: 0 };
+        perBus[bus][dh].boardings += row.boardings || 0;
+        perBus[bus][dh].alightings += row.alightings || 0;
       });
     }
-    let boardings, alightings;
+    const series = (bus, key) => Array.from({length: 24}, (_, h) => perBus[bus][h]?.[key] || 0);
+    let b515, a515, b419, a419;
     if (hasAny) {
-      boardings = Array.from({length: 24}, (_, h) => hourMap[h]?.boardings || 0);
-      alightings = Array.from({length: 24}, (_, h) => hourMap[h]?.alightings || 0);
+      b515 = series('515', 'boardings'); a515 = series('515', 'alightings');
+      b419 = series('419', 'boardings'); a419 = series('419', 'alightings');
     } else {
-      boardings = labels.map(h => hourlyBuckets[h]?.boardings || 0);
-      alightings = labels.map(h => hourlyBuckets[h]?.alightings || 0);
+      // Fallback to live in-memory buckets (not bus-split): show under 515.
+      b515 = labels.map(h => hourlyBuckets[h]?.boardings || 0);
+      a515 = labels.map(h => hourlyBuckets[h]?.alightings || 0);
+      b419 = new Array(24).fill(0); a419 = new Array(24).fill(0);
     }
+    const totalBoardings = b515.map((v, i) => v + b419[i]);
     setHourlyFlowAxis('Hour of day');
     charts.hourlyFlow.data.labels = labels;
-    charts.hourlyFlow.data.datasets[0].data = boardings;
-    charts.hourlyFlow.data.datasets[1].data = alightings;
+    charts.hourlyFlow.data.datasets[0].data = b515;
+    charts.hourlyFlow.data.datasets[1].data = a515;
+    charts.hourlyFlow.data.datasets[2].data = b419;
+    charts.hourlyFlow.data.datasets[3].data = a419;
+    charts.hourlyFlow.data.datasets[4].data = totalBoardings;
     charts.hourlyFlow.update('active');
     return;
   }
@@ -1260,12 +1277,15 @@ async function refreshHourlyFlowChart() {
   const to = dates[dates.length - 1];
 
   const dailyData = await apiFetch('/api/daily', { from, to });
-  const dataMap = {};
+  // Per-bus per-day maps so week/month also splits 515 vs 419.
+  const perBus = { '515': {}, '419': {} };
   if (dailyData && dailyData.daily) {
     dailyData.daily.forEach(r => {
-      if (!dataMap[r.date]) dataMap[r.date] = { boardings: 0, alightings: 0 };
-      dataMap[r.date].boardings += r.total_in || 0;
-      dataMap[r.date].alightings += r.total_out || 0;
+      const bus = perBus[r.bus_id] ? r.bus_id : null;
+      if (!bus) return;
+      if (!perBus[bus][r.date]) perBus[bus][r.date] = { boardings: 0, alightings: 0 };
+      perBus[bus][r.date].boardings += r.total_in || 0;
+      perBus[bus][r.date].alightings += r.total_out || 0;
     });
   }
 
@@ -1274,13 +1294,19 @@ async function refreshHourlyFlowChart() {
     const dd = new Date(dt + 'T12:00:00Z');
     return dd.toLocaleDateString('en-US', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' });
   });
-  const boardings = dates.map(dt => dataMap[dt]?.boardings || 0);
-  const alightings = dates.map(dt => dataMap[dt]?.alightings || 0);
+  const b515 = dates.map(dt => perBus['515'][dt]?.boardings || 0);
+  const a515 = dates.map(dt => perBus['515'][dt]?.alightings || 0);
+  const b419 = dates.map(dt => perBus['419'][dt]?.boardings || 0);
+  const a419 = dates.map(dt => perBus['419'][dt]?.alightings || 0);
+  const totalBoardings = b515.map((v, i) => v + b419[i]);
 
   setHourlyFlowAxis('Day');
   charts.hourlyFlow.data.labels = labels;
-  charts.hourlyFlow.data.datasets[0].data = boardings;
-  charts.hourlyFlow.data.datasets[1].data = alightings;
+  charts.hourlyFlow.data.datasets[0].data = b515;
+  charts.hourlyFlow.data.datasets[1].data = a515;
+  charts.hourlyFlow.data.datasets[2].data = b419;
+  charts.hourlyFlow.data.datasets[3].data = a419;
+  charts.hourlyFlow.data.datasets[4].data = totalBoardings;
   charts.hourlyFlow.update('active');
 }
 
