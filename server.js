@@ -37,12 +37,12 @@ const MQTT_CONFIG = {
 
 // Gateway / bus mapping — multiple topics can map to the same bus (multi-door)
 // Bus 515 (first bus): bus/001 = door 1, bus/002 = door 2 (merged into one record).
-// Bus 002 (second bus): bus/003 (+ bus/004 if it gains a second door later).
+// Bus 419 (second bus): bus/003 (+ bus/004 if it gains a second door later).
 const GATEWAYS = [
   { topic: 'bus/001', label: '515', route: '' },
   { topic: 'bus/002', label: '515', route: '' },
-  { topic: 'bus/003', label: '002', route: '' },
-  { topic: 'bus/004', label: '002', route: '' },
+  { topic: 'bus/003', label: '419', route: '' },
+  { topic: 'bus/004', label: '419', route: '' },
 ];
 
 // Last-known GPS fallback (UR35 indoors, status 52)
@@ -182,6 +182,49 @@ try {
   }
 } catch (err) {
   console.error('[MIGRATE] Label rename failed:', err.message);
+}
+
+// ----- One-time label migration: 002 -> 419 -----
+// The second bus's canonical label was renamed from 002 to 419. Carry existing
+// history and the persisted running-onboard tally over to the new label so
+// nothing is lost. Idempotent: only runs while old-label rows still exist.
+try {
+  const OLD_LABEL = '002';
+  const NEW_LABEL = '419';
+  const cnt = db.prepare('SELECT COUNT(*) AS n FROM records WHERE bus_id = ?').get(OLD_LABEL).n;
+  const stateCnt = db.prepare('SELECT COUNT(*) AS n FROM bus_state WHERE bus_id = ?').get(OLD_LABEL).n;
+  if (cnt > 0 || stateCnt > 0) {
+    const migrate = db.transaction(() => {
+      db.prepare('UPDATE records SET bus_id = ? WHERE bus_id = ?').run(NEW_LABEL, OLD_LABEL);
+      db.prepare('UPDATE hourly_summary SET bus_id = ? WHERE bus_id = ?').run(NEW_LABEL, OLD_LABEL);
+      // daily_summary has UNIQUE(date,bus_id): merge instead of blind rename.
+      db.prepare(`
+        INSERT INTO daily_summary (date, bus_id, total_in, total_out, peak_onboard, peak_hour, first_seen, last_seen, avg_occupancy)
+        SELECT date, ?, total_in, total_out, peak_onboard, peak_hour, first_seen, last_seen, avg_occupancy
+        FROM daily_summary WHERE bus_id = ?
+        ON CONFLICT(date, bus_id) DO UPDATE SET
+          total_in      = daily_summary.total_in  + excluded.total_in,
+          total_out     = daily_summary.total_out + excluded.total_out,
+          peak_onboard  = MAX(daily_summary.peak_onboard, excluded.peak_onboard),
+          last_seen     = excluded.last_seen,
+          avg_occupancy = (daily_summary.avg_occupancy + excluded.avg_occupancy) / 2
+      `).run(NEW_LABEL, OLD_LABEL);
+      db.prepare('DELETE FROM daily_summary WHERE bus_id = ?').run(OLD_LABEL);
+      // bus_state PRIMARY KEY: keep the larger running value if both exist.
+      db.prepare(`
+        INSERT INTO bus_state (bus_id, running_onboard, updated_at)
+        SELECT ?, running_onboard, updated_at FROM bus_state WHERE bus_id = ?
+        ON CONFLICT(bus_id) DO UPDATE SET
+          running_onboard = MAX(bus_state.running_onboard, excluded.running_onboard),
+          updated_at      = excluded.updated_at
+      `).run(NEW_LABEL, OLD_LABEL);
+      db.prepare('DELETE FROM bus_state WHERE bus_id = ?').run(OLD_LABEL);
+    });
+    migrate();
+    console.log(`[MIGRATE] Renamed bus label ${OLD_LABEL} -> ${NEW_LABEL} (${cnt} records, ${stateCnt} state rows)`);
+  }
+} catch (err) {
+  console.error('[MIGRATE] Label rename failed (002->419):', err.message);
 }
 
 // Prepared statements for fast inserts
