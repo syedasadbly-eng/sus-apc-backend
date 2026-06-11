@@ -1394,13 +1394,22 @@ function initOverviewAnalyticsCharts() {
       options: chartDefaults('Passenger on'),
     });
 
-    // Wire the per-bus selector. Updating the filter re-renders just this chart
-    // off the most recent /api/hourly payload — no extra request needed.
+    // Wire the per-bus and per-period selectors. The Passenger On chart owns
+    // its own fetcher (refreshPassengerOnChart) because Weekly/Monthly use
+    // /api/daily, not /api/hourly. Changes always re-fetch + re-render this
+    // chart only; the other Overview charts are untouched.
     const busSelect = document.getElementById('passengerOnBusFilter');
     if (busSelect) {
       busSelect.addEventListener('change', () => {
         _passengerOnBusFilter = busSelect.value || 'all';
-        refreshNetAndCumulativeCharts();
+        refreshPassengerOnChart();
+      });
+    }
+    const periodSelect = document.getElementById('passengerOnPeriodFilter');
+    if (periodSelect) {
+      periodSelect.addEventListener('change', () => {
+        _passengerOnPeriod = periodSelect.value || 'daily';
+        refreshPassengerOnChart();
       });
     }
   }
@@ -1408,6 +1417,10 @@ function initOverviewAnalyticsCharts() {
   // Initial paint + periodic refresh of the hour-based charts from the DB.
   refreshNetAndCumulativeCharts();
   setInterval(() => refreshNetAndCumulativeCharts(), 30000);
+
+  // Separate refresh loop for the Passenger On chart (covers Daily/Weekly/Monthly).
+  refreshPassengerOnChart();
+  setInterval(() => refreshPassengerOnChart(), 30000);
 }
 
 // Update the live gauge from current fleet occupancy (called on every MQTT tick).
@@ -1432,15 +1445,11 @@ function updateOverviewAnalytics() {
 // Pull today's hourly data from the API and render the net-flow bars and the
 // cumulative running-load line. Falls back to live MQTT buckets if API is down.
 async function refreshNetAndCumulativeCharts() {
-  if (!charts.netFlow && !charts.cumulativeLoad && !charts.passengerOn) return;
+  if (!charts.netFlow && !charts.cumulativeLoad) return;
   const today = displayDateStr();
   const apiData = await apiFetch('/api/hourly', { date: today });
   const board = new Array(24).fill(0);
   const alight = new Array(24).fill(0);
-  // Per-bus boardings buckets so the Passenger On chart can be filtered without
-  // refetching. The net-flow and cumulative-load charts continue to use the
-  // fleet-wide board/alight arrays.
-  const boardByBus = {};
   let hasAny = false;
   if (apiData && apiData.hourly && apiData.hourly.length > 0) {
     hasAny = true;
@@ -1448,11 +1457,6 @@ async function refreshNetAndCumulativeCharts() {
       const dh = utcHourToDisplayHour(row.hour);
       board[dh] += row.boardings || 0;
       alight[dh] += row.alightings || 0;
-      const bid = row.bus_id;
-      if (bid) {
-        if (!boardByBus[bid]) boardByBus[bid] = new Array(24).fill(0);
-        boardByBus[bid][dh] += row.boardings || 0;
-      }
     });
   } else {
     // Live fallback from in-browser hourly buckets.
@@ -1486,21 +1490,8 @@ async function refreshNetAndCumulativeCharts() {
     charts.netFlow.data.datasets[0].backgroundColor = net.map(v => v >= 0 ? 'rgba(59,130,246,0.85)' : 'rgba(16,185,129,0.85)');
     charts.netFlow.update('active');
   }
-  if (charts.passengerOn) {
-    // Pick the dataset for the currently selected bus (or fleet-wide).
-    const sel = _passengerOnBusFilter || 'all';
-    const series = sel === 'all'
-      ? board
-      : (boardByBus[sel] || new Array(24).fill(0));
-    charts.passengerOn.data.datasets[0].data = series;
-    charts.passengerOn.update('active');
-    const sub = document.getElementById('passengerOnSubtitle');
-    if (sub) {
-      sub.textContent = sel === 'all'
-        ? 'Boardings only — all buses'
-        : `Boardings only — Bus ${sel}`;
-    }
-  }
+  // Note: the Passenger On chart is driven by refreshPassengerOnChart() because
+  // Weekly/Monthly periods use /api/daily rather than /api/hourly.
   if (charts.cumulativeLoad) {
     // Only draw the line up to the last hour with activity so the trailing
     // hours don't show a flat zero for a day still in progress.
@@ -1835,8 +1826,108 @@ function getISOWeek(date) {
 let _occHourlyCache = null;
 
 // Currently selected bus filter for the Passenger On Counts chart. 'all' shows
-// the fleet-wide series; any other value filters /api/hourly rows by bus_id.
+// the fleet-wide series; any other value filters rows by bus_id.
 let _passengerOnBusFilter = 'all';
+
+// Currently selected period for the Passenger On Counts chart.
+// 'daily'   — 24 hourly bars for today (uses /api/hourly).
+// 'weekly'  — 7 daily bars for the last 7 days (uses /api/daily).
+// 'monthly' — ~30 daily bars for the last 30 days (uses /api/daily).
+let _passengerOnPeriod = 'daily';
+
+// Shift a YYYY-MM-DD date string in DISPLAY_TZ by N days (negative = past).
+function shiftDisplayDate(daysOffset) {
+  const today = displayDateStr();
+  const [y, m, d] = today.split('-').map(Number);
+  // Use UTC math on a date constructed from the display-zone Y/M/D to avoid
+  // off-by-one issues when the local zone differs from the display zone.
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + daysOffset);
+  const yy = dt.getUTCFullYear();
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getUTCDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}
+
+// Build a short label for a YYYY-MM-DD date, e.g. '9 Jun'.
+function shortDateLabel(yyyymmdd) {
+  const [y, m, d] = yyyymmdd.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+}
+
+// Refresh the Passenger On Counts chart based on the current period + bus filter.
+// Daily → hourly bars from /api/hourly. Weekly/Monthly → daily bars from /api/daily.
+async function refreshPassengerOnChart() {
+  if (!charts.passengerOn) return;
+  const period = _passengerOnPeriod || 'daily';
+  const busSel = _passengerOnBusFilter || 'all';
+  const busFilterArg = busSel === 'all' ? null : busSel;
+
+  let labels = [];
+  let series = [];
+
+  if (period === 'daily') {
+    // Hourly bars for today.
+    const today = displayDateStr();
+    const apiData = await apiFetch('/api/hourly', { date: today });
+    labels = Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2, '0')}:00`);
+    series = new Array(24).fill(0);
+    if (apiData && Array.isArray(apiData.hourly)) {
+      apiData.hourly.forEach(row => {
+        if (busFilterArg && row.bus_id !== busFilterArg) return;
+        const dh = utcHourToDisplayHour(row.hour);
+        series[dh] += row.boardings || 0;
+      });
+    }
+  } else {
+    // Weekly = last 7 days incl. today; Monthly = last 30 days incl. today.
+    const span = period === 'weekly' ? 7 : 30;
+    const from = shiftDisplayDate(-(span - 1));
+    const to = displayDateStr();
+    const params = { from, to };
+    if (busFilterArg) params.bus_id = busFilterArg;
+    const apiData = await apiFetch('/api/daily', params);
+    // Pre-fill every day in the window so empty days show as 0 rather than gaps.
+    const totals = {};
+    for (let i = 0; i < span; i++) {
+      const dstr = shiftDisplayDate(-(span - 1 - i));
+      totals[dstr] = 0;
+    }
+    if (apiData && Array.isArray(apiData.daily)) {
+      apiData.daily.forEach(row => {
+        if (busFilterArg && row.bus_id !== busFilterArg) return;
+        if (!(row.date in totals)) return;
+        totals[row.date] += row.total_in || 0;
+      });
+    }
+    labels = Object.keys(totals).map(shortDateLabel);
+    series = Object.values(totals);
+  }
+
+  charts.passengerOn.data.labels = labels;
+  charts.passengerOn.data.datasets[0].data = series;
+  charts.passengerOn.update('active');
+
+  // Update title + subtitle to reflect the current period and bus.
+  const titleEl = document.getElementById('passengerOnTitle');
+  const subEl = document.getElementById('passengerOnSubtitle');
+  const titleByPeriod = {
+    daily: 'Passenger On Counts by Hour',
+    weekly: 'Passenger On Counts — Last 7 Days',
+    monthly: 'Passenger On Counts — Last 30 Days',
+  };
+  const subPeriod = {
+    daily: 'Boardings only',
+    weekly: 'Boardings only — last 7 days',
+    monthly: 'Boardings only — last 30 days',
+  };
+  if (titleEl) titleEl.textContent = titleByPeriod[period] || titleByPeriod.daily;
+  if (subEl) {
+    const busPart = busSel === 'all' ? 'all buses' : `Bus ${busSel}`;
+    subEl.textContent = `${subPeriod[period] || subPeriod.daily} — ${busPart}`;
+  }
+}
 
 // Fetch today's hourly board/alight series from the API into _occHourlyCache.
 async function refreshOccHourlyCache() {

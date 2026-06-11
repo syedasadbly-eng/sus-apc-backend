@@ -419,10 +419,15 @@
         <div class="chart-panel">
           <div class="chart-header">
             <div>
-              <div class="chart-title">Passenger On Counts by Hour</div>
+              <div class="chart-title" id="passengerOnTitle">Passenger On Counts by Hour</div>
               <div class="chart-subtitle" id="passengerOnSubtitle">Boardings only — all buses</div>
             </div>
             <div class="chart-actions">
+              <select id="passengerOnPeriodFilter" class="filter-select" aria-label="Period for passenger-on chart">
+                <option value="daily" selected>Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+              </select>
               <select id="passengerOnBusFilter" class="filter-select" aria-label="Filter passenger-on chart by bus">
                 <option value="all" selected>All buses</option>
                 <option value="515">Bus 515</option>
