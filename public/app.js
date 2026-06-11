@@ -1394,8 +1394,8 @@ function initOverviewAnalyticsCharts() {
           label: 'Passenger on',
           data: new Array(24).fill(0),
           backgroundColor: premiumGradient,
-          // Champagne-tinted hover for a quiet luxury accent against the indigo.
-          hoverBackgroundColor: 'rgba(212, 184, 150, 0.92)',
+          // Rich gold hover — warm metallic accent against the deep indigo.
+          hoverBackgroundColor: 'rgba(212, 175, 55, 0.95)',
           borderColor: 'rgba(165, 142, 209, 0.45)',
           borderWidth: 0,
           borderRadius: 5,
