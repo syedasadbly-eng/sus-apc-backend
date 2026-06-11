@@ -1379,11 +1379,13 @@ function initOverviewAnalyticsCharts() {
   const pctx = document.getElementById('chartPassengerOn');
   if (pctx) {
     const pctxCtx = pctx.getContext('2d');
-    // Vertical gradient fill: brighter purple at the top, fading toward the
-    // baseline. Built once and re-used by every dataset update.
-    const purpleGradient = pctxCtx.createLinearGradient(0, 0, 0, 420);
-    purpleGradient.addColorStop(0, 'rgba(168, 85, 247, 0.95)');
-    purpleGradient.addColorStop(1, 'rgba(124, 58, 237, 0.55)');
+    // Refined indigo-amethyst vertical gradient — deeper, more restrained than
+    // the original Tailwind violet. Reads as 'editorial' rather than 'consumer
+    // app' against the dark surface.
+    const premiumGradient = pctxCtx.createLinearGradient(0, 0, 0, 420);
+    premiumGradient.addColorStop(0.00, 'rgba(139, 116, 209, 0.92)'); // soft amethyst top
+    premiumGradient.addColorStop(0.55, 'rgba(91, 73, 168, 0.85)');   // muted indigo
+    premiumGradient.addColorStop(1.00, 'rgba(49, 46, 129, 0.55)');   // deep navy-indigo base
     charts.passengerOn = new Chart(pctxCtx, {
       type: 'bar',
       data: {
@@ -1391,11 +1393,12 @@ function initOverviewAnalyticsCharts() {
         datasets: [{
           label: 'Passenger on',
           data: new Array(24).fill(0),
-          backgroundColor: purpleGradient,
-          hoverBackgroundColor: 'rgba(196, 132, 252, 0.95)',
-          borderColor: 'rgba(168, 85, 247, 1)',
+          backgroundColor: premiumGradient,
+          // Champagne-tinted hover for a quiet luxury accent against the indigo.
+          hoverBackgroundColor: 'rgba(212, 184, 150, 0.92)',
+          borderColor: 'rgba(165, 142, 209, 0.45)',
           borderWidth: 0,
-          borderRadius: 6,
+          borderRadius: 5,
           borderSkipped: false,
           barPercentage: 0.78,
           categoryPercentage: 0.85,
@@ -1423,7 +1426,7 @@ function initOverviewAnalyticsCharts() {
             grid: { display: false, drawBorder: false },
             border: { display: false },
             ticks: {
-              color: '#9aa0c0',
+              color: '#8a8ea8',
               font: { size: 11, family: 'Inter', weight: '500' },
               maxRotation: 0,
               autoSkip: true,
@@ -1432,10 +1435,10 @@ function initOverviewAnalyticsCharts() {
           },
           y: {
             beginAtZero: true,
-            grid: { color: 'rgba(255,255,255,0.05)', drawBorder: false, drawTicks: false },
+            grid: { color: 'rgba(165, 142, 209, 0.07)', drawBorder: false, drawTicks: false },
             border: { display: false },
             ticks: {
-              color: '#9aa0c0',
+              color: '#8a8ea8',
               font: { size: 11, family: 'Inter', weight: '500' },
               padding: 8,
               precision: 0,
@@ -1444,8 +1447,8 @@ function initOverviewAnalyticsCharts() {
             title: {
               display: true,
               text: 'Boardings',
-              color: '#6b6f8c',
-              font: { size: 11, family: 'Inter', weight: '600' },
+              color: '#6a6e8a',
+              font: { size: 10, family: 'Inter', weight: '600' },
               padding: { bottom: 8 },
             },
           },
