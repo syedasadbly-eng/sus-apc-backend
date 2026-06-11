@@ -1500,3 +1500,53 @@ html, body {
   background: rgba(245, 158, 11, 0.15);
   color: #f59e0b;
 }
+
+/* ==========================================================================
+   Feature chart panel — used for the Passenger On Counts hero card.
+   Slightly stronger visual presence, larger title, a thin purple accent at
+   the top, and a fixed-height canvas wrap so the chart renders large and
+   crisp regardless of viewport width.
+   ========================================================================== */
+.chart-panel-feature {
+  position: relative;
+  border-color: rgba(168, 85, 247, 0.28);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.02) inset,
+              0 12px 32px -16px rgba(168, 85, 247, 0.35);
+}
+
+.chart-panel-feature::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, rgba(168, 85, 247, 0.85), rgba(124, 58, 237, 0.65) 60%, rgba(168, 85, 247, 0));
+  pointer-events: none;
+}
+
+.chart-panel-feature .chart-header {
+  padding-top: calc(var(--space-4) + 2px);
+}
+
+.chart-title.chart-title-lg {
+  font-size: var(--text-base, 15px);
+  font-weight: 700;
+  letter-spacing: -0.005em;
+}
+
+.chart-body.chart-body-feature {
+  padding: var(--space-5) var(--space-5) var(--space-4);
+}
+
+.chart-body.chart-body-feature .chart-feature-canvas {
+  display: block;
+  width: 100% !important;
+  height: 420px !important;
+}
+
+@media (max-width: 768px) {
+  .chart-body.chart-body-feature .chart-feature-canvas {
+    height: 320px !important;
+  }
+}

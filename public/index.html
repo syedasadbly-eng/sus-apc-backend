@@ -344,6 +344,33 @@
         </div>
       </div>
 
+      <!-- Passenger On Counts (feature row, sits directly under the main flow chart) -->
+      <div class="chart-grid" style="margin-top:var(--space-4)">
+        <div class="chart-panel chart-panel-feature">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title chart-title-lg" id="passengerOnTitle">Passenger On Counts by Hour</div>
+              <div class="chart-subtitle" id="passengerOnSubtitle">Boardings only — all buses</div>
+            </div>
+            <div class="chart-actions">
+              <select id="passengerOnPeriodFilter" class="filter-select" aria-label="Period for passenger-on chart">
+                <option value="daily" selected>Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+              </select>
+              <select id="passengerOnBusFilter" class="filter-select" aria-label="Filter passenger-on chart by bus">
+                <option value="all" selected>All buses</option>
+                <option value="515">Bus 515</option>
+                <option value="419">Bus 419</option>
+              </select>
+            </div>
+          </div>
+          <div class="chart-body chart-body-feature">
+            <canvas id="chartPassengerOn" class="chart-feature-canvas"></canvas>
+          </div>
+        </div>
+      </div>
+
       <!-- Map + Fleet List -->
       <div class="chart-grid map-charts" style="margin-top:var(--space-4)">
         <div class="chart-panel">
@@ -403,8 +430,8 @@
         </div>
       </div>
 
-      <!-- Net Passenger Flow by Hour + Passenger On Counts by Hour -->
-      <div class="chart-grid cols-2" style="margin-top:var(--space-4)">
+      <!-- Net Passenger Flow by Hour -->
+      <div class="chart-grid" style="margin-top:var(--space-4)">
         <div class="chart-panel">
           <div class="chart-header">
             <div>
@@ -414,29 +441,6 @@
           </div>
           <div class="chart-body">
             <canvas id="chartNetFlow" height="240"></canvas>
-          </div>
-        </div>
-        <div class="chart-panel">
-          <div class="chart-header">
-            <div>
-              <div class="chart-title" id="passengerOnTitle">Passenger On Counts by Hour</div>
-              <div class="chart-subtitle" id="passengerOnSubtitle">Boardings only — all buses</div>
-            </div>
-            <div class="chart-actions">
-              <select id="passengerOnPeriodFilter" class="filter-select" aria-label="Period for passenger-on chart">
-                <option value="daily" selected>Daily</option>
-                <option value="weekly">Weekly</option>
-                <option value="monthly">Monthly</option>
-              </select>
-              <select id="passengerOnBusFilter" class="filter-select" aria-label="Filter passenger-on chart by bus">
-                <option value="all" selected>All buses</option>
-                <option value="515">Bus 515</option>
-                <option value="419">Bus 419</option>
-              </select>
-            </div>
-          </div>
-          <div class="chart-body">
-            <canvas id="chartPassengerOn" height="240"></canvas>
           </div>
         </div>
       </div>

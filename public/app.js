@@ -1374,24 +1374,83 @@ function initOverviewAnalyticsCharts() {
     });
   }
 
-  // 4) Passenger On Counts by Hour — boardings only, in a distinct purple.
+  // 4) Passenger On Counts — the dashboard's hero card for boardings.
+  // Larger, taller, hi-DPI canvas with a purple gradient fill and crisp axes.
   const pctx = document.getElementById('chartPassengerOn');
   if (pctx) {
-    charts.passengerOn = new Chart(pctx.getContext('2d'), {
+    const pctxCtx = pctx.getContext('2d');
+    // Vertical gradient fill: brighter purple at the top, fading toward the
+    // baseline. Built once and re-used by every dataset update.
+    const purpleGradient = pctxCtx.createLinearGradient(0, 0, 0, 420);
+    purpleGradient.addColorStop(0, 'rgba(168, 85, 247, 0.95)');
+    purpleGradient.addColorStop(1, 'rgba(124, 58, 237, 0.55)');
+    charts.passengerOn = new Chart(pctxCtx, {
       type: 'bar',
       data: {
         labels: Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2, '0')}:00`),
         datasets: [{
           label: 'Passenger on',
           data: new Array(24).fill(0),
-          backgroundColor: 'rgba(168, 85, 247, 0.85)',
+          backgroundColor: purpleGradient,
+          hoverBackgroundColor: 'rgba(196, 132, 252, 0.95)',
           borderColor: 'rgba(168, 85, 247, 1)',
-          borderWidth: 1,
-          borderRadius: 4,
-          barPercentage: 0.7,
+          borderWidth: 0,
+          borderRadius: 6,
+          borderSkipped: false,
+          barPercentage: 0.78,
+          categoryPercentage: 0.85,
         }],
       },
-      options: chartDefaults('Passenger on'),
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        // Render at the screen's native pixel density so bars and text stay crisp.
+        devicePixelRatio: Math.max(2, window.devicePixelRatio || 1),
+        interaction: { mode: 'index', intersect: false },
+        animation: { duration: 600, easing: 'easeOutCubic' },
+        layout: { padding: { top: 8, right: 8, bottom: 0, left: 0 } },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            ...tooltipDefaults(),
+            callbacks: {
+              label: (ctx) => ` ${ctx.parsed.y.toLocaleString()} boardings`,
+            },
+          },
+        },
+        scales: {
+          x: {
+            grid: { display: false, drawBorder: false },
+            border: { display: false },
+            ticks: {
+              color: '#9aa0c0',
+              font: { size: 11, family: 'Inter', weight: '500' },
+              maxRotation: 0,
+              autoSkip: true,
+              autoSkipPadding: 12,
+            },
+          },
+          y: {
+            beginAtZero: true,
+            grid: { color: 'rgba(255,255,255,0.05)', drawBorder: false, drawTicks: false },
+            border: { display: false },
+            ticks: {
+              color: '#9aa0c0',
+              font: { size: 11, family: 'Inter', weight: '500' },
+              padding: 8,
+              precision: 0,
+              callback: (v) => Number(v).toLocaleString(),
+            },
+            title: {
+              display: true,
+              text: 'Boardings',
+              color: '#6b6f8c',
+              font: { size: 11, family: 'Inter', weight: '600' },
+              padding: { bottom: 8 },
+            },
+          },
+        },
+      },
     });
 
     // Wire the per-bus and per-period selectors. The Passenger On chart owns
