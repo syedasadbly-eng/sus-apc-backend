@@ -1374,6 +1374,27 @@ function initOverviewAnalyticsCharts() {
     });
   }
 
+  // 4) Passenger On Counts by Hour — boardings only, in a distinct purple.
+  const pctx = document.getElementById('chartPassengerOn');
+  if (pctx) {
+    charts.passengerOn = new Chart(pctx.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2, '0')}:00`),
+        datasets: [{
+          label: 'Passenger on',
+          data: new Array(24).fill(0),
+          backgroundColor: 'rgba(168, 85, 247, 0.85)',
+          borderColor: 'rgba(168, 85, 247, 1)',
+          borderWidth: 1,
+          borderRadius: 4,
+          barPercentage: 0.7,
+        }],
+      },
+      options: chartDefaults('Passenger on'),
+    });
+  }
+
   // Initial paint + periodic refresh of the hour-based charts from the DB.
   refreshNetAndCumulativeCharts();
   setInterval(() => refreshNetAndCumulativeCharts(), 30000);
@@ -1401,7 +1422,7 @@ function updateOverviewAnalytics() {
 // Pull today's hourly data from the API and render the net-flow bars and the
 // cumulative running-load line. Falls back to live MQTT buckets if API is down.
 async function refreshNetAndCumulativeCharts() {
-  if (!charts.netFlow && !charts.cumulativeLoad) return;
+  if (!charts.netFlow && !charts.cumulativeLoad && !charts.passengerOn) return;
   const today = displayDateStr();
   const apiData = await apiFetch('/api/hourly', { date: today });
   const board = new Array(24).fill(0);
@@ -1445,6 +1466,10 @@ async function refreshNetAndCumulativeCharts() {
     // Positive net = filling (blue), negative = emptying (green).
     charts.netFlow.data.datasets[0].backgroundColor = net.map(v => v >= 0 ? 'rgba(59,130,246,0.85)' : 'rgba(16,185,129,0.85)');
     charts.netFlow.update('active');
+  }
+  if (charts.passengerOn) {
+    charts.passengerOn.data.datasets[0].data = board;
+    charts.passengerOn.update('active');
   }
   if (charts.cumulativeLoad) {
     // Only draw the line up to the last hour with activity so the trailing

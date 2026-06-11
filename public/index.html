@@ -403,8 +403,8 @@
         </div>
       </div>
 
-      <!-- Net Passenger Flow by Hour -->
-      <div class="chart-grid" style="margin-top:var(--space-4)">
+      <!-- Net Passenger Flow by Hour + Passenger On Counts by Hour -->
+      <div class="chart-grid cols-2" style="margin-top:var(--space-4)">
         <div class="chart-panel">
           <div class="chart-header">
             <div>
@@ -414,6 +414,17 @@
           </div>
           <div class="chart-body">
             <canvas id="chartNetFlow" height="240"></canvas>
+          </div>
+        </div>
+        <div class="chart-panel">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Passenger On Counts by Hour</div>
+              <div class="chart-subtitle">Boardings only — passengers boarding each hour</div>
+            </div>
+          </div>
+          <div class="chart-body">
+            <canvas id="chartPassengerOn" height="240"></canvas>
           </div>
         </div>
       </div>
