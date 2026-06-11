@@ -420,7 +420,14 @@
           <div class="chart-header">
             <div>
               <div class="chart-title">Passenger On Counts by Hour</div>
-              <div class="chart-subtitle">Boardings only — passengers boarding each hour</div>
+              <div class="chart-subtitle" id="passengerOnSubtitle">Boardings only — all buses</div>
+            </div>
+            <div class="chart-actions">
+              <select id="passengerOnBusFilter" class="filter-select" aria-label="Filter passenger-on chart by bus">
+                <option value="all" selected>All buses</option>
+                <option value="515">Bus 515</option>
+                <option value="419">Bus 419</option>
+              </select>
             </div>
           </div>
           <div class="chart-body">

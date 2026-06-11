@@ -1393,6 +1393,16 @@ function initOverviewAnalyticsCharts() {
       },
       options: chartDefaults('Passenger on'),
     });
+
+    // Wire the per-bus selector. Updating the filter re-renders just this chart
+    // off the most recent /api/hourly payload — no extra request needed.
+    const busSelect = document.getElementById('passengerOnBusFilter');
+    if (busSelect) {
+      busSelect.addEventListener('change', () => {
+        _passengerOnBusFilter = busSelect.value || 'all';
+        refreshNetAndCumulativeCharts();
+      });
+    }
   }
 
   // Initial paint + periodic refresh of the hour-based charts from the DB.
@@ -1427,6 +1437,10 @@ async function refreshNetAndCumulativeCharts() {
   const apiData = await apiFetch('/api/hourly', { date: today });
   const board = new Array(24).fill(0);
   const alight = new Array(24).fill(0);
+  // Per-bus boardings buckets so the Passenger On chart can be filtered without
+  // refetching. The net-flow and cumulative-load charts continue to use the
+  // fleet-wide board/alight arrays.
+  const boardByBus = {};
   let hasAny = false;
   if (apiData && apiData.hourly && apiData.hourly.length > 0) {
     hasAny = true;
@@ -1434,6 +1448,11 @@ async function refreshNetAndCumulativeCharts() {
       const dh = utcHourToDisplayHour(row.hour);
       board[dh] += row.boardings || 0;
       alight[dh] += row.alightings || 0;
+      const bid = row.bus_id;
+      if (bid) {
+        if (!boardByBus[bid]) boardByBus[bid] = new Array(24).fill(0);
+        boardByBus[bid][dh] += row.boardings || 0;
+      }
     });
   } else {
     // Live fallback from in-browser hourly buckets.
@@ -1468,8 +1487,19 @@ async function refreshNetAndCumulativeCharts() {
     charts.netFlow.update('active');
   }
   if (charts.passengerOn) {
-    charts.passengerOn.data.datasets[0].data = board;
+    // Pick the dataset for the currently selected bus (or fleet-wide).
+    const sel = _passengerOnBusFilter || 'all';
+    const series = sel === 'all'
+      ? board
+      : (boardByBus[sel] || new Array(24).fill(0));
+    charts.passengerOn.data.datasets[0].data = series;
     charts.passengerOn.update('active');
+    const sub = document.getElementById('passengerOnSubtitle');
+    if (sub) {
+      sub.textContent = sel === 'all'
+        ? 'Boardings only — all buses'
+        : `Boardings only — Bus ${sel}`;
+    }
   }
   if (charts.cumulativeLoad) {
     // Only draw the line up to the last hour with activity so the trailing
@@ -1803,6 +1833,10 @@ function getISOWeek(date) {
 // Cache of the day's hourly board/alight series, refreshed from the API by
 // refreshNetAndCumulativeCharts(). Used to time-weight the occupancy bands.
 let _occHourlyCache = null;
+
+// Currently selected bus filter for the Passenger On Counts chart. 'all' shows
+// the fleet-wide series; any other value filters /api/hourly rows by bus_id.
+let _passengerOnBusFilter = 'all';
 
 // Fetch today's hourly board/alight series from the API into _occHourlyCache.
 async function refreshOccHourlyCache() {
