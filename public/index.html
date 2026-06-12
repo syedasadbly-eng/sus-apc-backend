@@ -22,6 +22,7 @@
 <!-- Leaflet -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
 
 <!-- Chart.js -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1"></script>
@@ -486,7 +487,15 @@
 
     <!-- ===== LIVE MAP VIEW ===== -->
     <div class="view" id="view-live-map">
-      <div class="filter-bar">
+      <div class="map-mode-tabs">
+        <button class="map-mode-tab active" data-mode="live" id="mapModeLive">
+          <span class="live-dot"></span> Live
+        </button>
+        <button class="map-mode-tab" data-mode="history" id="mapModeHistory">
+          <i data-lucide="history" style="width:14px;height:14px"></i> History
+        </button>
+      </div>
+      <div class="filter-bar" id="liveFilterBar">
         <div class="filter-group">
           <span class="filter-label">Route</span>
           <select class="filter-select" id="mapRouteFilter">
@@ -505,9 +514,59 @@
           <i data-lucide="crosshair" style="width:14px;height:14px"></i> Center Map
         </button>
       </div>
-      <div class="chart-panel" style="height:calc(100vh - 180px)">
+      <div class="history-bar" id="historyFilterBar" style="display:none">
+        <div class="history-presets" role="group" aria-label="Date range preset">
+          <button class="history-preset active" data-preset="today">Today</button>
+          <button class="history-preset" data-preset="yesterday">Yesterday</button>
+          <button class="history-preset" data-preset="7">Last 7 days</button>
+          <button class="history-preset" data-preset="custom">Custom</button>
+        </div>
+        <div class="history-custom" id="historyCustomRange" style="display:none">
+          <input type="date" id="historyFrom" class="filter-select" aria-label="From date">
+          <span class="history-dash">to</span>
+          <input type="date" id="historyTo" class="filter-select" aria-label="To date">
+        </div>
+        <div class="filter-group">
+          <span class="filter-label">Bus</span>
+          <select class="filter-select" id="historyBusFilter">
+            <option value="all">All buses</option>
+            <option value="515">Bus 515</option>
+            <option value="419">Bus 419</option>
+          </select>
+        </div>
+        <div class="history-mode-toggle" role="group" aria-label="Visualisation mode">
+          <button class="history-mode active" data-vis="breadcrumbs" title="Breadcrumb trail">
+            <i data-lucide="footprints" style="width:14px;height:14px"></i> Trail
+          </button>
+          <button class="history-mode" data-vis="heatmap" title="Density heatmap">
+            <i data-lucide="flame" style="width:14px;height:14px"></i> Heatmap
+          </button>
+          <button class="history-mode" data-vis="playback" title="Time-scrub playback">
+            <i data-lucide="play" style="width:14px;height:14px"></i> Playback
+          </button>
+        </div>
+        <button class="btn btn-primary btn-sm" id="historyLoadBtn">
+          <i data-lucide="refresh-cw" style="width:14px;height:14px"></i> Load
+        </button>
+        <div class="history-status" id="historyStatus"></div>
+      </div>
+      <div class="chart-panel" style="height:calc(100vh - 220px);position:relative">
         <div class="chart-body" style="padding:0;height:100%">
           <div class="map-container" id="liveMapFull" style="height:100%"></div>
+        </div>
+        <div class="playback-scrubber" id="playbackScrubber" style="display:none">
+          <button class="playback-btn" id="playbackPlayBtn" aria-label="Play/Pause">
+            <i data-lucide="play" style="width:16px;height:16px"></i>
+          </button>
+          <div class="playback-time" id="playbackTime">--</div>
+          <input type="range" id="playbackSlider" class="playback-slider" min="0" max="100" value="0" step="1" aria-label="Playback position">
+          <select class="filter-select playback-speed" id="playbackSpeed" aria-label="Playback speed">
+            <option value="1">1x</option>
+            <option value="4" selected>4x</option>
+            <option value="16">16x</option>
+            <option value="60">60x</option>
+            <option value="300">300x</option>
+          </select>
         </div>
       </div>
     </div>

@@ -1141,6 +1141,63 @@ app.get('/api/stops/boardings', (req, res) => {
   }
 });
 
+// Historical GPS breadcrumbs for the Live Map playback view.
+// Returns one row per recorded GPS sample, filtered by date range / bus.
+//   GET /api/history-locations?from=YYYY-MM-DD&to=YYYY-MM-DD
+//   GET /api/history-locations?date=YYYY-MM-DD
+//   GET /api/history-locations?bus_id=515&date=YYYY-MM-DD
+// Hard cap of 5000 points to keep the map snappy; if exceeded we downsample uniformly.
+app.get('/api/history-locations', (req, res) => {
+  try {
+    const { date, from, to, bus_id } = req.query;
+    const limit = Math.min(parseInt(req.query.limit, 10) || 5000, 20000);
+    let where = " WHERE lat != 0 AND lng != 0 ";
+    const params = {};
+    if (bus_id)            { where += " AND bus_id = @bus_id"; params.bus_id = bus_id; }
+    if (date)              { where += " AND date = @date";     params.date = date; }
+    else if (from && to)   { where += " AND date BETWEEN @from AND @to"; params.from = from; params.to = to; }
+    else if (!date && !from && !to) {
+      const today = new Date().toISOString().slice(0, 10);
+      where += " AND date = @today"; params.today = today;
+    }
+
+    // Count first so we can decide whether to downsample.
+    const totalRow = db.prepare(`SELECT COUNT(*) AS n FROM records ${where}`).get(params);
+    const total = totalRow.n || 0;
+    let rows;
+    if (total <= limit) {
+      rows = db.prepare(`
+        SELECT timestamp, bus_id, route, stop, lat, lng, speed, onboard, stop_source
+        FROM records ${where}
+        ORDER BY timestamp ASC
+      `).all(params);
+    } else {
+      // Uniform downsample: pick every Nth row so the trail still represents the full span.
+      const step = Math.ceil(total / limit);
+      params.step = step;
+      rows = db.prepare(`
+        SELECT timestamp, bus_id, route, stop, lat, lng, speed, onboard, stop_source
+        FROM (
+          SELECT *, (ROW_NUMBER() OVER (ORDER BY timestamp ASC)) AS rn
+          FROM records ${where}
+        )
+        WHERE rn % @step = 0
+        ORDER BY timestamp ASC
+      `).all(params);
+    }
+
+    res.json({
+      filters: { date: date || null, from: from || null, to: to || null, bus_id: bus_id || null },
+      total_available: total,
+      returned: rows.length,
+      downsampled: total > limit,
+      points: rows,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Current scheduled stop per bus right now — useful for dashboards/tooltips.
 app.get('/api/stops/current', (req, res) => {
   const now = Date.now();
