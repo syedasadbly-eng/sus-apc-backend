@@ -1389,9 +1389,9 @@ function initOverviewAnalyticsCharts() {
           label: 'Passenger on',
           data: new Array(24).fill(0),
           backgroundColor: premiumGradient,
-          // Rich gold hover — warm metallic accent against the bright white.
-          hoverBackgroundColor: 'rgba(212, 175, 55, 0.95)',
-          borderColor: 'rgba(255, 255, 255, 0.55)',
+          // Stays flat white on hover too — no colour switching.
+          hoverBackgroundColor: '#ffffff',
+          borderColor: '#ffffff',
           borderWidth: 0,
           borderRadius: 5,
           borderSkipped: false,
