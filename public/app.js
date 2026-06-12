@@ -1518,12 +1518,12 @@ function initOverviewAnalyticsCharts() {
             categoryPercentage: 0.85,
           },
           {
-            // Second bus (419) — red.
+            // Second bus (419) — flat white, same as all other buses.
             label: 'Bus 419',
             data: new Array(24).fill(0),
-            backgroundColor: '#ef4444',
-            hoverBackgroundColor: '#ef4444',
-            borderColor: '#ef4444',
+            backgroundColor: premiumGradient,
+            hoverBackgroundColor: '#ffffff',
+            borderColor: '#ffffff',
             borderWidth: 0,
             borderRadius: 5,
             borderSkipped: false,
