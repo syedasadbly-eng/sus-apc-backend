@@ -1596,6 +1596,11 @@ function initOverviewAnalyticsCharts() {
   // Separate refresh loop for the Passenger On chart (covers Daily/Weekly/Monthly).
   refreshPassengerOnChart();
   setInterval(() => refreshPassengerOnChart(), 30000);
+
+  // Boardings by Stop premium panel.
+  initStopBoardingsHome();
+  refreshStopBoardingsHome();
+  setInterval(() => refreshStopBoardingsHome(), 30000);
 }
 
 // Update the live gauge from current fleet occupancy (called on every MQTT tick).
@@ -3042,4 +3047,178 @@ function chartDefaults(yLabel) {
 function tooltipDefaults() {
   return { backgroundColor:'#1c1e2e', titleColor:'#ffffff', bodyColor:'#c9cad8', borderColor:'#323554', borderWidth:1, padding:14, cornerRadius:8,
     titleFont:{family:'Inter',size:14,weight:600}, bodyFont:{family:'Inter',size:13}, displayColors:true, boxPadding:5 };
+}
+
+
+// ============================================
+// BOARDINGS BY STOP — premium dashboard home panel
+// ============================================
+// Horizontal bar chart of per-stop boardings + alightings with a live
+// GPS-vs-scheduled attribution chip in the header. Data: /api/stops/boardings.
+let _stopBoardingsBus = 'all';
+let _stopBoardingsRange = 'today';
+
+function initStopBoardingsHome() {
+  const ctx = document.getElementById('chartStopBoardingsHome');
+  if (!ctx) return;
+  // Flat glossy white for boardings (matches Passenger On treatment);
+  // gold accent for alightings — palette-consistent.
+  charts.stopBoardingsHome = new Chart(ctx.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: [],
+      datasets: [
+        {
+          label: 'Boardings',
+          data: [],
+          backgroundColor: '#ffffff',
+          hoverBackgroundColor: '#ffffff',
+          borderRadius: 6,
+          borderSkipped: false,
+          barPercentage: 0.78,
+          categoryPercentage: 0.78,
+        },
+        {
+          label: 'Alightings',
+          data: [],
+          backgroundColor: 'rgba(212,175,55,0.95)',
+          hoverBackgroundColor: 'rgba(212,175,55,1)',
+          borderRadius: 6,
+          borderSkipped: false,
+          barPercentage: 0.78,
+          categoryPercentage: 0.78,
+        },
+      ],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      layout: { padding: { top: 4, right: 14, bottom: 4, left: 4 } },
+      plugins: {
+        legend: {
+          position: 'top',
+          align: 'end',
+          labels: {
+            color: '#c8cad8',
+            font: { size: 12, weight: '500' },
+            usePointStyle: true,
+            pointStyle: 'rectRounded',
+            boxWidth: 10,
+            boxHeight: 10,
+            padding: 14,
+          },
+        },
+        tooltip: {
+          ...tooltipDefaults(),
+          callbacks: {
+            title: (items) => items[0]?.label || '',
+            label: (item) => `${item.dataset.label}: ${item.parsed.x}`,
+            afterBody: (items) => {
+              const row = items[0]?.raw?._meta;
+              if (!row) return '';
+              const gps = row.evt_gps || 0;
+              const sched = row.evt_scheduled || 0;
+              const total = gps + sched;
+              if (!total) return '';
+              const pct = Math.round((gps / total) * 100);
+              return `GPS-verified: ${pct}%  ·  Events: ${row.event_count}`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          beginAtZero: true,
+          grid: { color: 'rgba(255,255,255,0.05)', drawBorder: false },
+          ticks: { color: '#8b8ea5', font: { size: 12 }, precision: 0 },
+        },
+        y: {
+          grid: { display: false, drawBorder: false },
+          ticks: { color: '#e4e5ed', font: { size: 13, weight: '500' }, padding: 6 },
+        },
+      },
+    },
+  });
+
+  const busSel = document.getElementById('stopBoardingsBus');
+  if (busSel) busSel.addEventListener('change', () => {
+    _stopBoardingsBus = busSel.value || 'all';
+    refreshStopBoardingsHome();
+  });
+  const rangeSel = document.getElementById('stopBoardingsRange');
+  if (rangeSel) rangeSel.addEventListener('change', () => {
+    _stopBoardingsRange = rangeSel.value || 'today';
+    refreshStopBoardingsHome();
+  });
+}
+
+async function refreshStopBoardingsHome() {
+  const chart = charts.stopBoardingsHome;
+  if (!chart) return;
+  const params = {};
+  if (_stopBoardingsBus && _stopBoardingsBus !== 'all') params.bus_id = _stopBoardingsBus;
+  if (_stopBoardingsRange === '7' || _stopBoardingsRange === '30') {
+    const days = parseInt(_stopBoardingsRange, 10);
+    const to = displayDateStr();
+    const fromDate = new Date(Date.now() - (days - 1) * 86400000);
+    params.from = fromDate.toISOString().slice(0, 10);
+    params.to = to;
+  }
+  try {
+    const data = await apiFetch('/api/stops/boardings', params);
+    const empty = document.getElementById('stopBoardingsEmpty');
+    const subtitle = document.getElementById('stopBoardingsSubtitle');
+    const rows = (data && data.stops) ? data.stops : [];
+
+    let totalGps = 0, totalSched = 0;
+    for (const r of rows) {
+      totalGps += (r.evt_gps || 0);
+      totalSched += (r.evt_scheduled || 0);
+    }
+    const totalEvt = totalGps + totalSched;
+    const gpsPct = totalEvt ? Math.round((totalGps / totalEvt) * 100) : 0;
+    const schedPct = totalEvt ? (100 - gpsPct) : 0;
+    const gpsEl = document.getElementById('stopAttrGps');
+    const schedEl = document.getElementById('stopAttrSched');
+    if (gpsEl) gpsEl.textContent = gpsPct + '%';
+    if (schedEl) schedEl.textContent = schedPct + '%';
+
+    if (subtitle) {
+      const label = _stopBoardingsRange === 'today' ? 'today'
+        : _stopBoardingsRange === '7' ? 'over the last 7 days'
+        : 'over the last 30 days';
+      const busLabel = (_stopBoardingsBus && _stopBoardingsBus !== 'all') ? ` · Bus ${_stopBoardingsBus}` : '';
+      subtitle.textContent = `Top stops by passenger activity ${label}${busLabel}`;
+    }
+
+    const top = rows
+      .map(r => ({ ...r, _total: (r.boardings || 0) + (r.alightings || 0) }))
+      .filter(r => r._total > 0)
+      .sort((a, b) => b._total - a._total)
+      .slice(0, 10);
+
+    if (!top.length) {
+      if (empty) empty.style.display = 'flex';
+      chart.data.labels = [];
+      chart.data.datasets[0].data = [];
+      chart.data.datasets[1].data = [];
+      chart.update('none');
+      return;
+    }
+    if (empty) empty.style.display = 'none';
+
+    const shortLabel = (name) => {
+      if (!name) return '—';
+      const cleaned = name.replace(/\s*\([^)]*\)\s*$/, '').trim();
+      return cleaned.length > 32 ? cleaned.slice(0, 30) + '…' : cleaned;
+    };
+
+    chart.data.labels = top.map(r => shortLabel(r.stop));
+    chart.data.datasets[0].data = top.map(r => ({ x: r.boardings || 0, _meta: r }));
+    chart.data.datasets[1].data = top.map(r => ({ x: r.alightings || 0, _meta: r }));
+    chart.update('active');
+  } catch (err) {
+    console.warn('[stopBoardingsHome] refresh failed:', err);
+  }
 }
