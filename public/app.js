@@ -1956,8 +1956,24 @@ function updateRidershipKPIsFromLive(from, to) {
   if (avgSub) avgSub.textContent = totalOut > 0 ? `${totalOut.toLocaleString()} alightings` : 'live session';
 }
 
-/** Render ridership trend charts from API daily rows */
+/** Render ridership trend charts from API daily rows.
+ *  Weekly + monthly views zero-fill gap buckets across the full selected
+ *  window and use friendly date-range labels. Day-of-week chart aggregates
+ *  by unique calendar date (not per-bus-day) so the average is correct. */
 function renderRidershipCharts(rows, viewMode, fromDate, now) {
+  const setSubtitle = (id, text) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+  };
+  // Aggregate rows by unique date FIRST. Each /api/daily row is per-bus-per-day,
+  // so two buses on the same day would double-count buckets/days otherwise.
+  const byDate = {};
+  rows.forEach(r => {
+    if (!byDate[r.date]) byDate[r.date] = { boardings: 0, alightings: 0 };
+    byDate[r.date].boardings += r.total_in;
+    byDate[r.date].alightings += r.total_out;
+  });
+
   if (viewMode === 'daily') {
     const allDates = [];
     const d = new Date(fromDate);
@@ -1965,16 +1981,12 @@ function renderRidershipCharts(rows, viewMode, fromDate, now) {
       allDates.push(displayDateStr(d));
       d.setDate(d.getDate() + 1);
     }
-    const dataMap = {};
-    rows.forEach(r => { dataMap[r.date] = r; });
     const labels = allDates.map(dt => {
-      // dt is a calendar date string (YYYY-MM-DD). Format it directly with no
-      // timezone shift, otherwise a tz like America/Chicago rolls it back a day.
       const dd = new Date(dt + 'T12:00:00Z');
       return dd.toLocaleDateString('en-US', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' });
     });
-    const boardings = allDates.map(dt => dataMap[dt] ? dataMap[dt].total_in : 0);
-    const alightings = allDates.map(dt => dataMap[dt] ? dataMap[dt].total_out : 0);
+    const boardings = allDates.map(dt => byDate[dt] ? byDate[dt].boardings : 0);
+    const alightings = allDates.map(dt => byDate[dt] ? byDate[dt].alightings : 0);
     charts.ridershipTrend.data.labels = labels;
     charts.ridershipTrend.data.datasets[0].data = boardings;
     charts.ridershipTrend.update('active');
@@ -1982,52 +1994,83 @@ function renderRidershipCharts(rows, viewMode, fromDate, now) {
     charts.boardAlight.data.datasets[0].data = boardings;
     charts.boardAlight.data.datasets[1].data = alightings;
     charts.boardAlight.update('active');
+    setSubtitle('ridershipTrendSubtitle', 'Daily boardings');
+    setSubtitle('boardAlightSubtitle', 'Daily boardings vs alightings');
   } else if (viewMode === 'weekly') {
-    const weekMap = {};
-    rows.forEach(r => {
-      const d = new Date(r.date + 'T12:00:00Z');
-      const week = getISOWeek(d);
-      const key = `${d.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
-      if (!weekMap[key]) weekMap[key] = { boardings: 0, alightings: 0 };
-      weekMap[key].boardings += r.total_in;
-      weekMap[key].alightings += r.total_out;
+    // Build every ISO week between fromDate and now, then sum daily into each.
+    const startOfWeek = (date) => {
+      const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+      const day = d.getUTCDay() || 7;
+      d.setUTCDate(d.getUTCDate() - (day - 1));
+      return d;
+    };
+    const fromUtc = new Date(Date.UTC(fromDate.getFullYear(), fromDate.getMonth(), fromDate.getDate()));
+    const toUtc = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+    const weeks = [];
+    let cur = startOfWeek(fromUtc);
+    while (cur <= toUtc) {
+      const weekStart = new Date(cur);
+      const weekEnd = new Date(cur);
+      weekEnd.setUTCDate(weekEnd.getUTCDate() + 6);
+      weeks.push({ start: weekStart, end: weekEnd, boardings: 0, alightings: 0 });
+      cur.setUTCDate(cur.getUTCDate() + 7);
+    }
+    Object.entries(byDate).forEach(([dateStr, v]) => {
+      const d = new Date(dateStr + 'T12:00:00Z');
+      const ws = startOfWeek(d).getTime();
+      const bucket = weeks.find(w => w.start.getTime() === ws);
+      if (bucket) { bucket.boardings += v.boardings; bucket.alightings += v.alightings; }
     });
-    const weeks = Object.keys(weekMap).sort();
-    charts.ridershipTrend.data.labels = weeks;
-    charts.ridershipTrend.data.datasets[0].data = weeks.map(w => weekMap[w].boardings);
+    const fmt = { timeZone: 'UTC', day: 'numeric', month: 'short' };
+    const labels = weeks.map(w => {
+      const s = w.start.toLocaleDateString('en-US', fmt);
+      const e = w.end.toLocaleDateString('en-US', fmt);
+      return s + ' - ' + e;
+    });
+    charts.ridershipTrend.data.labels = labels;
+    charts.ridershipTrend.data.datasets[0].data = weeks.map(w => w.boardings);
     charts.ridershipTrend.update('active');
-    charts.boardAlight.data.labels = weeks;
-    charts.boardAlight.data.datasets[0].data = weeks.map(w => weekMap[w].boardings);
-    charts.boardAlight.data.datasets[1].data = weeks.map(w => weekMap[w].alightings);
+    charts.boardAlight.data.labels = labels;
+    charts.boardAlight.data.datasets[0].data = weeks.map(w => w.boardings);
+    charts.boardAlight.data.datasets[1].data = weeks.map(w => w.alightings);
     charts.boardAlight.update('active');
+    setSubtitle('ridershipTrendSubtitle', 'Weekly boardings - ' + weeks.length + ' week' + (weeks.length === 1 ? '' : 's'));
+    setSubtitle('boardAlightSubtitle', 'Weekly boardings vs alightings');
   } else if (viewMode === 'monthly') {
-    const monthMap = {};
-    rows.forEach(r => {
-      const key = r.date.slice(0, 7);
-      if (!monthMap[key]) monthMap[key] = { boardings: 0, alightings: 0 };
-      monthMap[key].boardings += r.total_in;
-      monthMap[key].alightings += r.total_out;
+    // Build every YYYY-MM month between fromDate and now, then sum daily into each.
+    const months = [];
+    const cur = new Date(Date.UTC(fromDate.getFullYear(), fromDate.getMonth(), 1));
+    const end = new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1));
+    while (cur <= end) {
+      const key = cur.getUTCFullYear() + '-' + String(cur.getUTCMonth() + 1).padStart(2, '0');
+      months.push({ key, year: cur.getUTCFullYear(), month: cur.getUTCMonth(), boardings: 0, alightings: 0 });
+      cur.setUTCMonth(cur.getUTCMonth() + 1);
+    }
+    Object.entries(byDate).forEach(([dateStr, v]) => {
+      const key = dateStr.slice(0, 7);
+      const bucket = months.find(m => m.key === key);
+      if (bucket) { bucket.boardings += v.boardings; bucket.alightings += v.alightings; }
     });
-    const months = Object.keys(monthMap).sort();
-    const monthLabels = months.map(m => {
-      const [y, mo] = m.split('-');
-      return new Date(y, mo - 1).toLocaleDateString('en-US', { timeZone: 'America/Chicago', month: 'short', year: 'numeric' });
-    });
-    charts.ridershipTrend.data.labels = monthLabels;
-    charts.ridershipTrend.data.datasets[0].data = months.map(m => monthMap[m].boardings);
+    const labels = months.map(m => new Date(Date.UTC(m.year, m.month, 15))
+      .toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', year: 'numeric' }));
+    charts.ridershipTrend.data.labels = labels;
+    charts.ridershipTrend.data.datasets[0].data = months.map(m => m.boardings);
     charts.ridershipTrend.update('active');
-    charts.boardAlight.data.labels = monthLabels;
-    charts.boardAlight.data.datasets[0].data = months.map(m => monthMap[m].boardings);
-    charts.boardAlight.data.datasets[1].data = months.map(m => monthMap[m].alightings);
+    charts.boardAlight.data.labels = labels;
+    charts.boardAlight.data.datasets[0].data = months.map(m => m.boardings);
+    charts.boardAlight.data.datasets[1].data = months.map(m => m.alightings);
     charts.boardAlight.update('active');
+    setSubtitle('ridershipTrendSubtitle', 'Monthly boardings - ' + months.length + ' month' + (months.length === 1 ? '' : 's'));
+    setSubtitle('boardAlightSubtitle', 'Monthly boardings vs alightings');
   }
-  // Day of week chart
+
+  // Day-of-week chart - aggregate by UNIQUE date (not per-bus-row).
   const dowTotals = [0,0,0,0,0,0,0];
   const dowCounts = [0,0,0,0,0,0,0];
-  rows.forEach(r => {
-    const dow = new Date(r.date + 'T12:00:00Z').getUTCDay();
+  Object.entries(byDate).forEach(([dateStr, v]) => {
+    const dow = new Date(dateStr + 'T12:00:00Z').getUTCDay();
     const idx = dow === 0 ? 6 : dow - 1;
-    dowTotals[idx] += r.total_in;
+    dowTotals[idx] += v.boardings;
     dowCounts[idx]++;
   });
   const dowAvg = dowTotals.map((t, i) => dowCounts[i] > 0 ? Math.round(t / dowCounts[i]) : 0);
