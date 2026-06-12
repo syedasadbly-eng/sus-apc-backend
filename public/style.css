@@ -2363,7 +2363,7 @@ html, body {
   flex-shrink: 0;
 }
 .mayo-logo--sidebar {
-  height: 28px;
+  height: 44px;
   opacity: 0.92;
 }
 .sidebar-cobrand:hover .mayo-logo--sidebar { opacity: 1; }
@@ -2386,6 +2386,6 @@ html, body {
   font-weight: 600;
 }
 .mayo-logo--login {
-  height: 44px;
+  height: 72px;
   opacity: 0.95;
 }
