@@ -525,52 +525,43 @@
         </div>
       </div>
 
-      <div class="chart-grid cols-2">
-        <div class="chart-panel">
+      <!-- HERO: Ridership Trend, full-width -->
+      <div class="chart-grid">
+        <div class="chart-panel chart-panel-feature ridership-hero">
           <div class="chart-header">
             <div>
-              <div class="chart-title">Ridership Trend</div>
+              <div class="chart-title chart-title-lg">Ridership Trend</div>
               <div class="chart-subtitle">Boardings over time</div>
             </div>
           </div>
-          <div class="chart-body">
-            <canvas id="chartRidershipTrend" height="280"></canvas>
-          </div>
-        </div>
-        <div class="chart-panel">
-          <div class="chart-header">
-            <div>
-              <div class="chart-title">Boardings vs Alightings</div>
-              <div class="chart-subtitle">Daily balance</div>
-            </div>
-          </div>
-          <div class="chart-body">
-            <canvas id="chartBoardAlightRidership" height="280"></canvas>
+          <div class="chart-body chart-body-feature">
+            <canvas id="chartRidershipTrend" class="chart-feature-canvas"></canvas>
           </div>
         </div>
       </div>
 
-      <div class="chart-grid cols-2" style="margin-top:var(--space-4)">
-        <div class="chart-panel">
+      <!-- Second row: two large companion charts -->
+      <div class="chart-grid cols-2 ridership-row-2" style="margin-top:var(--space-5)">
+        <div class="chart-panel ridership-companion">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Boardings vs Alightings</div>
+              <div class="chart-subtitle">Daily balance across the selected period</div>
+            </div>
+          </div>
+          <div class="chart-body chart-body-companion">
+            <canvas id="chartBoardAlightRidership" class="chart-companion-canvas"></canvas>
+          </div>
+        </div>
+        <div class="chart-panel ridership-companion">
           <div class="chart-header">
             <div>
               <div class="chart-title">Ridership by Day of Week</div>
-              <div class="chart-subtitle">Average passengers per day</div>
+              <div class="chart-subtitle">Average boardings per day</div>
             </div>
           </div>
-          <div class="chart-body">
-            <canvas id="chartDayOfWeek" height="260"></canvas>
-          </div>
-        </div>
-        <div class="chart-panel">
-          <div class="chart-header">
-            <div>
-              <div class="chart-title">Time at Occupancy Level</div>
-              <div class="chart-subtitle">Share of operating time by load band</div>
-            </div>
-          </div>
-          <div class="chart-body">
-            <canvas id="chartOccupancyDist" height="260"></canvas>
+          <div class="chart-body chart-body-companion">
+            <canvas id="chartDayOfWeek" class="chart-companion-canvas"></canvas>
           </div>
         </div>
       </div>
