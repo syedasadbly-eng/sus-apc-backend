@@ -1503,19 +1503,34 @@ function initOverviewAnalyticsCharts() {
       type: 'bar',
       data: {
         labels: Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2, '0')}:00`),
-        datasets: [{
-          label: 'Passenger on',
-          data: new Array(24).fill(0),
-          backgroundColor: premiumGradient,
-          // Stays flat white on hover too — no colour switching.
-          hoverBackgroundColor: '#ffffff',
-          borderColor: '#ffffff',
-          borderWidth: 0,
-          borderRadius: 5,
-          borderSkipped: false,
-          barPercentage: 0.78,
-          categoryPercentage: 0.85,
-        }],
+        datasets: [
+          {
+            // First bus (515) — flat white.
+            label: 'Bus 515',
+            data: new Array(24).fill(0),
+            backgroundColor: premiumGradient,
+            hoverBackgroundColor: '#ffffff',
+            borderColor: '#ffffff',
+            borderWidth: 0,
+            borderRadius: 5,
+            borderSkipped: false,
+            barPercentage: 0.78,
+            categoryPercentage: 0.85,
+          },
+          {
+            // Second bus (419) — red.
+            label: 'Bus 419',
+            data: new Array(24).fill(0),
+            backgroundColor: '#ef4444',
+            hoverBackgroundColor: '#ef4444',
+            borderColor: '#ef4444',
+            borderWidth: 0,
+            borderRadius: 5,
+            borderSkipped: false,
+            barPercentage: 0.78,
+            categoryPercentage: 0.85,
+          },
+        ],
       },
       options: {
         responsive: true,
@@ -1526,16 +1541,20 @@ function initOverviewAnalyticsCharts() {
         animation: { duration: 600, easing: 'easeOutCubic' },
         layout: { padding: { top: 8, right: 8, bottom: 0, left: 0 } },
         plugins: {
-          legend: { display: false },
+          legend: {
+            display: true,
+            labels: { color: '#dbdce6', font: { size: 12, family: 'Inter', weight: '500' }, padding: 16, usePointStyle: true, pointStyle: 'circle', boxWidth: 10 },
+          },
           tooltip: {
             ...tooltipDefaults(),
             callbacks: {
-              label: (ctx) => ` ${ctx.parsed.y.toLocaleString()} boardings`,
+              label: (ctx) => ` ${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString()} boardings`,
             },
           },
         },
         scales: {
           x: {
+            stacked: true,
             grid: { display: false, drawBorder: false },
             border: { display: false },
             ticks: {
@@ -1547,6 +1566,7 @@ function initOverviewAnalyticsCharts() {
             },
           },
           y: {
+            stacked: true,
             beginAtZero: true,
             grid: { color: 'rgba(165, 142, 209, 0.07)', drawBorder: false, drawTicks: false },
             border: { display: false },
@@ -2159,19 +2179,24 @@ async function refreshPassengerOnChart() {
   const busFilterArg = busSel === 'all' ? null : busSel;
 
   let labels = [];
-  let series = [];
+  // One bucket per bus: '515' is the first (white) series, '419' the second (red).
+  let series515 = [];
+  let series419 = [];
 
   if (period === 'daily') {
     // Hourly bars for today.
     const today = displayDateStr();
     const apiData = await apiFetch('/api/hourly', { date: today });
     labels = Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2, '0')}:00`);
-    series = new Array(24).fill(0);
+    series515 = new Array(24).fill(0);
+    series419 = new Array(24).fill(0);
     if (apiData && Array.isArray(apiData.hourly)) {
       apiData.hourly.forEach(row => {
         if (busFilterArg && row.bus_id !== busFilterArg) return;
         const dh = utcHourToDisplayHour(row.hour);
-        series[dh] += row.boardings || 0;
+        const v = row.boardings || 0;
+        if (String(row.bus_id) === '419') series419[dh] += v;
+        else series515[dh] += v;
       });
     }
   } else {
@@ -2183,24 +2208,33 @@ async function refreshPassengerOnChart() {
     if (busFilterArg) params.bus_id = busFilterArg;
     const apiData = await apiFetch('/api/daily', params);
     // Pre-fill every day in the window so empty days show as 0 rather than gaps.
-    const totals = {};
+    const totals515 = {};
+    const totals419 = {};
     for (let i = 0; i < span; i++) {
       const dstr = shiftDisplayDate(-(span - 1 - i));
-      totals[dstr] = 0;
+      totals515[dstr] = 0;
+      totals419[dstr] = 0;
     }
     if (apiData && Array.isArray(apiData.daily)) {
       apiData.daily.forEach(row => {
         if (busFilterArg && row.bus_id !== busFilterArg) return;
-        if (!(row.date in totals)) return;
-        totals[row.date] += row.total_in || 0;
+        if (!(row.date in totals515)) return;
+        const v = row.total_in || 0;
+        if (String(row.bus_id) === '419') totals419[row.date] += v;
+        else totals515[row.date] += v;
       });
     }
-    labels = Object.keys(totals).map(shortDateLabel);
-    series = Object.values(totals);
+    labels = Object.keys(totals515).map(shortDateLabel);
+    series515 = Object.values(totals515);
+    series419 = Object.values(totals419);
   }
 
+  // Honour the bus filter: hide the series for a bus that isn't selected.
   charts.passengerOn.data.labels = labels;
-  charts.passengerOn.data.datasets[0].data = series;
+  charts.passengerOn.data.datasets[0].data = series515;
+  charts.passengerOn.data.datasets[1].data = series419;
+  charts.passengerOn.getDatasetMeta(0).hidden = (busSel === '419');
+  charts.passengerOn.getDatasetMeta(1).hidden = (busSel === '515');
   charts.passengerOn.update('active');
 
   // Update title + subtitle to reflect the current period and bus.
