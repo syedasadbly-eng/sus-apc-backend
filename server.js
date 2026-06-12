@@ -1487,14 +1487,14 @@ app.post('/api/admin/backfill-history-locations', (req, res) => {
     }
 
     const rows = db.prepare(`
-      SELECT rowid, timestamp, bus_id, lat, lng
+      SELECT id, timestamp, bus_id, lat, lng
       FROM records
       WHERE lat IS NOT NULL AND lng IS NOT NULL
     `).all();
 
     const upd = db.prepare(`
       UPDATE records SET lat = @lat, lng = @lng, stop = @stop, route = @route, stop_source = 'backfilled'
-      WHERE rowid = @rowid
+      WHERE id = @id
     `);
 
     let touched = 0, skippedNotStale = 0, skippedNoRoute = 0;
@@ -1517,7 +1517,7 @@ app.post('/api/admin/backfill-history-locations', (req, res) => {
       const lat = Math.round(lerp(a.lat, b.lat, frac) * 1e6) / 1e6;
       const lng = Math.round(lerp(a.lng, b.lng, frac) * 1e6) / 1e6;
       const stop = frac < 0.2 ? a.name : (frac > 0.8 ? b.name : `${a.name} -> ${b.name}`);
-      updates.push({ rowid: r.rowid, lat, lng, stop, route: rt.routeKey });
+      updates.push({ id: r.id, lat, lng, stop, route: rt.routeKey });
       touched++;
     }
 
@@ -1527,9 +1527,9 @@ app.post('/api/admin/backfill-history-locations', (req, res) => {
     let sampleDebug = null;
     if (updates.length > 0) {
       const sample = updates[0];
-      const before = db.prepare('SELECT rowid, lat, lng, stop FROM records WHERE rowid = ?').get(sample.rowid);
+      const before = db.prepare('SELECT id, lat, lng, stop FROM records WHERE id = ?').get(sample.id);
       const result = upd.run(sample);
-      const after = db.prepare('SELECT rowid, lat, lng, stop FROM records WHERE rowid = ?').get(sample.rowid);
+      const after = db.prepare('SELECT id, lat, lng, stop FROM records WHERE id = ?').get(sample.id);
       sampleDebug = { sample, before, result_changes: result.changes, after };
     }
 
