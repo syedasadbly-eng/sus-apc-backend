@@ -1766,7 +1766,7 @@ function initRidership() {
         }
       },
       scales: {
-        x: { grid: { color: 'rgba(255,255,255,0.04)', drawTicks: false }, ticks: { color: '#c9cad8', font: { size: 13, family: 'Inter', weight: '500' }, padding: 10 } },
+        x: { grid: { color: 'rgba(255,255,255,0.04)', drawTicks: false }, ticks: { color: '#c9cad8', font: { size: 12, family: 'Inter', weight: '500' }, padding: 10, autoSkip: true, autoSkipPadding: 16, maxRotation: 45, minRotation: 0 } },
         y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)', drawTicks: false }, ticks: { color: '#c9cad8', font: { size: 13, family: 'Inter', weight: '500' }, padding: 10, callback: (v) => Number(v).toLocaleString() }, title: { display: true, text: 'Boardings', color: '#a5a8c1', font: { size: 13, family: 'Inter', weight: '600' }, padding: { bottom: 8 } } }
       }
     },
@@ -1786,7 +1786,7 @@ function initRidership() {
       }
     },
     scales: {
-      x: { grid: { color: 'rgba(255,255,255,0.04)', drawTicks: false }, ticks: { color: '#c9cad8', font: { size: 13, family: 'Inter', weight: '500' }, padding: 10 } },
+      x: { grid: { color: 'rgba(255,255,255,0.04)', drawTicks: false }, ticks: { color: '#c9cad8', font: { size: 12, family: 'Inter', weight: '500' }, padding: 10, autoSkip: true, autoSkipPadding: 16, maxRotation: 45, minRotation: 0 } },
       y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)', drawTicks: false }, ticks: { color: '#c9cad8', font: { size: 13, family: 'Inter', weight: '500' }, padding: 10, callback: (v) => Number(v).toLocaleString() }, title: { display: true, text: yLabel, color: '#a5a8c1', font: { size: 13, family: 'Inter', weight: '600' }, padding: { bottom: 8 } } }
     }
   });
