@@ -1319,7 +1319,7 @@ async function refreshHourlyFlowChart() {
 function setHourlyFlowAxis(xTitle) {
   const opts = charts.hourlyFlow.options;
   if (opts && opts.scales && opts.scales.x) {
-    opts.scales.x.title = { display: true, text: xTitle, color: '#8b8ea5', font: { size: 11, family: 'Inter' } };
+    opts.scales.x.title = { display: true, text: xTitle, color: '#9094b2', font: { size: 13, weight: '600', family: 'Inter' }, padding: { top: 6 } };
   }
 }
 
@@ -2920,12 +2920,12 @@ function chartDefaults(yLabel) {
   return {
     responsive:true, maintainAspectRatio:true, interaction:{mode:'index',intersect:false},
     animation:{duration:800,easing:'easeOutQuart'},
-    plugins:{ legend:{labels:{color:'#8b8ea5',font:{size:11,family:'Inter'},padding:16,usePointStyle:true}}, tooltip:{...tooltipDefaults()} },
-    scales:{ x:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#8b8ea5',font:{size:10}}}, y:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#8b8ea5',font:{size:10}},title:{display:true,text:yLabel,color:'#5a5d76',font:{size:10}}} },
+    plugins:{ legend:{labels:{color:'#b5b8d0',font:{size:13,family:'Inter',weight:'500'},padding:18,usePointStyle:true,boxWidth:10,boxHeight:10}}, tooltip:{...tooltipDefaults()} },
+    scales:{ x:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#b5b8d0',font:{size:12,weight:'500'},padding:8}}, y:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#b5b8d0',font:{size:12,weight:'500'},padding:8},title:{display:true,text:yLabel,color:'#9094b2',font:{size:12,weight:'600'},padding:{bottom:6}}} },
   };
 }
 
 function tooltipDefaults() {
-  return { backgroundColor:'#1c1e2e', titleColor:'#e4e5ed', bodyColor:'#8b8ea5', borderColor:'#323554', borderWidth:1, padding:12, cornerRadius:8,
-    titleFont:{family:'Inter',size:12,weight:600}, bodyFont:{family:'Inter',size:11}, displayColors:true, boxPadding:4 };
+  return { backgroundColor:'#1c1e2e', titleColor:'#ffffff', bodyColor:'#c9cad8', borderColor:'#323554', borderWidth:1, padding:14, cornerRadius:8,
+    titleFont:{family:'Inter',size:14,weight:600}, bodyFont:{family:'Inter',size:13}, displayColors:true, boxPadding:5 };
 }

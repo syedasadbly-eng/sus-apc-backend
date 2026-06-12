@@ -1831,3 +1831,93 @@ html, body {
     grid-template-columns: 1fr;
   }
 }
+
+/* ============================================
+   DASHBOARD HOME PAGE — BIGGER FONTS
+   Scoped to #view-overview via .dashboard-premium
+   ============================================ */
+
+.dashboard-premium .kpi-label {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.dashboard-premium .kpi-value {
+  font-size: 38px;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+.dashboard-premium .kpi-sub {
+  font-size: 13.5px;
+  margin-top: 8px;
+  line-height: 1.4;
+}
+
+.dashboard-premium .kpi-delta {
+  font-size: 13px;
+  padding: 3px 10px;
+}
+
+.dashboard-premium .chart-title {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.dashboard-premium .chart-title.chart-title-lg {
+  font-size: 24px;
+}
+
+.dashboard-premium .chart-subtitle {
+  font-size: 14.5px;
+  margin-top: 4px;
+  line-height: 1.45;
+}
+
+.dashboard-premium .filter-select {
+  font-size: 14px;
+  padding: 8px 12px;
+}
+
+.dashboard-premium .period-tab {
+  font-size: 13.5px;
+  padding: 8px 14px;
+  font-weight: 600;
+}
+
+.dashboard-premium #occGaugeValue {
+  font-size: 42px !important;
+}
+.dashboard-premium #occGaugeLabel {
+  font-size: 13px !important;
+}
+
+.dashboard-premium .fleet-name {
+  font-size: 15px;
+}
+.dashboard-premium .fleet-route {
+  font-size: 13px;
+  margin-top: 2px;
+}
+.dashboard-premium .fleet-passengers {
+  font-size: 16px;
+}
+.dashboard-premium .fleet-occupancy {
+  font-size: 13px;
+}
+.dashboard-premium .fleet-badge {
+  width: 40px;
+  height: 40px;
+  font-size: 13px;
+}
+
+@media (max-width: 720px) {
+  .dashboard-premium .kpi-value { font-size: 30px; }
+  .dashboard-premium .kpi-sub { font-size: 12.5px; }
+  .dashboard-premium .chart-title { font-size: 17px; }
+  .dashboard-premium .chart-title.chart-title-lg { font-size: 20px; }
+  .dashboard-premium .chart-subtitle { font-size: 13px; }
+  .dashboard-premium #occGaugeValue { font-size: 34px !important; }
+}
