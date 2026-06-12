@@ -527,6 +527,13 @@ const MERGE_WINDOW_MS = 2000;  // Wait 2s for all door messages to arrive
 const DEBUG_RAW_PAYLOADS = [];
 const DEBUG_MAX = 20;
 
+// Per-bus GPS diagnostic. Captures the raw GPS fields + verdict for the
+// latest message from each bus, plus a ring buffer of the last 50 verdicts.
+// Survives across page reloads but resets on process restart.
+const GPS_DIAG_BY_BUS = {};
+const GPS_DIAG_HISTORY = [];
+const GPS_DIAG_HISTORY_MAX = 50;
+
 // Debug: track every distinct topic seen since boot, with the sensor serial,
 // resolved bus label, message count and last-seen time. This is the single
 // source of truth for "is a given bus/door actually transmitting?".
@@ -602,6 +609,51 @@ function handleMessage(topic, rawPayload) {
   const hasValidFix = gpsStatus == null ? true : gpsStatus !== 52;
   const inRange = (v, max) => v != null && !isNaN(v) && Math.abs(v) <= max && v !== 0;
   const validFix = inRange(lat, 90) && inRange(lng, 180) && hasValidFix;
+
+  // ---- GPS DIAGNOSTIC (always captured, even when validFix=false) ----
+  const rawLat = extractField(payload, FIELD_PATHS.latitude);
+  const rawLng = extractField(payload, FIELD_PATHS.longitude);
+  const gpsFieldHits = {
+    latitude_path:  FIELD_PATHS.latitude.find(p => extractField(payload, [p]) != null) || null,
+    longitude_path: FIELD_PATHS.longitude.find(p => extractField(payload, [p]) != null) || null,
+    status_path:    FIELD_PATHS.gpsStatus.find(p => extractField(payload, [p]) != null) || null,
+    speed_path:     FIELD_PATHS.speed.find(p => extractField(payload, [p]) != null) || null,
+  };
+  let verdict = 'valid';
+  let advice = null;
+  if (rawLat == null && rawLng == null && gpsStatusRaw == null) {
+    verdict = 'gps_fields_missing';
+    advice = 'No GPS fields in payload. Enable GNSS + JSON push on UR35 (Industrial > GPS) and confirm the publish topic carries location data.';
+  } else if (gpsStatus === 52) {
+    verdict = 'no_satellite_fix';
+    advice = 'UR35 reports status=52 (no fix). Antenna may be disconnected, indoors, or still acquiring. Move bus outside with clear sky view for 1-3 minutes.';
+  } else if (rawLat != null && (lat === 0 || lat === null)) {
+    verdict = 'lat_unparseable';
+    advice = 'Latitude field present but failed to parse: ' + JSON.stringify(rawLat);
+  } else if (rawLng != null && (lng === 0 || lng === null)) {
+    verdict = 'lng_unparseable';
+    advice = 'Longitude field present but failed to parse: ' + JSON.stringify(rawLng);
+  } else if (!inRange(lat, 90) || !inRange(lng, 180)) {
+    verdict = 'coords_out_of_range';
+    advice = 'Parsed coords out of range or zero: lat=' + lat + ', lng=' + lng + '. Sensor may be reporting before first fix.';
+  } else if (!validFix) {
+    verdict = 'rejected_other';
+    advice = 'Coords parsed but rejected. lat=' + lat + ' lng=' + lng + ' status=' + gpsStatus;
+  }
+  const diag = {
+    bus_id: busId,
+    topic,
+    ts: new Date().toISOString(),
+    verdict,
+    advice,
+    raw: { latitude: rawLat, longitude: rawLng, status: gpsStatusRaw, speed: extractField(payload, FIELD_PATHS.speed) },
+    parsed: { lat, lng, status: gpsStatus, speed },
+    field_paths_hit: gpsFieldHits,
+    validFix,
+  };
+  GPS_DIAG_BY_BUS[busId] = diag;
+  GPS_DIAG_HISTORY.unshift(diag);
+  if (GPS_DIAG_HISTORY.length > GPS_DIAG_HISTORY_MAX) GPS_DIAG_HISTORY.length = GPS_DIAG_HISTORY_MAX;
 
   if (validFix) {
     dev.lat = lat; dev.lng = lng; dev.gpsValid = true; dev.gpsSource = 'live'; dev.gpsTs = Date.now();
@@ -1607,6 +1659,37 @@ app.all('/api/clear-today', (req, res) => {
    });
 
 // --- Debug endpoints ---
+
+// GET /api/gps-diag - per-bus + recent GPS extraction verdicts.
+// Use this the moment a bus comes back online to see exactly what the UR35
+// is sending and why GPS is or is not being captured.
+app.get('/api/gps-diag', (req, res) => {
+  const buses = {};
+  for (const [busId, diag] of Object.entries(GPS_DIAG_BY_BUS)) {
+    const ageMs = Date.now() - new Date(diag.ts).getTime();
+    buses[busId] = Object.assign({}, diag, { age_seconds: Math.round(ageMs / 1000) });
+  }
+  res.json({
+    description: 'GPS extraction diagnostic. Shows latest verdict per bus + recent history.',
+    legend: {
+      valid: 'GPS fix accepted and stored.',
+      gps_fields_missing: 'No GPS fields in MQTT payload at all.',
+      no_satellite_fix: 'UR35 reports status=52 (no satellite fix yet).',
+      lat_unparseable: 'Latitude field present but could not be parsed.',
+      lng_unparseable: 'Longitude field present but could not be parsed.',
+      coords_out_of_range: 'Parsed coordinates are 0,0 or outside valid range.',
+      rejected_other: 'Coords parsed but rejected for another reason.',
+    },
+    field_paths_searched: {
+      latitude: FIELD_PATHS.latitude,
+      longitude: FIELD_PATHS.longitude,
+      status: FIELD_PATHS.gpsStatus,
+      speed: FIELD_PATHS.speed,
+    },
+    per_bus_latest: buses,
+    recent_history: GPS_DIAG_HISTORY,
+  });
+});
 
 app.get('/api/debug', (req, res) => {
   res.json({
