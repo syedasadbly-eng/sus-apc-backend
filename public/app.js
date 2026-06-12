@@ -2415,32 +2415,118 @@ function initFleetCharts() {
 // REPORTS
 // ============================================
 
-function initReports() {
-  // Default report date range to today if empty
+async function initReports() {
   const today = displayDateStr();
   const reportFrom = document.getElementById('reportFrom');
   const reportTo = document.getElementById('reportTo');
-  if (reportFrom && !reportFrom.value) reportFrom.value = today;
-  if (reportTo && !reportTo.value) reportTo.value = today;
-  if (reportFrom) reportFrom.max = today;
-  if (reportTo) reportTo.max = today;
+  const reportBus = document.getElementById('reportBus');
+  const reportType = document.getElementById('reportType');
+  const reportFormat = document.getElementById('reportFormat');
+  const reportStatus = document.getElementById('reportStatus');
+  const generateBtn = document.getElementById('generateReport');
+
+  // Find the latest date that actually has data, fall back to today
+  let latestDataDate = today;
+  let availableDates = [];
+  try {
+    const res = await apiFetch('/api/dates');
+    if (res && Array.isArray(res.dates) && res.dates.length) {
+      availableDates = res.dates.slice().sort();
+      latestDataDate = availableDates[availableDates.length - 1];
+    }
+  } catch (e) { /* ignore */ }
+
+  // Cap inputs at today, default empty to latest data date
+  if (reportFrom) { reportFrom.max = today; if (!reportFrom.value) reportFrom.value = latestDataDate; }
+  if (reportTo) { reportTo.max = today; if (!reportTo.value) reportTo.value = latestDataDate; }
+
+  // Populate bus selector from /api/daily across available range
+  if (reportBus) {
+    try {
+      const from = availableDates[0] || latestDataDate;
+      const data = await apiFetch('/api/daily', { from, to: latestDataDate });
+      const buses = Array.from(new Set((data?.daily || []).map(r => String(r.bus_id)))).sort();
+      buses.forEach(id => {
+        const opt = document.createElement('option');
+        opt.value = id; opt.textContent = 'Bus ' + id;
+        reportBus.appendChild(opt);
+      });
+    } catch (e) { /* ignore */ }
+  }
+
+  // Map report-card to a sensible default date range
+  const cardRangeFor = (key) => {
+    const end = latestDataDate;
+    if (key === 'weekly-analysis') return { from: shiftDateStr(end, -6), to: end };
+    if (key === 'monthly-performance') return { from: shiftDateStr(end, -29), to: end };
+    if (key === 'custom-report') return null; // keep current range
+    return { from: end, to: end };
+  };
+
   document.querySelectorAll('.report-card').forEach(card => {
     card.addEventListener('click', () => {
-      const t = card.querySelector('.report-name');
-      if (t) document.getElementById('reportType').value = t.textContent;
-      card.style.borderColor = 'var(--color-primary)';
-      setTimeout(() => { card.style.borderColor = ''; }, 1000);
+      const key = card.dataset.report;
+      const name = card.querySelector('.report-name')?.textContent;
+      if (name && reportType) {
+        const exists = Array.from(reportType.options).some(o => o.textContent === name);
+        if (exists) reportType.value = name;
+      }
+      const range = cardRangeFor(key);
+      if (range) {
+        if (reportFrom) reportFrom.value = range.from;
+        if (reportTo) reportTo.value = range.to;
+      }
+      document.querySelectorAll('.report-card').forEach(c => c.classList.remove('report-card-selected'));
+      card.classList.add('report-card-selected');
     });
   });
-  document.getElementById('generateReport').addEventListener('click', () => {
-    const format = document.getElementById('reportFormat').value;
-    const type = document.getElementById('reportType').value;
-    const from = document.getElementById('reportFrom').value;
-    const to = document.getElementById('reportTo').value;
-    if (format === 'pdf') exportToPDF(type, from, to);
-    else if (format === 'excel') exportToExcel(type, from, to);
-    else exportToCSV(type, from, to);
-  });
+
+  // Pre-select the default card
+  const preselect = document.querySelector('.report-card[data-report="daily-summary"]');
+  if (preselect) preselect.classList.add('report-card-selected');
+
+  if (generateBtn) {
+    generateBtn.addEventListener('click', async () => {
+      const format = reportFormat.value;
+      const type = reportType.value;
+      let from = reportFrom.value;
+      let to = reportTo.value;
+      const busId = reportBus ? reportBus.value : '';
+
+      if (!from || !to) {
+        if (reportStatus) reportStatus.textContent = 'Please choose both From and To dates.';
+        return;
+      }
+      if (from > to) { const tmp = from; from = to; to = tmp; }
+      if (from > today || to > today) {
+        if (reportStatus) reportStatus.textContent = 'Dates cannot be in the future.';
+        return;
+      }
+
+      generateBtn.disabled = true;
+      const busLabel = busId ? ', Bus ' + busId : '';
+      if (reportStatus) reportStatus.textContent = 'Generating ' + format.toUpperCase() + ' for ' + type + ' (' + from + ' to ' + to + busLabel + ')...';
+      try {
+        if (format === 'pdf') await exportToPDF(type, from, to, busId);
+        else if (format === 'excel') await exportToExcel(type, from, to, busId);
+        else await exportToCSV(type, from, to, busId);
+        if (reportStatus) reportStatus.textContent = 'Downloaded ' + format.toUpperCase() + ' for ' + from + ' to ' + to + (busId ? ' (Bus ' + busId + ')' : '') + '.';
+      } catch (err) {
+        console.error('Report generation failed:', err);
+        if (reportStatus) reportStatus.textContent = 'Failed to generate report: ' + (err.message || err);
+      } finally {
+        generateBtn.disabled = false;
+      }
+    });
+  }
+}
+
+// Add/subtract days from a YYYY-MM-DD string
+function shiftDateStr(dateStr, days) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return dt.toISOString().slice(0, 10);
 }
 
 
@@ -2605,16 +2691,24 @@ function initExportMenus() {
   });
 }
 
-async function exportToPDF(title, from, to) {
+async function exportToPDF(title, from, to, busId) {
   const { jsPDF } = window.jspdf; const doc = new jsPDF();
   doc.setFillColor(15,17,23); doc.rect(0,0,210,40,'F');
   doc.setTextColor(255,255,255); doc.setFontSize(18); doc.text('Smart Urban Sensing Ltd',14,18);
-  doc.setFontSize(10); doc.text(`${title} — ${from} to ${to}`,14,28);
+  doc.setFontSize(10); doc.text(`${title} — ${from} to ${to}${busId ? ' — Bus ' + busId : ''}`,14,28);
   doc.text(`Generated: ${new Date().toLocaleString('en-GB')}`,14,34);
 
-  // Fetch summary from backend, with live MQTT fallback
-  const summary = await apiFetch('/api/summary', { period: from });
-  const totals = summary?.totals || {};
+  // Aggregate KPIs from /api/daily so the To date is honoured (and bus filter respected)
+  const dailyForKpis = await apiFetch('/api/daily', { from, to, ...(busId ? { bus_id: busId } : {}) });
+  const rows = (dailyForKpis && dailyForKpis.daily) || [];
+  const totals = {
+    total_boardings: rows.reduce((s,r)=>s+(r.total_in||0),0),
+    total_alightings: rows.reduce((s,r)=>s+(r.total_out||0),0),
+    peak_onboard: rows.reduce((m,r)=>Math.max(m, r.peak_onboard||0), 0),
+    bus_count: new Set(rows.map(r=>r.bus_id)).size,
+    avg_occupancy: rows.length ? (rows.reduce((s,r)=>s+(r.avg_occupancy||0),0)/rows.length) : 0,
+  };
+  const summary = rows.length ? { totals } : null;
   const totalPax = totals.total_boardings || BUS_POSITIONS.reduce((s,b)=>s+(b.lineIn||b.passengers),0);
   const totalAlight = totals.total_alightings || BUS_POSITIONS.reduce((s,b)=>s+(b.lineOut||0),0);
   const busCount = totals.bus_count || BUS_POSITIONS.filter(b=>b.status==='active').length;
@@ -2631,8 +2725,8 @@ async function exportToPDF(title, from, to) {
     ['Avg Occupancy', avgOcc.toFixed ? avgOcc.toFixed(1) + '%' : avgOcc + '%', dataSource],
   ], theme:'grid', headStyles:{fillColor:[59,130,246]} });
 
-  // Fetch daily breakdown
-  const daily = await apiFetch('/api/daily', { from, to });
+  // Fetch daily breakdown (already in `dailyForKpis`, but re-use as `daily`)
+  const daily = dailyForKpis;
   if (daily && daily.daily && daily.daily.length > 0) {
     doc.text('Daily Breakdown',14,doc.lastAutoTable.finalY+14);
     doc.autoTable({ startY:doc.lastAutoTable.finalY+20, head:[['Date','Bus','Boardings','Alightings','Peak Onboard','Avg Occupancy']],
@@ -2653,12 +2747,20 @@ async function exportToPDF(title, from, to) {
   doc.save(`SUS_Report_${from}_${to}.pdf`);
 }
 
-async function exportToExcel(title, from, to) {
+async function exportToExcel(title, from, to, busId) {
   const wb = XLSX.utils.book_new();
 
-  // Summary sheet — backend or live MQTT fallback
-  const summary = await apiFetch('/api/summary', { period: from });
-  const totals = summary?.totals || {};
+  // Summary sheet — aggregate KPIs from /api/daily so To date and bus filter are honoured
+  const dailyForKpis = await apiFetch('/api/daily', { from, to, ...(busId ? { bus_id: busId } : {}) });
+  const rowsAgg = (dailyForKpis && dailyForKpis.daily) || [];
+  const totals = {
+    total_boardings: rowsAgg.reduce((s,r)=>s+(r.total_in||0),0),
+    total_alightings: rowsAgg.reduce((s,r)=>s+(r.total_out||0),0),
+    peak_onboard: rowsAgg.reduce((m,r)=>Math.max(m, r.peak_onboard||0), 0),
+    bus_count: new Set(rowsAgg.map(r=>r.bus_id)).size,
+    avg_occupancy: rowsAgg.length ? (rowsAgg.reduce((s,r)=>s+(r.avg_occupancy||0),0)/rowsAgg.length) : 0,
+  };
+  const summary = rowsAgg.length ? { totals } : null;
   const totalBoardings = totals.total_boardings || BUS_POSITIONS.reduce((s,b)=>s+(b.lineIn||0),0);
   const totalAlightings = totals.total_alightings || BUS_POSITIONS.reduce((s,b)=>s+(b.lineOut||0),0);
   const busCount = totals.bus_count || BUS_POSITIONS.filter(b=>b.status==='active').length;
@@ -2667,7 +2769,7 @@ async function exportToExcel(title, from, to) {
   const dataSource = summary ? 'Database + Live MQTT' : 'Live MQTT only';
 
   const ws1 = XLSX.utils.aoa_to_sheet([
-    ['Smart Urban Sensing Ltd — APC Report'],[`${title} — ${from} to ${to}`],
+    ['Smart Urban Sensing Ltd — APC Report'],[`${title} — ${from} to ${to}${busId ? ' — Bus ' + busId : ''}`],
     ['Generated:',new Date().toLocaleString('en-GB')],['Data Source:', dataSource],[],
     ['Metric','Value'],
     ['Total Boardings', totalBoardings],
@@ -2679,7 +2781,7 @@ async function exportToExcel(title, from, to) {
   XLSX.utils.book_append_sheet(wb,ws1,'Summary');
 
   // Daily summary sheet
-  const daily = await apiFetch('/api/daily', { from, to });
+  const daily = dailyForKpis;
   if (daily && daily.daily) {
     const ws2 = XLSX.utils.aoa_to_sheet([
       ['Date','Bus ID','Boardings','Alightings','Peak Onboard','Peak Hour','First Seen','Last Seen','Avg Occupancy %'],
@@ -2689,7 +2791,9 @@ async function exportToExcel(title, from, to) {
   }
 
   // Raw records sheet — API or live MQTT fallback
-  const apiRecords = await apiFetch('/api/records', { date: from === to ? from : undefined, limit: 10000 });
+  const recordParams = { limit: 10000, ...(busId ? { bus_id: busId } : {}) };
+  if (from === to) recordParams.date = from; else { recordParams.from = from; recordParams.to = to; }
+  const apiRecords = await apiFetch('/api/records', recordParams);
   if (apiRecords && apiRecords.records) {
     const ws3 = XLSX.utils.aoa_to_sheet([
       ['Timestamp','Bus ID','Route','Stop','Boardings','Alightings','Onboard','Occupancy %','Lat','Lng','Type'],
@@ -2716,10 +2820,12 @@ async function exportToExcel(title, from, to) {
   XLSX.writeFile(wb,`SUS_Report_${from}_${to}.xlsx`);
 }
 
-async function exportToCSV(title, from, to) {
+async function exportToCSV(title, from, to, busId) {
   void title;
   // Fetch records from API, with live MQTT fallback
-  const data = await apiFetch('/api/records', { date: from === to ? from : undefined, limit: 50000 });
+  const recordParams = { limit: 50000, ...(busId ? { bus_id: busId } : {}) };
+  if (from === to) recordParams.date = from; else { recordParams.from = from; recordParams.to = to; }
+  const data = await apiFetch('/api/records', recordParams);
   let records, h, rows;
   if (data && data.records) {
     records = data.records;

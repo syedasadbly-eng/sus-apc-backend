@@ -771,13 +771,23 @@ app.get('/api/live', (req, res) => {
 // --- Records (raw data for Data Explorer) ---
 
 app.get('/api/records', (req, res) => {
-  const { date, bus_id, limit = 500, offset = 0 } = req.query;
+  const { date, from, to, bus_id, limit = 500, offset = 0 } = req.query;
   let sql = 'SELECT * FROM records WHERE 1=1';
   const params = {};
 
   if (date) {
     sql += ' AND date = @date';
     params.date = date;
+  } else if (from && to) {
+    sql += ' AND date BETWEEN @from AND @to';
+    params.from = from;
+    params.to = to;
+  } else if (from) {
+    sql += ' AND date >= @from';
+    params.from = from;
+  } else if (to) {
+    sql += ' AND date <= @to';
+    params.to = to;
   }
   if (bus_id) {
     sql += ' AND bus_id = @bus_id';

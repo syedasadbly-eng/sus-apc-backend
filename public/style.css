@@ -987,6 +987,12 @@ html, body {
   box-shadow: var(--shadow-md);
 }
 
+.report-card-selected {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 1px var(--color-primary), var(--shadow-md);
+  background: linear-gradient(180deg, rgba(91,73,168,0.10) 0%, var(--color-surface) 100%);
+}
+
 .report-icon {
   width: 40px;
   height: 40px;
