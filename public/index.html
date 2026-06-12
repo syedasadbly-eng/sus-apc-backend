@@ -670,49 +670,119 @@
         <div class="filter-group">
           <span class="filter-label">Route</span>
           <select class="filter-select" id="routeSelect">
-            <option value="all">All Buses</option>
+            <option value="all">All Routes</option>
           </select>
         </div>
         <div class="filter-group">
-          <span class="filter-label">Date</span>
-          <input type="date" class="filter-input" id="routeDate">
+          <span class="filter-label">From</span>
+          <input type="date" class="filter-input" id="routeFromDate">
+        </div>
+        <div class="filter-group">
+          <span class="filter-label">To</span>
+          <input type="date" class="filter-input" id="routeToDate">
+        </div>
+        <div class="filter-group" id="routePresetGroup">
+          <button class="btn btn-ghost btn-sm" data-route-preset="1">1d</button>
+          <button class="btn btn-ghost btn-sm" data-route-preset="7">7d</button>
+          <button class="btn btn-ghost btn-sm" data-route-preset="30">30d</button>
+        </div>
+        <div class="filter-group" style="margin-left:auto">
+          <button class="btn btn-primary btn-sm" id="routeExportCsv">Export CSV</button>
         </div>
       </div>
 
+      <!-- Route KPI strip -->
+      <div class="kpi-grid" style="margin-bottom:var(--space-4)">
+        <div class="kpi-card">
+          <div class="kpi-label">Total Boardings</div>
+          <div class="kpi-value" id="routeKpiBoard">--</div>
+          <div class="kpi-sub" id="routeKpiBoardSub">across selected stops</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Total Alightings</div>
+          <div class="kpi-value" id="routeKpiAlight">--</div>
+          <div class="kpi-sub" id="routeKpiAlightSub">across selected stops</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Active Stops</div>
+          <div class="kpi-value" id="routeKpiStops">--</div>
+          <div class="kpi-sub" id="routeKpiStopsSub">with passenger events</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Busiest Stop</div>
+          <div class="kpi-value" id="routeKpiBusiest" style="font-size:1.05rem;line-height:1.3;font-weight:600">--</div>
+          <div class="kpi-sub" id="routeKpiBusiestSub">peak boarding location</div>
+        </div>
+      </div>
+
+      <!-- Per-stop ranking + map -->
       <div class="chart-grid cols-2">
         <div class="chart-panel">
           <div class="chart-header">
             <div>
-              <div class="chart-title">Boardings by Stop</div>
-              <div class="chart-subtitle">Live MQTT Data</div>
+              <div class="chart-title" id="stopRankTitle">Top Stops by Boardings</div>
+              <div class="chart-subtitle" id="stopRankSubtitle">Ranked across the selected window</div>
             </div>
           </div>
-          <div class="chart-body">
-            <canvas id="chartStopBoardings" height="300"></canvas>
+          <div class="chart-body" style="min-height:420px">
+            <canvas id="chartStopBoardings"></canvas>
           </div>
         </div>
         <div class="chart-panel">
           <div class="chart-header">
             <div>
-              <div class="chart-title">Passenger Load Profile</div>
-              <div class="chart-subtitle">Onboard count across stops</div>
+              <div class="chart-title">Route Map</div>
+              <div class="chart-subtitle" id="routeMapSubtitle">Stops sized by boarding volume</div>
             </div>
           </div>
-          <div class="chart-body">
-            <canvas id="chartLoadProfile" height="300"></canvas>
+          <div class="chart-body" style="padding:0;overflow:hidden;border-radius:12px;min-height:420px">
+            <div id="routeMap" style="width:100%;height:420px;border-radius:12px"></div>
           </div>
         </div>
       </div>
 
+      <!-- Stop leaderboard table -->
       <div class="chart-panel" style="margin-top:var(--space-4)">
         <div class="chart-header">
           <div>
-            <div class="chart-title">Hourly Heatmap — Boardings per Stop</div>
-            <div class="chart-subtitle">Stop activity intensity across the day</div>
+            <div class="chart-title">Stop Leaderboard</div>
+            <div class="chart-subtitle" id="stopLeaderSubtitle">Per-stop boardings, alightings, and net load</div>
           </div>
         </div>
-        <div class="chart-body">
-          <canvas id="chartHeatmap" height="280"></canvas>
+        <div class="chart-body" style="padding:0">
+          <div style="overflow-x:auto;max-height:420px;overflow-y:auto">
+            <table class="data-table" id="stopLeaderTable" style="width:100%">
+              <thead>
+                <tr>
+                  <th style="text-align:left">#</th>
+                  <th style="text-align:left">Route</th>
+                  <th style="text-align:left">Stop</th>
+                  <th style="text-align:right">Boardings</th>
+                  <th style="text-align:right">Alightings</th>
+                  <th style="text-align:right">Net Load</th>
+                  <th style="text-align:right">Events</th>
+                </tr>
+              </thead>
+              <tbody id="stopLeaderBody">
+                <tr><td colspan="7" style="text-align:center;padding:24px;color:#8b8ea5">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stop x Hour heatmap matrix -->
+      <div class="chart-panel" style="margin-top:var(--space-4)">
+        <div class="chart-header">
+          <div>
+            <div class="chart-title">Hourly Activity by Stop</div>
+            <div class="chart-subtitle" id="heatmapSubtitle">Boarding intensity - rows are stops, columns are hours</div>
+          </div>
+        </div>
+        <div class="chart-body" style="padding:8px 4px">
+          <div id="stopHourMatrix" style="width:100%;overflow-x:auto">
+            <div style="padding:32px;text-align:center;color:#8b8ea5">Loading hourly activity...</div>
+          </div>
         </div>
       </div>
     </div>
