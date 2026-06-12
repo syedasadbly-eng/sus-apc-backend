@@ -534,6 +534,29 @@ const GPS_DIAG_BY_BUS = {};
 const GPS_DIAG_HISTORY = [];
 const GPS_DIAG_HISTORY_MAX = 50;
 
+// MQTT-counting state
+const busHasEverSentTrigger = {};                 // bus_id -> bool
+const periodicWindowsSeen = new Set();            // de-dupe key for periodic-only fallback
+const MQTT_FLOW_HISTORY_MAX = 100;
+const MQTT_FLOW_HISTORY = [];                     // newest first
+const MQTT_FLOW_BY_BUS = {};                      // bus_id -> latest flow record
+function recordMqttFlow(busId, topic, brokerNow, deviceTs, skewSec, msgType, decision, dIn, dOut) {
+  const rec = {
+    bus_id: busId, topic,
+    broker_ts: brokerNow.toISOString(),
+    device_ts: deviceTs || null,
+    clock_skew_seconds: skewSec,
+    msg_type: msgType,
+    count_decision: decision,
+    delta_in: dIn || 0,
+    delta_out: dOut || 0,
+  };
+  MQTT_FLOW_BY_BUS[busId] = rec;
+  MQTT_FLOW_HISTORY.unshift(rec);
+  if (MQTT_FLOW_HISTORY.length > MQTT_FLOW_HISTORY_MAX) MQTT_FLOW_HISTORY.length = MQTT_FLOW_HISTORY_MAX;
+}
+
+
 // Debug: track every distinct topic seen since boot, with the sensor serial,
 // resolved bus label, message count and last-seen time. This is the single
 // source of truth for "is a given bus/door actually transmitting?".
@@ -686,16 +709,25 @@ function handleMessage(topic, rawPayload) {
   const totalDataDate = totalDataStartTime ? totalDataStartTime.slice(0, 10) : null;
   const todayDateStr = displayDateStr(new Date());
   const hasDailyTotals = dailyIn != null || dailyOut != null;
-  // Skip stale MQTT messages from previous days entirely
-  if (totalDataDate !== null && totalDataDate !== todayDateStr) {
-    console.log(`[SKIP] Stale message from ${totalDataDate}, today is ${todayDateStr}`);
-    return;
-  }
   const hasTrigger     = triggerIn != null || triggerOut != null;
 
-  // If no counting data at all, this is a pure GPS/status message — done
+  // NOTE: We previously dropped any message whose time_info.start_time was not
+  // today, but the UR35/VS125 device clocks can drift or freeze (bus 515's
+  // device reported 2026-05-30 indefinitely), which silently blackholed live
+  // data. Trust the BROKER receive time (Date.now()) as truth and just RECORD
+  // device-clock skew into the diagnostic instead of dropping the message.
+  const brokerNow = new Date();
+  const deviceClockSkewSec = totalDataStartTime
+    ? Math.round((brokerNow.getTime() - new Date(totalDataStartTime).getTime()) / 1000)
+    : null;
+  if (totalDataDate !== null && totalDataDate !== todayDateStr) {
+    console.warn(`[CLOCK-SKEW] ${busId} (${topic}) device clock at ${totalDataStartTime}, broker now ${brokerNow.toISOString()} (skew ${deviceClockSkewSec}s) - PROCESSING ANYWAY`);
+  }
+
+  // If no counting data at all, this is a pure GPS/status message - done
   if (!hasPeriodic && !hasDailyTotals && !hasTrigger) {
-    console.log(`[MQTT] ${busId} (${topic}) GPS/status only — no counting data`);
+    recordMqttFlow(busId, topic, brokerNow, totalDataStartTime, deviceClockSkewSec, 'gps_only', 'No counting fields in payload', 0, 0);
+    console.log(`[MQTT] ${busId} (${topic}) GPS/status only - no counting data`);
     return;
   }
 
@@ -703,26 +735,59 @@ function handleMessage(topic, rawPayload) {
   // line_trigger_data is the authoritative per-event counting source. The device
   // ALSO emits line_periodic_data that re-reports the same movement over a fixed
   // interval; counting both as separate messages double-counts ridership (this
-  // caused June 2's impossible 1262 boardings). So trigger is primary, and
-  // periodic movement is IGNORED for counting (periodic messages are still kept
-  // for GPS / onboard snapshots, just with zero count delta).
+  // caused June 2's impossible 1262 boardings).
+  //
+  // Counting policy (per bus, sticky):
+  //  - If a bus has EVER sent line_trigger_data, trigger is primary and periodic
+  //    is ignored (avoids double counting).
+  //  - If a bus has NEVER sent trigger data, fall back to counting periodic
+  //    deltas, with a per-window de-dupe key (line_uuid + start_time) so the
+  //    same window isn't credited twice even if the device retransmits.
   let deltaIn = 0, deltaOut = 0, msgType = 'unknown';
+  let countDecision = 'no_count';
 
   if (hasTrigger) {
-    // Primary source: real-time single-person events (already per-event).
     deltaIn = Number(triggerIn) || 0;
     deltaOut = Number(triggerOut) || 0;
     msgType = 'trigger';
+    busHasEverSentTrigger[busId] = true;
+    countDecision = 'trigger_counted';
     console.log(`[MQTT] ${busId} (${topic}) trigger: in=${deltaIn} out=${deltaOut}`);
   } else if (hasPeriodic) {
-    // Periodic data exists but no trigger data on this message: treat it as a
-    // heartbeat only — do NOT count its movement (avoids double-counting the
-    // trigger events that report the same passengers).
-    deltaIn = 0;
-    deltaOut = 0;
-    msgType = 'periodic';
-    console.log(`[MQTT] ${busId} (${topic}) periodic heartbeat (movement ignored for counting)`);
+    if (busHasEverSentTrigger[busId]) {
+      deltaIn = 0;
+      deltaOut = 0;
+      msgType = 'periodic';
+      countDecision = 'periodic_ignored_trigger_mode';
+      console.log(`[MQTT] ${busId} (${topic}) periodic heartbeat (trigger-mode, ignored for counting)`);
+    } else {
+      const lineUuid = (() => {
+        const arr = payload && payload.line_periodic_data;
+        return Array.isArray(arr) && arr[0] && arr[0].line_uuid ? arr[0].line_uuid : 'line';
+      })();
+      const windowKey = busId + '|' + lineUuid + '|' + (totalDataStartTime || 'now-' + brokerNow.toISOString().slice(0, 16));
+      if (periodicWindowsSeen.has(windowKey)) {
+        deltaIn = 0;
+        deltaOut = 0;
+        msgType = 'periodic';
+        countDecision = 'periodic_duplicate_window';
+        console.log(`[MQTT] ${busId} (${topic}) periodic DUPLICATE window ${windowKey} - skipping count`);
+      } else {
+        periodicWindowsSeen.add(windowKey);
+        if (periodicWindowsSeen.size > 10000) {
+          const it = periodicWindowsSeen.values();
+          for (let i = 0; i < 2000; i++) periodicWindowsSeen.delete(it.next().value);
+        }
+        deltaIn = Number(periodicIn) || 0;
+        deltaOut = Number(periodicOut) || 0;
+        msgType = 'periodic';
+        countDecision = 'periodic_counted_fallback';
+        console.log(`[MQTT] ${busId} (${topic}) periodic-only mode: in=${deltaIn} out=${deltaOut} window=${windowKey}`);
+      }
+    }
   }
+
+  recordMqttFlow(busId, topic, brokerNow, totalDataStartTime, deviceClockSkewSec, msgType, countDecision, deltaIn, deltaOut);
 
   // ---- ONBOARD COUNT (from line_total_data cumulative) ----
   // onboard is always computed from dayIn-dayOut in flushBusDelta (line_total_data totals are stale device lifetime counts)
@@ -1688,6 +1753,23 @@ app.get('/api/gps-diag', (req, res) => {
     },
     per_bus_latest: buses,
     recent_history: GPS_DIAG_HISTORY,
+  });
+});
+
+app.get('/api/mqtt-flow', (req, res) => {
+  res.json({
+    description: 'MQTT message flow diagnostic. Shows per-bus accept/drop decisions and clock skew.',
+    legend: {
+      gps_only: 'Payload had GPS only (no counting fields). Not counted, not an error.',
+      trigger_counted: 'line_trigger_data delta counted as boardings/alightings.',
+      periodic_counted_fallback: 'No trigger data ever seen for this bus, so periodic deltas counted (with per-window de-dupe).',
+      periodic_ignored_trigger_mode: 'Bus has sent trigger data before, so periodic heartbeats are ignored to avoid double-counting.',
+      periodic_duplicate_window: 'Periodic window (line_uuid+start_time) already counted; ignored.',
+      no_count: 'No countable fields in payload.',
+    },
+    bus_state: Object.fromEntries(Object.keys(busHasEverSentTrigger).map(b => [b, { has_ever_sent_trigger: !!busHasEverSentTrigger[b] }])),
+    per_bus_latest: MQTT_FLOW_BY_BUS,
+    recent_history: MQTT_FLOW_HISTORY,
   });
 });
 
