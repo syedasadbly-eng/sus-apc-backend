@@ -1379,13 +1379,13 @@ function initOverviewAnalyticsCharts() {
   const pctx = document.getElementById('chartPassengerOn');
   if (pctx) {
     const pctxCtx = pctx.getContext('2d');
-    // High-quality white gradient — bright crisp top fading to a subtle
-    // cool-white base. Reads as luminous and premium against the dark surface
-    // without going flat or chalky.
+    // Solid glossy white — a single white tone with a subtle highlight sheen
+    // along the top edge for a polished, glass-like finish. Stays uniformly
+    // white through the body of each bar.
     const premiumGradient = pctxCtx.createLinearGradient(0, 0, 0, 420);
-    premiumGradient.addColorStop(0.00, 'rgba(255, 255, 255, 0.98)'); // bright white top
-    premiumGradient.addColorStop(0.55, 'rgba(244, 245, 250, 0.92)'); // soft pearl mid
-    premiumGradient.addColorStop(1.00, 'rgba(214, 218, 235, 0.70)'); // cool pearl base
+    premiumGradient.addColorStop(0.00, 'rgba(255, 255, 255, 1.00)'); // bright sheen highlight
+    premiumGradient.addColorStop(0.08, 'rgba(255, 255, 255, 0.98)'); // pure white body
+    premiumGradient.addColorStop(1.00, 'rgba(255, 255, 255, 0.96)'); // pure white base
     charts.passengerOn = new Chart(pctxCtx, {
       type: 'bar',
       data: {
