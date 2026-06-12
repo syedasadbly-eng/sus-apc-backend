@@ -1526,11 +1526,24 @@ app.post('/api/admin/backfill-history-locations', (req, res) => {
     });
     if (updates.length > 0) tx(updates);
 
+    // Force WAL checkpoint so the update is durable across restarts.
+    let checkpoint = null;
+    try { checkpoint = db.pragma('wal_checkpoint(TRUNCATE)'); } catch (e) { checkpoint = e.message; }
+
+    // Verify with a follow-up read inside the same handler.
+    const verify = db.prepare(`
+      SELECT COUNT(*) AS stale FROM records
+      WHERE ABS(lat - 44.9778) < 0.001 AND ABS(lng - (-93.265)) < 0.001
+    `).get();
+
     res.json({
       scanned: rows.length,
       updated: touched,
       skipped_not_stale: skippedNotStale,
       skipped_no_route: skippedNoRoute,
+      checkpoint,
+      stale_remaining_after_update: verify.stale,
+      db_path: DB_PATH,
     });
   } catch (e) {
     console.error('[BACKFILL]', e);
