@@ -835,15 +835,22 @@
                 <option>Monthly Performance</option>
                 <option>Route Analysis</option>
                 <option>Fleet Health</option>
+                <option>Custom Report</option>
               </select>
             </div>
             <div class="filter-group">
               <span class="filter-label">From</span>
-              <input type="date" class="filter-input" value="2026-03-01" id="reportFrom">
+              <input type="date" class="filter-input" id="reportFrom">
             </div>
             <div class="filter-group">
               <span class="filter-label">To</span>
               <input type="date" class="filter-input" id="reportTo">
+            </div>
+            <div class="filter-group">
+              <span class="filter-label">Bus</span>
+              <select class="filter-select" id="reportBus">
+                <option value="">All buses</option>
+              </select>
             </div>
             <div class="filter-group">
               <span class="filter-label">Format</span>
@@ -854,6 +861,7 @@
               </select>
             </div>
           </div>
+          <div id="reportStatus" style="font-size:var(--text-xs);color:var(--color-text-muted);margin-bottom:var(--space-3);min-height:1.2em"></div>
           <button class="btn btn-primary" id="generateReport">
             <i data-lucide="file-down" style="width:14px;height:14px"></i>
             Generate &amp; Download
