@@ -1521,6 +1521,18 @@ app.post('/api/admin/backfill-history-locations', (req, res) => {
       touched++;
     }
 
+    // Run a single sample update outside a transaction first, capturing
+    // exact changes count + a follow-up SELECT on that rowid, to prove
+    // whether the write is actually landing.
+    let sampleDebug = null;
+    if (updates.length > 0) {
+      const sample = updates[0];
+      const before = db.prepare('SELECT rowid, lat, lng, stop FROM records WHERE rowid = ?').get(sample.rowid);
+      const result = upd.run(sample);
+      const after = db.prepare('SELECT rowid, lat, lng, stop FROM records WHERE rowid = ?').get(sample.rowid);
+      sampleDebug = { sample, before, result_changes: result.changes, after };
+    }
+
     const tx = db.transaction((items) => {
       for (const it of items) upd.run(it);
     });
@@ -1544,6 +1556,7 @@ app.post('/api/admin/backfill-history-locations', (req, res) => {
       checkpoint,
       stale_remaining_after_update: verify.stale,
       db_path: DB_PATH,
+      sample_debug: sampleDebug,
     });
   } catch (e) {
     console.error('[BACKFILL]', e);
