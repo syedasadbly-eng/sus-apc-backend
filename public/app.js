@@ -1640,12 +1640,15 @@ function initRidership() {
       plugins: {
         legend: { display: false },
         tooltip: { ...tooltipDefaults(),
+          titleFont: { family: 'Inter', size: 14, weight: '600' },
+          bodyFont: { family: 'Inter', size: 13 },
+          padding: 14,
           callbacks: { label: (c) => ' ' + Number(c.parsed.y).toLocaleString() + ' boardings' }
         }
       },
       scales: {
-        x: { grid: { color: 'rgba(255,255,255,0.04)', drawTicks: false }, ticks: { color: '#b5b8d0', font: { size: 11, family: 'Inter' }, padding: 8 } },
-        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)', drawTicks: false }, ticks: { color: '#b5b8d0', font: { size: 11, family: 'Inter' }, padding: 8, callback: (v) => Number(v).toLocaleString() }, title: { display: true, text: 'Boardings', color: '#9094b2', font: { size: 11, family: 'Inter', weight: '600' } } }
+        x: { grid: { color: 'rgba(255,255,255,0.04)', drawTicks: false }, ticks: { color: '#c9cad8', font: { size: 13, family: 'Inter', weight: '500' }, padding: 10 } },
+        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)', drawTicks: false }, ticks: { color: '#c9cad8', font: { size: 13, family: 'Inter', weight: '500' }, padding: 10, callback: (v) => Number(v).toLocaleString() }, title: { display: true, text: 'Boardings', color: '#a5a8c1', font: { size: 13, family: 'Inter', weight: '600' }, padding: { bottom: 8 } } }
       }
     },
   });
@@ -1655,14 +1658,17 @@ function initRidership() {
     interaction: { mode: 'index', intersect: false },
     animation: { duration: 800, easing: 'easeOutQuart' },
     plugins: {
-      legend: { labels: { color: '#c9cad8', font: { size: 12, family: 'Inter', weight: '500' }, padding: 18, usePointStyle: true, pointStyle: 'circle', boxWidth: 8, boxHeight: 8 } },
+      legend: { labels: { color: '#dbdce6', font: { size: 14, family: 'Inter', weight: '500' }, padding: 20, usePointStyle: true, pointStyle: 'circle', boxWidth: 10, boxHeight: 10 } },
       tooltip: { ...tooltipDefaults(),
+        titleFont: { family: 'Inter', size: 14, weight: '600' },
+        bodyFont: { family: 'Inter', size: 13 },
+        padding: 14,
         callbacks: { label: (c) => ' ' + c.dataset.label + ': ' + Number(c.parsed.y).toLocaleString() }
       }
     },
     scales: {
-      x: { grid: { color: 'rgba(255,255,255,0.04)', drawTicks: false }, ticks: { color: '#b5b8d0', font: { size: 11, family: 'Inter' }, padding: 8 } },
-      y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)', drawTicks: false }, ticks: { color: '#b5b8d0', font: { size: 11, family: 'Inter' }, padding: 8, callback: (v) => Number(v).toLocaleString() }, title: { display: true, text: yLabel, color: '#9094b2', font: { size: 11, family: 'Inter', weight: '600' } } }
+      x: { grid: { color: 'rgba(255,255,255,0.04)', drawTicks: false }, ticks: { color: '#c9cad8', font: { size: 13, family: 'Inter', weight: '500' }, padding: 10 } },
+      y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)', drawTicks: false }, ticks: { color: '#c9cad8', font: { size: 13, family: 'Inter', weight: '500' }, padding: 10, callback: (v) => Number(v).toLocaleString() }, title: { display: true, text: yLabel, color: '#a5a8c1', font: { size: 13, family: 'Inter', weight: '600' }, padding: { bottom: 8 } } }
     }
   });
 

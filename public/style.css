@@ -1658,13 +1658,14 @@ html, body {
 
 .ridership-premium .kpi-label {
   color: #a5a8c1;
+  font-size: 13px;
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.09em;
 }
 
 .ridership-premium .kpi-value {
   color: #ffffff;
-  font-size: 30px;
+  font-size: 38px;
   font-weight: 700;
   letter-spacing: -0.02em;
   line-height: 1.1;
@@ -1672,9 +1673,10 @@ html, body {
 }
 
 .ridership-premium .kpi-sub {
-  color: #8a8db0;
-  font-size: 12px;
-  margin-top: 6px;
+  color: #9094b2;
+  font-size: 13.5px;
+  margin-top: 8px;
+  line-height: 1.4;
 }
 
 .ridership-premium .chart-panel {
@@ -1692,15 +1694,20 @@ html, body {
 
 .ridership-premium .chart-title {
   color: #ffffff;
-  font-size: 16px;
+  font-size: 20px;
   font-weight: 600;
   letter-spacing: -0.01em;
 }
 
+.ridership-premium .chart-title.chart-title-lg {
+  font-size: 24px;
+}
+
 .ridership-premium .chart-subtitle {
   color: #9094b2;
-  font-size: 12.5px;
-  margin-top: 2px;
+  font-size: 14.5px;
+  margin-top: 4px;
+  line-height: 1.45;
 }
 
 .ridership-premium .chart-body {
@@ -1718,14 +1725,23 @@ html, body {
 
 .ridership-premium .filter-label {
   color: #a5a8c1;
+  font-size: 13px;
   font-weight: 600;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
 }
 
 .ridership-premium .filter-select {
   background: rgba(11,13,21,0.55);
   border-color: rgba(139,116,209,0.25);
   color: #ffffff;
+  font-size: 14px;
+  padding: 8px 12px;
+}
+
+.ridership-premium #ridershipViewTabs .period-tab {
+  font-size: 13.5px;
+  padding: 8px 14px;
+  font-weight: 600;
 }
 
 /* Day/Weekly/Monthly tabs in ridership */
@@ -1749,7 +1765,11 @@ html, body {
 }
 
 @media (max-width: 720px) {
-  .ridership-premium .kpi-value { font-size: 26px; }
+  .ridership-premium .kpi-value { font-size: 30px; }
+  .ridership-premium .kpi-sub { font-size: 12.5px; }
+  .ridership-premium .chart-title { font-size: 17px; }
+  .ridership-premium .chart-title.chart-title-lg { font-size: 20px; }
+  .ridership-premium .chart-subtitle { font-size: 13px; }
   .ridership-premium .chart-header { padding: 16px 16px 6px; }
 }
 
