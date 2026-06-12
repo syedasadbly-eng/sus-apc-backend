@@ -1663,7 +1663,7 @@ async function populateBusDropdowns() {
     busList = configStore.gateways.map(gw => gw.label || gw.topic);
   }
   if (busList.length === 0) return;
-  const selectors = ['ridershipRoute', 'compareRoute', 'dataRoute', 'dataBus'];
+  const selectors = ['ridershipRoute', 'compareRoute', 'dataRoute', 'dataBus', 'routeSelect'];
   selectors.forEach(id => {
     const sel = document.getElementById(id);
     if (!sel) return;
@@ -2085,17 +2085,41 @@ function initRoutes() {
     options: chartDefaults('Passengers'),
   });
   initHeatmapChart();
+
+  // Default the date filter to today and clamp it so the user can't pick a
+  // future date. (HTML defaulted to a stale value of 2026-03-09.)
+  const dateInput = document.getElementById('routeDate');
+  if (dateInput) {
+    const today = displayDateStr();
+    dateInput.value = today;
+    dateInput.max = today;
+    dateInput.addEventListener('change', () => loadRoutesData());
+  }
+
+  // Wire the bus/route selector. Options are populated by
+  // populateRouteSelectors() from the live bus list (515, 419, …).
+  const routeSel = document.getElementById('routeSelect');
+  if (routeSel) routeSel.addEventListener('change', () => loadRoutesData());
+
   loadRoutesData();
 }
 
 async function loadRoutesData() {
+  // Read both filters from the page; fall back to sensible defaults.
   const today = displayDateStr();
+  const dateInput = document.getElementById('routeDate');
+  const routeSel = document.getElementById('routeSelect');
+  const date = (dateInput && dateInput.value) || today;
+  const busSel = (routeSel && routeSel.value) || 'all';
+  const busFilter = busSel === 'all' ? null : busSel;
 
-  // Fetch today's daily data per bus
-  const dailyData = await apiFetch('/api/daily', { from: today, to: today });
+  // --- Daily totals (per bus) for the Boardings / Load Profile charts. ---
+  const dailyParams = { from: date, to: date };
+  if (busFilter) dailyParams.bus_id = busFilter;
+  const dailyData = await apiFetch('/api/daily', dailyParams);
   if (dailyData && dailyData.daily && dailyData.daily.length > 0) {
     const rows = dailyData.daily;
-    const busLabels = rows.map(r => r.bus_id);
+    const busLabels = rows.map(r => `Bus ${r.bus_id}`);
     const busIn = rows.map(r => r.total_in);
     const busOut = rows.map(r => r.total_out);
     const busOnboard = rows.map(r => Math.max(0, r.total_in - r.total_out));
@@ -2109,37 +2133,65 @@ async function loadRoutesData() {
     charts.loadProfile.data.datasets[0].data = busOnboard;
     charts.loadProfile.data.datasets[1].data = busLabels.map(() => CONFIG.busCapacity);
     charts.loadProfile.update('active');
-  } else if (BUS_POSITIONS.length > 0) {
-    // Fallback to live data
-    const busLabels = BUS_POSITIONS.map(b => b.id);
+  } else if (date === today && BUS_POSITIONS.length > 0) {
+    // Live MQTT fallback only makes sense for *today*.
+    const positions = busFilter
+      ? BUS_POSITIONS.filter(b => b.id === busFilter)
+      : BUS_POSITIONS;
+    const busLabels = positions.map(b => `Bus ${b.id}`);
     charts.stopBoardings.data.labels = busLabels;
-    charts.stopBoardings.data.datasets[0].data = BUS_POSITIONS.map(b => b.lineIn || 0);
-    charts.stopBoardings.data.datasets[1].data = BUS_POSITIONS.map(b => b.lineOut || 0);
+    charts.stopBoardings.data.datasets[0].data = positions.map(b => b.lineIn || 0);
+    charts.stopBoardings.data.datasets[1].data = positions.map(b => b.lineOut || 0);
     charts.stopBoardings.update('active');
     charts.loadProfile.data.labels = busLabels;
-    charts.loadProfile.data.datasets[0].data = BUS_POSITIONS.map(b => Math.max(0, (b.lineIn||0) - (b.lineOut||0)));
+    charts.loadProfile.data.datasets[0].data = positions.map(b => Math.max(0, (b.lineIn||0) - (b.lineOut||0)));
     charts.loadProfile.data.datasets[1].data = busLabels.map(() => CONFIG.busCapacity);
+    charts.loadProfile.update('active');
+  } else {
+    // Explicit empty state so the chart doesn't keep showing the previous selection.
+    charts.stopBoardings.data.labels = ['No data for this selection'];
+    charts.stopBoardings.data.datasets[0].data = [0];
+    charts.stopBoardings.data.datasets[1].data = [0];
+    charts.stopBoardings.update('active');
+    charts.loadProfile.data.labels = ['No data for this selection'];
+    charts.loadProfile.data.datasets[0].data = [0];
+    charts.loadProfile.data.datasets[1].data = [CONFIG.busCapacity];
     charts.loadProfile.update('active');
   }
 
-  // Fetch today's hourly data for heatmap
-  const hourlyData = await apiFetch('/api/hourly', { date: today });
+  // --- Hourly heatmap for the selected day (and optional bus). ---
+  const hourlyParams = { date };
+  if (busFilter) hourlyParams.bus_id = busFilter;
+  const hourlyData = await apiFetch('/api/hourly', hourlyParams);
+  const hours = Array.from({length:24},(_,i)=>`${String(i).padStart(2,'0')}:00`);
   if (hourlyData && hourlyData.hourly && hourlyData.hourly.length > 0) {
-    const hours = Array.from({length:24},(_,i)=>`${String(i).padStart(2,'0')}:00`);
     const hourMap = {};
     hourlyData.hourly.forEach(h => { const dh = utcHourToDisplayHour(h.hour); hourMap[dh] = (hourMap[dh] || 0) + h.boardings; });
     const hourData = hours.map((_, i) => hourMap[i] || 0);
     charts.heatmap.data.labels = hours;
     charts.heatmap.data.datasets[0].data = hourData;
     charts.heatmap.update('active');
-  } else {
-    // Fallback: use live hourlyBuckets from MQTT
-    const hours = Array.from({length:24},(_,i)=>`${String(i).padStart(2,'0')}:00`);
+  } else if (date === today) {
+    // Live MQTT fallback only for today.
     const hourData = hours.map(h => hourlyBuckets[h] ? hourlyBuckets[h].boardings : 0);
     charts.heatmap.data.labels = hours;
     charts.heatmap.data.datasets[0].data = hourData;
     charts.heatmap.update('active');
+  } else {
+    charts.heatmap.data.labels = hours;
+    charts.heatmap.data.datasets[0].data = hours.map(() => 0);
+    charts.heatmap.update('active');
   }
+
+  // Update the chart subtitles so users can see what they're looking at.
+  const stopSub = document.querySelector('#view-routes .chart-grid.cols-2 .chart-panel:nth-of-type(1) .chart-subtitle');
+  const loadSub = document.querySelector('#view-routes .chart-grid.cols-2 .chart-panel:nth-of-type(2) .chart-subtitle');
+  const heatSub = document.querySelector('#view-routes > .chart-panel .chart-subtitle');
+  const niceDate = date === today ? 'Today' : date;
+  const niceBus = busFilter ? `Bus ${busFilter}` : 'all buses';
+  if (stopSub) stopSub.textContent = `${niceDate} · ${niceBus}`;
+  if (loadSub) loadSub.textContent = `Onboard count per bus · ${niceDate}`;
+  if (heatSub) heatSub.textContent = `Hourly boardings · ${niceDate} · ${niceBus}`;
 }
 
 function initHeatmapChart() {
@@ -2364,6 +2416,14 @@ function initFleetCharts() {
 // ============================================
 
 function initReports() {
+  // Default report date range to today if empty
+  const today = displayDateStr();
+  const reportFrom = document.getElementById('reportFrom');
+  const reportTo = document.getElementById('reportTo');
+  if (reportFrom && !reportFrom.value) reportFrom.value = today;
+  if (reportTo && !reportTo.value) reportTo.value = today;
+  if (reportFrom) reportFrom.max = today;
+  if (reportTo) reportTo.max = today;
   document.querySelectorAll('.report-card').forEach(card => {
     card.addEventListener('click', () => {
       const t = card.querySelector('.report-name');
