@@ -1632,3 +1632,123 @@ html, body {
     height: 320px !important;
   }
 }
+
+/* ============================================
+   RIDERSHIP — premium dark+white treatment
+   ============================================ */
+
+.ridership-premium .kpi-card {
+  background:
+    radial-gradient(120% 80% at 0% 0%, rgba(139,116,209,0.10) 0%, transparent 55%),
+    linear-gradient(180deg, rgba(255,255,255,0.025) 0%, var(--color-surface) 100%);
+  border-color: rgba(139,116,209,0.18);
+  padding: var(--space-5);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.03) inset,
+              0 12px 32px -22px rgba(0,0,0,0.5);
+}
+
+.ridership-premium .kpi-card::before {
+  height: 2px;
+  background: linear-gradient(90deg,
+    rgba(212,175,55,0.0) 0%,
+    rgba(212,175,55,0.7) 30%,
+    rgba(139,116,209,0.85) 70%,
+    rgba(91,73,168,0.0) 100%) !important;
+}
+
+.ridership-premium .kpi-label {
+  color: #a5a8c1;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.ridership-premium .kpi-value {
+  color: #ffffff;
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  text-shadow: 0 1px 0 rgba(0,0,0,0.35);
+}
+
+.ridership-premium .kpi-sub {
+  color: #8a8db0;
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+.ridership-premium .chart-panel {
+  background:
+    radial-gradient(120% 80% at 0% 0%, rgba(139,116,209,0.06) 0%, transparent 55%),
+    linear-gradient(180deg, rgba(255,255,255,0.02) 0%, var(--color-surface) 100%);
+  border: 1px solid rgba(139,116,209,0.18);
+  border-radius: 16px;
+  box-shadow: 0 14px 40px -24px rgba(0,0,0,0.55);
+}
+
+.ridership-premium .chart-header {
+  padding: 20px 22px 8px;
+}
+
+.ridership-premium .chart-title {
+  color: #ffffff;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.ridership-premium .chart-subtitle {
+  color: #9094b2;
+  font-size: 12.5px;
+  margin-top: 2px;
+}
+
+.ridership-premium .chart-body {
+  padding: 8px 18px 18px;
+}
+
+/* Filter bar in Ridership: tighter look, subtle border */
+.ridership-premium .filter-bar {
+  background: rgba(255,255,255,0.015);
+  border: 1px solid rgba(139,116,209,0.14);
+  border-radius: 14px;
+  padding: 12px 14px;
+  margin-bottom: var(--space-5);
+}
+
+.ridership-premium .filter-label {
+  color: #a5a8c1;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+.ridership-premium .filter-select {
+  background: rgba(11,13,21,0.55);
+  border-color: rgba(139,116,209,0.25);
+  color: #ffffff;
+}
+
+/* Day/Weekly/Monthly tabs in ridership */
+.ridership-premium #ridershipViewTabs.period-tabs { gap: 4px; }
+.ridership-premium #ridershipViewTabs .period-tab {
+  color: #b5b8d0;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(139,116,209,0.18);
+  transition: all 180ms ease;
+}
+.ridership-premium #ridershipViewTabs .period-tab:hover {
+  color: #ffffff;
+  border-color: rgba(139,116,209,0.45);
+}
+.ridership-premium #ridershipViewTabs .period-tab.active {
+  color: #1a1530;
+  background: linear-gradient(180deg, #ffffff 0%, #e8e5f2 100%);
+  border-color: rgba(255,255,255,0.6);
+  box-shadow: 0 0 0 1px rgba(212,175,55,0.45),
+              0 6px 18px -10px rgba(139,116,209,0.7);
+}
+
+@media (max-width: 720px) {
+  .ridership-premium .kpi-value { font-size: 26px; }
+  .ridership-premium .chart-header { padding: 16px 16px 6px; }
+}
