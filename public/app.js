@@ -1379,13 +1379,13 @@ function initOverviewAnalyticsCharts() {
   const pctx = document.getElementById('chartPassengerOn');
   if (pctx) {
     const pctxCtx = pctx.getContext('2d');
-    // Refined indigo-amethyst vertical gradient — deeper, more restrained than
-    // the original Tailwind violet. Reads as 'editorial' rather than 'consumer
-    // app' against the dark surface.
+    // High-quality white gradient — bright crisp top fading to a subtle
+    // cool-white base. Reads as luminous and premium against the dark surface
+    // without going flat or chalky.
     const premiumGradient = pctxCtx.createLinearGradient(0, 0, 0, 420);
-    premiumGradient.addColorStop(0.00, 'rgba(139, 116, 209, 0.92)'); // soft amethyst top
-    premiumGradient.addColorStop(0.55, 'rgba(91, 73, 168, 0.85)');   // muted indigo
-    premiumGradient.addColorStop(1.00, 'rgba(49, 46, 129, 0.55)');   // deep navy-indigo base
+    premiumGradient.addColorStop(0.00, 'rgba(255, 255, 255, 0.98)'); // bright white top
+    premiumGradient.addColorStop(0.55, 'rgba(244, 245, 250, 0.92)'); // soft pearl mid
+    premiumGradient.addColorStop(1.00, 'rgba(214, 218, 235, 0.70)'); // cool pearl base
     charts.passengerOn = new Chart(pctxCtx, {
       type: 'bar',
       data: {
@@ -1394,9 +1394,9 @@ function initOverviewAnalyticsCharts() {
           label: 'Passenger on',
           data: new Array(24).fill(0),
           backgroundColor: premiumGradient,
-          // Rich gold hover — warm metallic accent against the deep indigo.
+          // Rich gold hover — warm metallic accent against the bright white.
           hoverBackgroundColor: 'rgba(212, 175, 55, 0.95)',
-          borderColor: 'rgba(165, 142, 209, 0.45)',
+          borderColor: 'rgba(255, 255, 255, 0.55)',
           borderWidth: 0,
           borderRadius: 5,
           borderSkipped: false,
