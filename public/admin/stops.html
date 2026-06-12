@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Stop Registry — Smart Urban Sensing</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root {
+    --bg: #0f1020;
+    --panel: #181a2e;
+    --panel-2: #1f2140;
+    --text: #e4e5ed;
+    --text-muted: #9094b2;
+    --border: #2a2d4a;
+    --purple: #8b74d1;
+    --gold: #d4af37;
+    --danger: #ef4444;
+    --ok: #10b981;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+    font-size: 14px;
+  }
+  header {
+    padding: 18px 28px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, #1a1c34, #14162a);
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  }
+  header h1 {
+    margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.01em;
+  }
+  header h1 small { color: var(--text-muted); font-weight: 500; margin-left: 8px; font-size: 13px; }
+  .header-actions { display: flex; gap: 8px; }
+  button {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 8px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+  }
+  button:hover { background: #262947; border-color: #3a3e60; }
+  button.primary { background: var(--purple); border-color: var(--purple); color: #fff; }
+  button.primary:hover { background: #9a82e3; }
+  button.danger { color: var(--danger); border-color: rgba(239,68,68,0.4); }
+  button.danger:hover { background: rgba(239,68,68,0.12); }
+  main {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    padding: 16px 28px;
+    min-height: calc(100vh - 70px);
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  .panel h2 {
+    margin: 0;
+    padding: 14px 18px;
+    font-size: 14px;
+    font-weight: 600;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, #1d2039, #181a2e);
+    letter-spacing: 0.02em;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .route-list { padding: 16px; overflow-y: auto; flex: 1; }
+  .route-card {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 14px;
+    overflow: hidden;
+  }
+  .route-head {
+    padding: 12px 14px;
+    display: flex; gap: 10px; align-items: center;
+    background: rgba(139,116,209,0.08);
+    border-bottom: 1px solid var(--border);
+  }
+  .route-head input[type=text] { flex: 1; }
+  .route-head input.route-key { max-width: 90px; }
+  .route-head input.route-loop { max-width: 70px; }
+  .route-head .route-bus { max-width: 130px; }
+  input[type=text], input[type=number] {
+    background: #0d0e1f;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 6px 9px;
+    font-size: 13px;
+    font-family: inherit;
+    width: 100%;
+  }
+  input:focus { outline: none; border-color: var(--purple); }
+  .stops-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .stops-table th, .stops-table td {
+    padding: 6px 8px; text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  .stops-table th { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+  .stops-table td input { font-size: 12px; padding: 4px 7px; }
+  .stops-table td.lat-col input, .stops-table td.lng-col input { max-width: 95px; }
+  .stops-table td.idx-col { color: var(--text-muted); width: 28px; font-variant-numeric: tabular-nums; }
+  .stops-table td.act-col { width: 64px; text-align: right; }
+  .stops-table tr:last-child td { border-bottom: none; }
+  .route-actions {
+    padding: 10px 14px;
+    border-top: 1px solid var(--border);
+    display: flex; gap: 8px; justify-content: flex-end;
+  }
+  .route-actions button { font-size: 12px; padding: 6px 10px; }
+  #map { width: 100%; height: 100%; min-height: 500px; }
+  .toast {
+    position: fixed; bottom: 24px; right: 24px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    padding: 12px 18px;
+    border-radius: 8px;
+    font-size: 13px; font-weight: 500;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.4);
+    transform: translateY(20px); opacity: 0;
+    transition: all 0.25s ease;
+    pointer-events: none;
+  }
+  .toast.show { transform: translateY(0); opacity: 1; }
+  .toast.ok { border-color: var(--ok); }
+  .toast.err { border-color: var(--danger); }
+  .stop-pin {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--purple);
+    border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+  }
+  .stop-pin.gold { background: var(--gold); }
+  @media (max-width: 1100px) {
+    main { grid-template-columns: 1fr; }
+    #map { min-height: 360px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Stop Registry <small>edit routes & stop coordinates</small></h1>
+  <div class="header-actions">
+    <button id="addRouteBtn">+ Add route</button>
+    <button id="reloadBtn">Reload</button>
+    <button id="saveBtn" class="primary">Save changes</button>
+  </div>
+</header>
+
+<main>
+  <section class="panel">
+    <h2>Routes <span id="metaInfo"></span></h2>
+    <div class="route-list" id="routeList">Loading…</div>
+  </section>
+  <section class="panel">
+    <h2>Map preview <span id="mapMeta"></span></h2>
+    <div id="map"></div>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const COLORS = ['#8b74d1', '#d4af37', '#7dd3fc', '#fb7185'];
+let STATE = { routes: {} };
+let map, layerGroup;
+
+async function fetchRegistry() {
+  const r = await fetch('/api/stops');
+  if (!r.ok) throw new Error('Failed to load');
+  return r.json();
+}
+
+function showToast(msg, type='ok') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + type;
+  setTimeout(() => t.className = 'toast', 2200);
+}
+
+function render() {
+  const root = document.getElementById('routeList');
+  const meta = document.getElementById('metaInfo');
+  const keys = Object.keys(STATE.routes);
+  meta.textContent = keys.length ? `· ${keys.length} route(s)` : '';
+  if (!keys.length) { root.innerHTML = '<p style="color:var(--text-muted)">No routes yet. Click + Add route to create one.</p>'; return; }
+  root.innerHTML = keys.map((rk, idx) => routeCardHtml(rk, STATE.routes[rk], idx)).join('');
+  // Wire events
+  keys.forEach((rk, idx) => {
+    const card = root.querySelector(`[data-route-key="${rk}"]`);
+    if (!card) return;
+    card.querySelector('.route-name').addEventListener('input', e => STATE.routes[rk].name = e.target.value);
+    card.querySelector('.route-loop').addEventListener('input', e => STATE.routes[rk].loop_minutes = Number(e.target.value) || 45);
+    card.querySelector('.route-bus').addEventListener('input', e => STATE.routes[rk].bus_ids = e.target.value.split(',').map(s => s.trim()).filter(Boolean));
+    card.querySelector('.route-key').addEventListener('change', e => renameRoute(rk, e.target.value));
+    card.querySelector('.add-stop').addEventListener('click', () => addStop(rk));
+    card.querySelector('.del-route').addEventListener('click', () => deleteRoute(rk));
+    (STATE.routes[rk].stops || []).forEach((s, i) => {
+      const row = card.querySelector(`[data-stop-idx="${i}"]`);
+      if (!row) return;
+      row.querySelector('.stop-name').addEventListener('input', e => s.name = e.target.value);
+      row.querySelector('.stop-lat').addEventListener('input', e => { s.lat = Number(e.target.value); drawMap(); });
+      row.querySelector('.stop-lng').addEventListener('input', e => { s.lng = Number(e.target.value); drawMap(); });
+      row.querySelector('.del-stop').addEventListener('click', () => deleteStop(rk, i));
+    });
+  });
+  drawMap();
+}
+
+function routeCardHtml(key, route, idx) {
+  const color = COLORS[idx % COLORS.length];
+  const busIds = (route.bus_ids || []).join(', ');
+  const stopsHtml = (route.stops || []).map((s, i) => `
+    <tr data-stop-idx="${i}">
+      <td class="idx-col">${i + 1}</td>
+      <td><input type="text" class="stop-name" value="${escAttr(s.name || '')}" placeholder="Stop name"></td>
+      <td class="lat-col"><input type="text" class="stop-lat" value="${s.lat ?? ''}" placeholder="lat"></td>
+      <td class="lng-col"><input type="text" class="stop-lng" value="${s.lng ?? ''}" placeholder="lng"></td>
+      <td class="act-col"><button class="del-stop danger" title="Remove stop">×</button></td>
+    </tr>
+  `).join('');
+  return `
+    <div class="route-card" data-route-key="${key}" style="border-left:3px solid ${color}">
+      <div class="route-head">
+        <input type="text" class="route-key" value="${escAttr(key)}" placeholder="Key">
+        <input type="text" class="route-name" value="${escAttr(route.name || '')}" placeholder="Route name">
+        <input type="number" class="route-loop" min="5" max="240" value="${route.loop_minutes || 45}" placeholder="min">
+        <input type="text" class="route-bus" value="${escAttr(busIds)}" placeholder="Bus IDs (comma)">
+      </div>
+      <table class="stops-table">
+        <thead><tr><th>#</th><th>Name</th><th>Lat</th><th>Lng</th><th></th></tr></thead>
+        <tbody>${stopsHtml || '<tr><td colspan="5" style="color:var(--text-muted);text-align:center;padding:14px">No stops yet</td></tr>'}</tbody>
+      </table>
+      <div class="route-actions">
+        <button class="add-stop">+ Add stop</button>
+        <button class="del-route danger">Delete route</button>
+      </div>
+    </div>
+  `;
+}
+
+function escAttr(s) { return String(s).replace(/"/g, '&quot;'); }
+
+function addStop(rk) {
+  const route = STATE.routes[rk];
+  if (!route.stops) route.stops = [];
+  const lastStop = route.stops[route.stops.length - 1];
+  const lat = lastStop ? lastStop.lat : 44.9778;
+  const lng = lastStop ? lastStop.lng : -93.2650;
+  route.stops.push({ id: `${rk}-${String(route.stops.length + 1).padStart(2,'0')}`, name: 'New stop', lat, lng });
+  render();
+}
+
+function deleteStop(rk, i) {
+  if (!confirm('Delete this stop?')) return;
+  STATE.routes[rk].stops.splice(i, 1);
+  render();
+}
+
+function deleteRoute(rk) {
+  if (!confirm(`Delete route ${rk} and all its stops?`)) return;
+  delete STATE.routes[rk];
+  render();
+}
+
+function renameRoute(oldKey, newKey) {
+  newKey = newKey.trim();
+  if (!newKey || newKey === oldKey) return;
+  if (STATE.routes[newKey]) { showToast(`Route ${newKey} already exists`, 'err'); render(); return; }
+  // Preserve order
+  const reordered = {};
+  for (const k of Object.keys(STATE.routes)) {
+    reordered[k === oldKey ? newKey : k] = STATE.routes[k];
+  }
+  STATE.routes = reordered;
+  render();
+}
+
+function addRoute() {
+  const key = prompt('Route key (e.g. 515):');
+  if (!key) return;
+  if (STATE.routes[key]) { showToast(`Route ${key} already exists`, 'err'); return; }
+  STATE.routes[key] = {
+    name: `Route ${key}`,
+    loop_minutes: 45,
+    bus_ids: [key],
+    stops: [],
+  };
+  render();
+}
+
+function drawMap() {
+  if (!map) return;
+  if (layerGroup) layerGroup.clearLayers();
+  layerGroup = L.layerGroup().addTo(map);
+  const allPts = [];
+  Object.entries(STATE.routes).forEach(([rk, r], idx) => {
+    const color = COLORS[idx % COLORS.length];
+    const pts = (r.stops || []).filter(s => Number.isFinite(s.lat) && Number.isFinite(s.lng));
+    pts.forEach((s, i) => {
+      const isTerm = i === 0 || i === pts.length - 1;
+      const dot = L.divIcon({
+        className: '', iconSize: isTerm ? [14,14] : [10,10],
+        iconAnchor: isTerm ? [7,7] : [5,5],
+        html: `<div class="stop-pin" style="background:${isTerm ? '#fff' : color};border-color:${isTerm ? color : '#fff'};${isTerm ? 'border-width:3px;width:14px;height:14px;' : ''}"></div>`,
+      });
+      L.marker([s.lat, s.lng], { icon: dot }).addTo(layerGroup)
+        .bindTooltip(`<strong>${s.name || s.id}</strong><br>${rk}`, { direction: 'top' });
+      allPts.push([s.lat, s.lng]);
+    });
+    if (pts.length > 1) {
+      L.polyline(pts.map(s => [s.lat, s.lng]), { color, weight: 3, opacity: 0.45, dashArray: '4,8' }).addTo(layerGroup);
+    }
+  });
+  document.getElementById('mapMeta').textContent = allPts.length ? `· ${allPts.length} stops` : '';
+  if (allPts.length && !window._mapAutoFit) {
+    map.fitBounds(L.latLngBounds(allPts), { padding: [30, 30], maxZoom: 13 });
+    window._mapAutoFit = true;
+  }
+}
+
+function initMap() {
+  map = L.map('map', { zoomControl: true, attributionControl: false }).setView([44.9778, -93.2650], 11);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
+  layerGroup = L.layerGroup().addTo(map);
+}
+
+async function save() {
+  // Strip any stops without valid coords; the server will validate too.
+  const payload = { routes: STATE.routes };
+  try {
+    const r = await fetch('/api/stops', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await r.json();
+    if (!r.ok) { showToast(data.error || 'Save failed', 'err'); return; }
+    showToast('Saved · live now', 'ok');
+  } catch (e) { showToast('Network error: ' + e.message, 'err'); }
+}
+
+async function reload() {
+  window._mapAutoFit = false;
+  try {
+    const data = await fetchRegistry();
+    STATE = data;
+    render();
+    showToast('Reloaded', 'ok');
+  } catch (e) { showToast('Failed to load: ' + e.message, 'err'); }
+}
+
+document.getElementById('saveBtn').addEventListener('click', save);
+document.getElementById('reloadBtn').addEventListener('click', reload);
+document.getElementById('addRouteBtn').addEventListener('click', addRoute);
+
+initMap();
+reload();
+</script>
+</body>
+</html>

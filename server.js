@@ -980,6 +980,46 @@ app.get('/api/stops', (req, res) => {
   res.json({ routes });
 });
 
+// Admin: replace the entire stop registry. Body should match the data/stops.json
+// shape: { routes: { '<key>': { name, loop_minutes, bus_ids, stops: [...] } } }.
+// Persists to disk and reloads the in-memory lookup, no redeploy needed.
+app.put('/api/stops', express.json({ limit: '256kb' }), (req, res) => {
+  const body = req.body;
+  if (!body || typeof body !== 'object' || typeof body.routes !== 'object') {
+    return res.status(400).json({ error: 'Body must be { routes: { ... } }' });
+  }
+  // Validate every stop has lat/lng numbers.
+  for (const [k, r] of Object.entries(body.routes)) {
+    if (!Array.isArray(r.stops)) return res.status(400).json({ error: `Route ${k}: stops must be an array` });
+    for (const s of r.stops) {
+      if (typeof s.lat !== 'number' || typeof s.lng !== 'number') {
+        return res.status(400).json({ error: `Route ${k}: stop ${s.id || s.name || '?'} missing numeric lat/lng` });
+      }
+      if (Math.abs(s.lat) > 90 || Math.abs(s.lng) > 180) {
+        return res.status(400).json({ error: `Route ${k}: stop ${s.id || s.name || '?'} lat/lng out of range` });
+      }
+    }
+  }
+  try {
+    fs.writeFileSync(STOPS_PATH, JSON.stringify(body, null, 2));
+    STOP_REGISTRY = body;
+    // Rebuild lookup
+    for (const k of Object.keys(BUS_ROUTE_LOOKUP)) delete BUS_ROUTE_LOOKUP[k];
+    for (const [routeKey, route] of Object.entries(STOP_REGISTRY.routes || {})) {
+      for (const bid of route.bus_ids || []) {
+        BUS_ROUTE_LOOKUP[bid] = {
+          routeKey, routeName: route.name,
+          stops: route.stops || [], loopMinutes: route.loop_minutes || 45,
+        };
+      }
+    }
+    console.log('[STOPS] Registry updated via admin API');
+    res.json({ ok: true, routes: Object.keys(STOP_REGISTRY.routes || {}).length });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to save: ' + err.message });
+  }
+});
+
 // Current scheduled stop per bus right now — useful for dashboards/tooltips.
 app.get('/api/stops/current', (req, res) => {
   const now = Date.now();

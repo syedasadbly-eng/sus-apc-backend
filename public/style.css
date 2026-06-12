@@ -1921,3 +1921,25 @@ html, body {
   .dashboard-premium .chart-subtitle { font-size: 13px; }
   .dashboard-premium #occGaugeValue { font-size: 34px !important; }
 }
+
+/* ============================================
+   STOP REGISTRY — small route pins on Leaflet maps
+   ============================================ */
+.stop-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--stop-color, #8b74d1);
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+  transition: transform 0.18s ease;
+}
+.stop-dot:hover {
+  transform: scale(1.5);
+}
+.stop-dot-terminal {
+  width: 14px;
+  height: 14px;
+  background: #ffffff;
+  border: 3px solid var(--stop-color, #8b74d1);
+}
