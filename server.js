@@ -61,15 +61,17 @@ const GATEWAYS = [
 // Per-bus last-known GPS is written to disk on every valid fix so a Railway
 // redeploy doesn't lose location memory.
 
-// Per-bus static depot/stop coordinates (Minnesota — Twin Cities area).
+// Per-bus static depot/stop coordinates — Mayo Clinic Rochester, MN inter-campus shuttles.
 // Used when no real fix has ever been seen for that bus.
+//   515 = Mayo Downtown inter-campus loop, anchored at Gonda Building (200 1st St SW)
+//   419 = Mayo NW patient parking shuttle, anchored at Medical Complex NW Building B (3033 41st St NW)
 const BUS_STATIC_LOCATIONS = {
-  '515': { lat: 44.9778, lng: -93.2650, label: 'Minneapolis depot' },
-  '419': { lat: 44.9537, lng: -93.0900, label: 'St. Paul depot' },
+  '515': { lat: 44.02302, lng: -92.46657, label: 'Gonda Building (Mayo Downtown)' },
+  '419': { lat: 44.07770, lng: -92.50580, label: 'Medical Complex NW — Building B' },
 };
 
-// Ultimate fallback when bus_id has no static mapping.
-const DEPOT_FALLBACK = { lat: 44.9778, lng: -93.2650, label: 'Twin Cities depot' };
+// Ultimate fallback when bus_id has no static mapping — Mayo Clinic main downtown campus.
+const DEPOT_FALLBACK = { lat: 44.02302, lng: -92.46657, label: 'Mayo Clinic Rochester (downtown)' };
 
 // Persisted last-known GPS file — survives restarts/redeploys.
 const GPS_CACHE_PATH = process.env.GPS_CACHE_PATH || path.join(__dirname, 'gps-cache.json');

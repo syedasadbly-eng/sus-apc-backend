@@ -1,42 +1,37 @@
 {
-  "_doc": "Static stop registry for the APC dashboard. Each route lists ordered stops the bus visits. The server cycles a bus through these stops on a fixed loop_minutes cadence to produce a 'current scheduled stop' until real GPS arrives. Coordinates verified from Metro Transit Route 515 (66th St / Bloomington Ave / Mall of America) plus a plausible Plymouth Metrolink-style commuter loop for 419.",
+  "_meta": {
+    "source": "Mayo Clinic Rochester MN — verified building coordinates and published Mayo inter-campus shuttle services",
+    "verified_against": [
+      "https://en.wikipedia.org/wiki/Gonda_Building (44.0230, -92.4666)",
+      "https://en.wikipedia.org/wiki/Mayo_Clinic_Hospital_(Rochester) — Saint Marys (44.0203, -92.4817)",
+      "https://www.mayoclinic.org/rochester-construction/intercampus-patient-routing — Downtown loop (Gonda/Charlton/Mary Brigh, every 35-40 min, M-F 7am-5:30pm)",
+      "https://www.mayoclinic.org/rochester-construction/patient-shuttle — NW parking shuttle (Building B ↔ Baldwin, every 30 min, ~20 min travel)",
+      "https://communityhealth.mayoclinic.org/locations/baldwin (221 4th Ave SW, 44.02191, -92.47049)",
+      "https://www.mayoclinic.org/documents/northwest-campus-map-influenza/doc-20590894 — Medical Complex NW Building B (3033 41st St NW)"
+    ],
+    "last_updated": "2026-06-12"
+  },
   "routes": {
     "515": {
-      "name": "Route 515 — 66th St / Bloomington Ave / Mall of America",
-      "loop_minutes": 45,
+      "name": "Bus 515 — Mayo Downtown Inter-Campus Loop (Gonda ↔ Charlton ↔ Saint Marys)",
+      "loop_minutes": 40,
       "bus_ids": ["515"],
       "stops": [
-        { "id": "515-01", "name": "Southdale Transit Center",       "lat": 44.879600, "lng": -93.323900 },
-        { "id": "515-02", "name": "66th St & Penn Ave S",            "lat": 44.879200, "lng": -93.310200 },
-        { "id": "515-03", "name": "66th St & Lyndale Ave S",         "lat": 44.879150, "lng": -93.288100 },
-        { "id": "515-04", "name": "66th St & Nicollet Ave",          "lat": 44.879100, "lng": -93.278200 },
-        { "id": "515-05", "name": "66th St & Portland Ave",          "lat": 44.879050, "lng": -93.264700 },
-        { "id": "515-06", "name": "66th St & Chicago Ave",           "lat": 44.879000, "lng": -93.260100 },
-        { "id": "515-07", "name": "66th St & Bloomington Ave",       "lat": 44.878970, "lng": -93.244600 },
-        { "id": "515-08", "name": "Bloomington Ave & 73rd St",       "lat": 44.866400, "lng": -93.243700 },
-        { "id": "515-09", "name": "Bloomington Ave & 76th St",       "lat": 44.860500, "lng": -93.243600 },
-        { "id": "515-10", "name": "12th Ave S & 78th St (Hwy 494)",  "lat": 44.857600, "lng": -93.260300 },
-        { "id": "515-11", "name": "American Blvd & 24th Ave S",      "lat": 44.857500, "lng": -93.224100 },
-        { "id": "515-12", "name": "Mall of America Transit Station", "lat": 44.854900, "lng": -93.238100 }
+        { "id": "515-01", "name": "Gonda Building (200 1st St SW)",            "lat": 44.02302, "lng": -92.46657 },
+        { "id": "515-02", "name": "Charlton Building (201 W Center St)",       "lat": 44.02384, "lng": -92.46716 },
+        { "id": "515-03", "name": "Mary Brigh — Saint Marys Hospital (1216 2nd St SW)", "lat": 44.02028, "lng": -92.48167 },
+        { "id": "515-04", "name": "Charlton Building (return)",                "lat": 44.02384, "lng": -92.46716 },
+        { "id": "515-05", "name": "Gonda Building (return)",                   "lat": 44.02302, "lng": -92.46657 }
       ]
     },
     "419": {
-      "name": "Route 419 — Plymouth / Downtown Minneapolis Commuter",
-      "loop_minutes": 45,
+      "name": "Bus 419 — Mayo NW Patient Parking Shuttle (Building B ↔ Baldwin)",
+      "loop_minutes": 50,
       "bus_ids": ["419"],
       "stops": [
-        { "id": "419-01", "name": "Plymouth Rd & Hwy 169 P&R",       "lat": 45.011200, "lng": -93.412100 },
-        { "id": "419-02", "name": "Plymouth Blvd & City Hall",       "lat": 45.011900, "lng": -93.451400 },
-        { "id": "419-03", "name": "Co Rd 73 & Rockford Rd",          "lat": 45.012800, "lng": -93.466700 },
-        { "id": "419-04", "name": "I-394 & Louisiana Ave P&R",       "lat": 44.969400, "lng": -93.366900 },
-        { "id": "419-05", "name": "I-394 & General Mills Blvd",      "lat": 44.971000, "lng": -93.353400 },
-        { "id": "419-06", "name": "Hennepin Ave & Dunwoody Blvd",    "lat": 44.974600, "lng": -93.288700 },
-        { "id": "419-07", "name": "Hennepin Ave & 12th St",          "lat": 44.974900, "lng": -93.275600 },
-        { "id": "419-08", "name": "Marquette Ave & 6th St",          "lat": 44.977200, "lng": -93.269700 },
-        { "id": "419-09", "name": "Marquette Ave & 4th St",          "lat": 44.978700, "lng": -93.268100 },
-        { "id": "419-10", "name": "Government Plaza Station",        "lat": 44.978100, "lng": -93.264600 },
-        { "id": "419-11", "name": "St. Paul Union Depot",            "lat": 44.948600, "lng": -93.087700 },
-        { "id": "419-12", "name": "St. Paul Capitol / 10th St",      "lat": 44.953700, "lng": -93.102200 }
+        { "id": "419-01", "name": "Medical Complex NW — Building B (3033 41st St NW)", "lat": 44.07770, "lng": -92.50580 },
+        { "id": "419-02", "name": "Baldwin Building (221 4th Ave SW)",                 "lat": 44.02191, "lng": -92.47049 },
+        { "id": "419-03", "name": "Medical Complex NW — Building B (return)",          "lat": 44.07770, "lng": -92.50580 }
       ]
     }
   }
