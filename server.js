@@ -154,6 +154,35 @@ function currentScheduledStop(busId, nowMs) {
   };
 }
 
+// Haversine distance in metres between two lat/lng pairs.
+function haversineMeters(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const toRad = (d) => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 +
+            Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+// Find the nearest stop on this bus's route within `maxMeters`. Returns
+// { stop, distanceMeters } or null if no GPS, no route, or nothing within range.
+// Default radius 60m — large enough to cover bus length + GPS jitter, small
+// enough to avoid attributing one stop's events to its neighbour.
+function nearestStopByProximity(busId, lat, lng, maxMeters = 60) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  const r = BUS_ROUTE_LOOKUP[busId];
+  if (!r || !r.stops.length) return null;
+  let best = null;
+  for (const s of r.stops) {
+    if (!Number.isFinite(s.lat) || !Number.isFinite(s.lng)) continue;
+    const d = haversineMeters(lat, lng, s.lat, s.lng);
+    if (!best || d < best.distanceMeters) best = { stop: s, distanceMeters: d };
+  }
+  if (!best || best.distanceMeters > maxMeters) return null;
+  return { ...best, routeKey: r.routeKey, routeName: r.routeName };
+}
+
 // Resolve the best location for a bus given its current state.
 // Priority: live GPS > cached last-known > current scheduled stop > static depot > generic depot.
 function resolveBusLocation(busId, devLat, devLng) {
@@ -225,7 +254,9 @@ db.exec(`
     lat         REAL    NOT NULL DEFAULT 0,
     lng         REAL    NOT NULL DEFAULT 0,
     speed       REAL    NOT NULL DEFAULT 0,
-    msg_type    TEXT    NOT NULL DEFAULT 'unknown'  -- daily_total, periodic, trigger, legacy
+    msg_type    TEXT    NOT NULL DEFAULT 'unknown', -- daily_total, periodic, trigger, legacy
+    stop_source TEXT    NOT NULL DEFAULT 'scheduled', -- 'gps' = matched by live GPS proximity; 'scheduled' = timetable guess; 'none' = no route
+    stop_dist_m REAL    NOT NULL DEFAULT 0          -- distance in metres from GPS fix to matched stop (0 when stop_source != 'gps')
   );
 
   -- Hourly summary buckets (aggregated per bus per hour per day)
@@ -359,10 +390,26 @@ try {
   console.error('[MIGRATE] Label rename failed (002->419):', err.message);
 }
 
+// ----- Schema migration: add stop_source / stop_dist_m to existing records table -----
+// Safe & idempotent: only runs ADD COLUMN if the column doesn't already exist.
+try {
+  const cols = db.prepare("PRAGMA table_info(records)").all().map(c => c.name);
+  if (!cols.includes('stop_source')) {
+    db.prepare("ALTER TABLE records ADD COLUMN stop_source TEXT NOT NULL DEFAULT 'scheduled'").run();
+    console.log('[MIGRATE] Added records.stop_source column');
+  }
+  if (!cols.includes('stop_dist_m')) {
+    db.prepare("ALTER TABLE records ADD COLUMN stop_dist_m REAL NOT NULL DEFAULT 0").run();
+    console.log('[MIGRATE] Added records.stop_dist_m column');
+  }
+} catch (err) {
+  console.error('[MIGRATE] stop_source/stop_dist_m migration failed:', err.message);
+}
+
 // Prepared statements for fast inserts
 const insertRecord = db.prepare(`
-  INSERT INTO records (timestamp, date, hour, bus_id, route, stop, boardings, alightings, evt_in, evt_out, onboard, occupancy, lat, lng, speed, msg_type)
-  VALUES (@timestamp, @date, @hour, @bus_id, @route, @stop, @boardings, @alightings, @evt_in, @evt_out, @onboard, @occupancy, @lat, @lng, @speed, @msg_type)
+  INSERT INTO records (timestamp, date, hour, bus_id, route, stop, boardings, alightings, evt_in, evt_out, onboard, occupancy, lat, lng, speed, msg_type, stop_source, stop_dist_m)
+  VALUES (@timestamp, @date, @hour, @bus_id, @route, @stop, @boardings, @alightings, @evt_in, @evt_out, @onboard, @occupancy, @lat, @lng, @speed, @msg_type, @stop_source, @stop_dist_m)
 `);
 
 const upsertHourlySummary = db.prepare(`
@@ -730,17 +777,47 @@ function flushBusDelta(busId) {
 
   // ---- Insert merged record into database ----
   try {
-    // Use the bus's current scheduled stop (if any) so historical records
-    // carry geographic context even when the device isn't sending stop info.
-    const schedStop = currentScheduledStop(busId);
-    const stopName = schedStop ? (schedStop.name || schedStop.id || '-') : '-';
-    const recordRoute = route || (schedStop ? schedStop.routeKey : '');
+    // Stop attribution priority:
+    //   1. Live GPS proximity — if a recent valid fix is within 60m of a stop on this bus's route,
+    //      attribute the boarding/alighting event to that stop (stop_source='gps').
+    //   2. Scheduled timetable — otherwise use the bus's current scheduled stop (stop_source='scheduled').
+    //   3. None — if the bus has no route at all (stop_source='none').
+    let stopName = '-';
+    let stopSource = 'none';
+    let stopDistM = 0;
+    let recordRoute = route;
+
+    // 1. Try GPS proximity match first (only if we have a real GPS fix on this event).
+    const dev = liveDevices[busId];
+    const haveLiveGps = dev && dev.gpsValid && Number.isFinite(dev.lat) && Number.isFinite(dev.lng);
+    const lat = haveLiveGps ? dev.lat : (pending.lat || null);
+    const lng = haveLiveGps ? dev.lng : (pending.lng || null);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      const prox = nearestStopByProximity(busId, lat, lng, 60);
+      if (prox) {
+        stopName = prox.stop.name || prox.stop.id || '-';
+        stopSource = 'gps';
+        stopDistM = Math.round(prox.distanceMeters * 10) / 10;
+        recordRoute = recordRoute || prox.routeKey;
+      }
+    }
+
+    // 2. Fallback to scheduled timetable if proximity didn't match.
+    if (stopSource === 'none') {
+      const schedStop = currentScheduledStop(busId);
+      if (schedStop) {
+        stopName = schedStop.name || schedStop.id || '-';
+        stopSource = 'scheduled';
+        recordRoute = recordRoute || schedStop.routeKey;
+      }
+    }
+
     insertRecord.run({
       timestamp: isoTs,
       date: dateStr,
       hour,
       bus_id: busId,
-      route: recordRoute,
+      route: recordRoute || '',
       stop: stopName,
       boardings: deltaIn,
       alightings: deltaOut,
@@ -752,6 +829,8 @@ function flushBusDelta(busId) {
       lng: pending.lng || 0,
       speed: pending.speed || 0,
       msg_type: pending.msgType || 'merged',
+      stop_source: stopSource,
+      stop_dist_m: stopDistM,
     });
 
     // Upsert hourly summary — accumulate the PER-HOUR deltas (not the running day
@@ -1019,6 +1098,46 @@ app.put('/api/stops', express.json({ limit: '256kb' }), (req, res) => {
     res.json({ ok: true, routes: Object.keys(STOP_REGISTRY.routes || {}).length });
   } catch (err) {
     res.status(500).json({ error: 'Failed to save: ' + err.message });
+  }
+});
+
+// Per-stop boardings/alightings aggregation. Defaults to today, optional date / from / to / bus_id.
+// Returns one row per (route, stop) with totals and a breakdown of attribution source.
+//   GET /api/stops/boardings              — today, all buses
+//   GET /api/stops/boardings?date=YYYY-MM-DD
+//   GET /api/stops/boardings?from=YYYY-MM-DD&to=YYYY-MM-DD
+//   GET /api/stops/boardings?bus_id=515
+app.get('/api/stops/boardings', (req, res) => {
+  try {
+    const { date, from, to, bus_id } = req.query;
+    let where = ' WHERE stop != \'-\' ';
+    const params = {};
+    if (bus_id) { where += ' AND bus_id = @bus_id'; params.bus_id = bus_id; }
+    if (date)   { where += ' AND date = @date';     params.date = date; }
+    else if (from && to) { where += ' AND date BETWEEN @from AND @to'; params.from = from; params.to = to; }
+    else if (!date && !from && !to) {
+      const today = new Date().toISOString().slice(0, 10);
+      where += ' AND date = @today'; params.today = today;
+    }
+    const rows = db.prepare(`
+      SELECT
+        route,
+        stop,
+        SUM(evt_in)  AS boardings,
+        SUM(evt_out) AS alightings,
+        SUM(CASE WHEN stop_source = 'gps'       THEN evt_in + evt_out ELSE 0 END) AS evt_gps,
+        SUM(CASE WHEN stop_source = 'scheduled' THEN evt_in + evt_out ELSE 0 END) AS evt_scheduled,
+        COUNT(*) AS event_count,
+        MIN(timestamp) AS first_seen,
+        MAX(timestamp) AS last_seen
+      FROM records
+      ${where}
+      GROUP BY route, stop
+      ORDER BY boardings DESC, alightings DESC
+    `).all(params);
+    res.json({ filters: { date: date || null, from: from || null, to: to || null, bus_id: bus_id || null }, stops: rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
