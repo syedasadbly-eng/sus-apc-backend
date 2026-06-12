@@ -444,6 +444,44 @@
           </div>
         </div>
       </div>
+
+      <!-- ===== Boardings by Stop (premium) ===== -->
+      <div class="chart-grid" style="margin-top:var(--space-4)">
+        <div class="chart-panel stop-boardings-premium">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Boardings by Stop</div>
+              <div class="chart-subtitle" id="stopBoardingsSubtitle">Top stops by passenger activity today</div>
+            </div>
+            <div class="chart-actions" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <span class="stop-attr-chip" id="stopAttrChip" title="Share of events attributed via live GPS vs scheduled timetable">
+                <span class="chip-dot chip-dot-gps"></span><span id="stopAttrGps">0%</span>
+                <span class="chip-sep">GPS</span>
+                <span class="chip-dot chip-dot-sched"></span><span id="stopAttrSched">0%</span>
+                <span class="chip-sep">scheduled</span>
+              </span>
+              <select id="stopBoardingsBus" class="filter-select" aria-label="Filter boardings by bus">
+                <option value="all" selected>All buses</option>
+                <option value="515">Bus 515</option>
+                <option value="419">Bus 419</option>
+              </select>
+              <select id="stopBoardingsRange" class="filter-select" aria-label="Time range for boardings">
+                <option value="today" selected>Today</option>
+                <option value="7">Last 7 days</option>
+                <option value="30">Last 30 days</option>
+              </select>
+            </div>
+          </div>
+          <div class="chart-body" style="position:relative">
+            <canvas id="chartStopBoardingsHome" height="320"></canvas>
+            <div id="stopBoardingsEmpty" class="stop-empty-state" style="display:none">
+              <div class="empty-icon"><i data-lucide="map-pin" style="width:28px;height:28px"></i></div>
+              <div class="empty-title">No stop activity yet</div>
+              <div class="empty-sub">Once buses start reporting boardings, the busiest stops will appear here.</div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- ===== LIVE MAP VIEW ===== -->
