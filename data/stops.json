@@ -1,0 +1,43 @@
+{
+  "_doc": "Static stop registry for the APC dashboard. Each route lists ordered stops the bus visits. The server cycles a bus through these stops on a fixed loop_minutes cadence to produce a 'current scheduled stop' until real GPS arrives. Coordinates verified from Metro Transit Route 515 (66th St / Bloomington Ave / Mall of America) plus a plausible Plymouth Metrolink-style commuter loop for 419.",
+  "routes": {
+    "515": {
+      "name": "Route 515 — 66th St / Bloomington Ave / Mall of America",
+      "loop_minutes": 45,
+      "bus_ids": ["515"],
+      "stops": [
+        { "id": "515-01", "name": "Southdale Transit Center",       "lat": 44.879600, "lng": -93.323900 },
+        { "id": "515-02", "name": "66th St & Penn Ave S",            "lat": 44.879200, "lng": -93.310200 },
+        { "id": "515-03", "name": "66th St & Lyndale Ave S",         "lat": 44.879150, "lng": -93.288100 },
+        { "id": "515-04", "name": "66th St & Nicollet Ave",          "lat": 44.879100, "lng": -93.278200 },
+        { "id": "515-05", "name": "66th St & Portland Ave",          "lat": 44.879050, "lng": -93.264700 },
+        { "id": "515-06", "name": "66th St & Chicago Ave",           "lat": 44.879000, "lng": -93.260100 },
+        { "id": "515-07", "name": "66th St & Bloomington Ave",       "lat": 44.878970, "lng": -93.244600 },
+        { "id": "515-08", "name": "Bloomington Ave & 73rd St",       "lat": 44.866400, "lng": -93.243700 },
+        { "id": "515-09", "name": "Bloomington Ave & 76th St",       "lat": 44.860500, "lng": -93.243600 },
+        { "id": "515-10", "name": "12th Ave S & 78th St (Hwy 494)",  "lat": 44.857600, "lng": -93.260300 },
+        { "id": "515-11", "name": "American Blvd & 24th Ave S",      "lat": 44.857500, "lng": -93.224100 },
+        { "id": "515-12", "name": "Mall of America Transit Station", "lat": 44.854900, "lng": -93.238100 }
+      ]
+    },
+    "419": {
+      "name": "Route 419 — Plymouth / Downtown Minneapolis Commuter",
+      "loop_minutes": 45,
+      "bus_ids": ["419"],
+      "stops": [
+        { "id": "419-01", "name": "Plymouth Rd & Hwy 169 P&R",       "lat": 45.011200, "lng": -93.412100 },
+        { "id": "419-02", "name": "Plymouth Blvd & City Hall",       "lat": 45.011900, "lng": -93.451400 },
+        { "id": "419-03", "name": "Co Rd 73 & Rockford Rd",          "lat": 45.012800, "lng": -93.466700 },
+        { "id": "419-04", "name": "I-394 & Louisiana Ave P&R",       "lat": 44.969400, "lng": -93.366900 },
+        { "id": "419-05", "name": "I-394 & General Mills Blvd",      "lat": 44.971000, "lng": -93.353400 },
+        { "id": "419-06", "name": "Hennepin Ave & Dunwoody Blvd",    "lat": 44.974600, "lng": -93.288700 },
+        { "id": "419-07", "name": "Hennepin Ave & 12th St",          "lat": 44.974900, "lng": -93.275600 },
+        { "id": "419-08", "name": "Marquette Ave & 6th St",          "lat": 44.977200, "lng": -93.269700 },
+        { "id": "419-09", "name": "Marquette Ave & 4th St",          "lat": 44.978700, "lng": -93.268100 },
+        { "id": "419-10", "name": "Government Plaza Station",        "lat": 44.978100, "lng": -93.264600 },
+        { "id": "419-11", "name": "St. Paul Union Depot",            "lat": 44.948600, "lng": -93.087700 },
+        { "id": "419-12", "name": "St. Paul Capitol / 10th St",      "lat": 44.953700, "lng": -93.102200 }
+      ]
+    }
+  }
+}

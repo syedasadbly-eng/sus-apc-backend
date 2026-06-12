@@ -97,7 +97,63 @@ function persistGpsCache(busId) {
   }
 }
 
+// ============================================
+// STATIC STOP REGISTRY (route + scheduled-stop resolver)
+// ============================================
+// Stops are loaded from data/stops.json and the server cycles each bus through
+// its route's ordered stops using a fixed loop_minutes cadence. This gives the
+// live map a sensible 'current scheduled stop' for each bus until real GPS
+// from the UR35 starts flowing.
+const STOPS_PATH = process.env.STOPS_PATH || path.join(__dirname, 'data', 'stops.json');
+let STOP_REGISTRY = { routes: {} };
+try {
+  if (fs.existsSync(STOPS_PATH)) {
+    STOP_REGISTRY = JSON.parse(fs.readFileSync(STOPS_PATH, 'utf8'));
+    const totalStops = Object.values(STOP_REGISTRY.routes || {}).reduce((s, r) => s + (r.stops || []).length, 0);
+    console.log(`[STOPS] Loaded ${Object.keys(STOP_REGISTRY.routes || {}).length} route(s), ${totalStops} stop(s) from ${STOPS_PATH}`);
+  } else {
+    console.warn(`[STOPS] ${STOPS_PATH} not found — stop-based location disabled`);
+  }
+} catch (err) {
+  console.warn(`[STOPS] Failed to load ${STOPS_PATH}:`, err.message);
+  STOP_REGISTRY = { routes: {} };
+}
+
+// Build a fast lookup: busId -> { routeKey, route, stops, loop_minutes }
+const BUS_ROUTE_LOOKUP = {};
+for (const [routeKey, route] of Object.entries(STOP_REGISTRY.routes || {})) {
+  for (const bid of route.bus_ids || []) {
+    BUS_ROUTE_LOOKUP[bid] = {
+      routeKey,
+      routeName: route.name,
+      stops: route.stops || [],
+      loopMinutes: route.loop_minutes || 45,
+    };
+  }
+}
+
+// Resolve the bus's current scheduled stop based on time-of-day modulo the
+// route loop. Returns the stop object or null if the bus has no route.
+function currentScheduledStop(busId, nowMs) {
+  const r = BUS_ROUTE_LOOKUP[busId];
+  if (!r || !r.stops.length) return null;
+  const now = nowMs || Date.now();
+  const loopMs = r.loopMinutes * 60 * 1000;
+  const positionInLoop = (now % loopMs) / loopMs; // 0..1
+  const idx = Math.min(r.stops.length - 1, Math.floor(positionInLoop * r.stops.length));
+  const nextIdx = (idx + 1) % r.stops.length;
+  const stop = r.stops[idx];
+  return {
+    ...stop,
+    routeKey: r.routeKey,
+    routeName: r.routeName,
+    nextStop: r.stops[nextIdx] || null,
+    loopMinutes: r.loopMinutes,
+  };
+}
+
 // Resolve the best location for a bus given its current state.
+// Priority: live GPS > cached last-known > current scheduled stop > static depot > generic depot.
 function resolveBusLocation(busId, devLat, devLng) {
   // 1. Real-time valid fix already on dev (validated upstream)
   if (devLat && devLng) return { lat: devLat, lng: devLng, source: 'live' };
@@ -106,10 +162,19 @@ function resolveBusLocation(busId, devLat, devLng) {
   if (cached && cached.lat && cached.lng) {
     return { lat: cached.lat, lng: cached.lng, source: 'cached', ts: cached.ts };
   }
-  // 3. Static per-bus depot/stop
+  // 3. Current scheduled stop on the bus's route
+  const stop = currentScheduledStop(busId);
+  if (stop && stop.lat && stop.lng) {
+    return {
+      lat: stop.lat, lng: stop.lng, source: 'stop',
+      label: stop.name, stopId: stop.id, routeName: stop.routeName,
+      nextStopName: stop.nextStop ? stop.nextStop.name : null,
+    };
+  }
+  // 4. Static per-bus depot
   const stat = BUS_STATIC_LOCATIONS[busId];
   if (stat) return { lat: stat.lat, lng: stat.lng, source: 'static', label: stat.label };
-  // 4. Generic depot
+  // 5. Generic depot
   return { lat: DEPOT_FALLBACK.lat, lng: DEPOT_FALLBACK.lng, source: 'depot', label: DEPOT_FALLBACK.label };
 }
 
@@ -663,13 +728,18 @@ function flushBusDelta(busId) {
 
   // ---- Insert merged record into database ----
   try {
+    // Use the bus's current scheduled stop (if any) so historical records
+    // carry geographic context even when the device isn't sending stop info.
+    const schedStop = currentScheduledStop(busId);
+    const stopName = schedStop ? (schedStop.name || schedStop.id || '-') : '-';
+    const recordRoute = route || (schedStop ? schedStop.routeKey : '');
     insertRecord.run({
       timestamp: isoTs,
       date: dateStr,
       hour,
       bus_id: busId,
-      route,
-      stop: '-',
+      route: recordRoute,
+      stop: stopName,
       boardings: deltaIn,
       alightings: deltaOut,
       evt_in: deltaIn,
@@ -824,6 +894,19 @@ app.get('/api/live', (req, res) => {
     const ageSeconds = dev.ts ? Math.round((Date.now() - dev.ts) / 1000) : 999;
     const passengers = dev.onboard || Math.max(0, dev.totalIn - dev.totalOut);
     const occupancy = BUS_CAPACITY > 0 ? Math.min(100, Math.round((passengers / BUS_CAPACITY) * 100)) : 0;
+    // If the bus has no live GPS, re-resolve every call so the scheduled-stop
+    // tracking moves the bus along its route as time passes.
+    let lat = dev.lat || 0, lng = dev.lng || 0;
+    let gpsSource = dev.gpsSource || 'unknown', gpsLabel = dev.gpsLabel || null;
+    let stopId = null, routeName = null, nextStopName = null;
+    if (gpsSource !== 'live') {
+      const resolved = resolveBusLocation(busId, 0, 0);
+      lat = resolved.lat; lng = resolved.lng;
+      gpsSource = resolved.source; gpsLabel = resolved.label || null;
+      stopId = resolved.stopId || null;
+      routeName = resolved.routeName || null;
+      nextStopName = resolved.nextStopName || null;
+    }
     return {
       busId,
       lineIn: dev.totalIn,       lastEventIn: dev.lastEventIn || 0,       lastEventOut: dev.lastEventOut || 0,
@@ -831,10 +914,13 @@ app.get('/api/live', (req, res) => {
       passengers,
       onboard: dev.onboard || 0,
       occupancy,
-      lat: dev.lat || 0,
-      lng: dev.lng || 0,
-      gpsSource: dev.gpsSource || 'unknown',
-      gpsLabel: dev.gpsLabel || null,
+      lat,
+      lng,
+      gpsSource,
+      gpsLabel,
+      stopId,
+      routeName,
+      nextStopName,
       speed: dev.speed || 0,
       status: ageSeconds < 300 ? 'active' : 'idle',
       sensorStatus: ageSeconds < 300 ? 'Online' : ageSeconds < 600 ? 'Degraded' : 'Offline',
@@ -875,6 +961,34 @@ app.get('/api/gps-debug', (req, res) => {
     depotFallback: DEPOT_FALLBACK,
     cachePath: GPS_CACHE_PATH,
   });
+});
+
+
+// --- Stop registry endpoints ---
+// Full registry: every route with its ordered stop list. Used by the map to
+// render stop pins along each route.
+app.get('/api/stops', (req, res) => {
+  const routes = {};
+  for (const [k, v] of Object.entries(STOP_REGISTRY.routes || {})) {
+    routes[k] = {
+      name: v.name,
+      loop_minutes: v.loop_minutes,
+      bus_ids: v.bus_ids || [],
+      stops: v.stops || [],
+    };
+  }
+  res.json({ routes });
+});
+
+// Current scheduled stop per bus right now — useful for dashboards/tooltips.
+app.get('/api/stops/current', (req, res) => {
+  const now = Date.now();
+  const buses = {};
+  for (const busId of Object.keys(BUS_ROUTE_LOOKUP)) {
+    const s = currentScheduledStop(busId, now);
+    if (s) buses[busId] = s;
+  }
+  res.json({ now: new Date(now).toISOString(), buses });
 });
 
 
