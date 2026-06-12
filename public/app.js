@@ -3222,3 +3222,373 @@ async function refreshStopBoardingsHome() {
     console.warn('[stopBoardingsHome] refresh failed:', err);
   }
 }
+
+
+// ============================================
+// HISTORY PLAYBACK — Live Map view
+// ============================================
+// Three modes share the same #liveMapFull Leaflet instance:
+//   1. breadcrumbs — coloured dots + polyline of every GPS sample in range
+//   2. heatmap     — Leaflet.heat overlay showing density of bus positions
+//   3. playback    — animated bus marker scrubbed via slider
+// All driven by /api/history-locations.
+
+const HISTORY = {
+  mode: 'live',          // 'live' | 'history'
+  vis: 'breadcrumbs',    // 'breadcrumbs' | 'heatmap' | 'playback'
+  preset: 'today',       // 'today' | 'yesterday' | '7' | 'custom'
+  busFilter: 'all',
+  customFrom: null,
+  customTo: null,
+  points: [],            // raw rows from API
+  layers: {},            // active Leaflet layers, keyed by name
+  // playback state
+  playback: {
+    playing: false,
+    idx: 0,
+    speed: 4,
+    timer: null,
+    markers: {},         // busId -> Leaflet marker
+    trails: {},          // busId -> Leaflet polyline
+  },
+};
+
+const BUS_COLORS = {
+  '515': '#8b74d1',  // purple
+  '419': '#d4af37',  // gold
+};
+const BUS_COLOR_FALLBACK = '#7dd3fc';
+
+function busColor(busId) { return BUS_COLORS[busId] || BUS_COLOR_FALLBACK; }
+
+function initHistoryControls() {
+  // Mode tabs
+  document.querySelectorAll('.map-mode-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const mode = btn.dataset.mode;
+      document.querySelectorAll('.map-mode-tab').forEach(b => b.classList.toggle('active', b === btn));
+      HISTORY.mode = mode;
+      const liveBar = document.getElementById('liveFilterBar');
+      const histBar = document.getElementById('historyFilterBar');
+      const scrubber = document.getElementById('playbackScrubber');
+      if (mode === 'live') {
+        liveBar.style.display = '';
+        histBar.style.display = 'none';
+        scrubber.style.display = 'none';
+        clearHistoryLayers();
+      } else {
+        liveBar.style.display = 'none';
+        histBar.style.display = 'flex';
+        // auto-load on first switch
+        loadHistory();
+      }
+      if (window.lucide) window.lucide.createIcons();
+    });
+  });
+
+  // Preset buttons
+  document.querySelectorAll('.history-preset').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.history-preset').forEach(b => b.classList.toggle('active', b === btn));
+      HISTORY.preset = btn.dataset.preset;
+      const custom = document.getElementById('historyCustomRange');
+      custom.style.display = (HISTORY.preset === 'custom') ? 'flex' : 'none';
+      if (HISTORY.preset !== 'custom') loadHistory();
+    });
+  });
+
+  // Custom date inputs
+  const today = displayDateStr();
+  const fromInput = document.getElementById('historyFrom');
+  const toInput = document.getElementById('historyTo');
+  if (fromInput) { fromInput.max = today; fromInput.value = today; }
+  if (toInput)   { toInput.max = today;   toInput.value = today; }
+
+  // Bus filter
+  const busSel = document.getElementById('historyBusFilter');
+  if (busSel) busSel.addEventListener('change', () => {
+    HISTORY.busFilter = busSel.value || 'all';
+    loadHistory();
+  });
+
+  // Vis mode toggle
+  document.querySelectorAll('.history-mode').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.history-mode').forEach(b => b.classList.toggle('active', b === btn));
+      HISTORY.vis = btn.dataset.vis;
+      renderHistory();
+    });
+  });
+
+  // Load button (mainly for custom date ranges)
+  const loadBtn = document.getElementById('historyLoadBtn');
+  if (loadBtn) loadBtn.addEventListener('click', loadHistory);
+
+  // Playback controls
+  const playBtn = document.getElementById('playbackPlayBtn');
+  if (playBtn) playBtn.addEventListener('click', togglePlayback);
+  const slider = document.getElementById('playbackSlider');
+  if (slider) slider.addEventListener('input', () => seekPlayback(parseInt(slider.value, 10)));
+  const speedSel = document.getElementById('playbackSpeed');
+  if (speedSel) speedSel.addEventListener('change', () => {
+    HISTORY.playback.speed = parseInt(speedSel.value, 10) || 4;
+  });
+}
+
+function historyParams() {
+  const params = {};
+  if (HISTORY.busFilter && HISTORY.busFilter !== 'all') params.bus_id = HISTORY.busFilter;
+  if (HISTORY.preset === 'today') {
+    // backend defaults to today
+  } else if (HISTORY.preset === 'yesterday') {
+    const d = new Date(Date.now() - 86400000);
+    params.date = d.toISOString().slice(0, 10);
+  } else if (HISTORY.preset === '7') {
+    const to = displayDateStr();
+    const fromDate = new Date(Date.now() - 6 * 86400000);
+    params.from = fromDate.toISOString().slice(0, 10);
+    params.to = to;
+  } else if (HISTORY.preset === 'custom') {
+    const f = document.getElementById('historyFrom');
+    const t = document.getElementById('historyTo');
+    if (f && f.value) params.from = f.value;
+    if (t && t.value) params.to = t.value;
+  }
+  return params;
+}
+
+async function loadHistory() {
+  if (!maps.liveMap) return; // map not initialised yet
+  const status = document.getElementById('historyStatus');
+  if (status) status.textContent = 'Loading…';
+  try {
+    const data = await apiFetch('/api/history-locations', historyParams());
+    HISTORY.points = (data && data.points) ? data.points : [];
+    if (status) {
+      const n = data.returned || 0;
+      const tot = data.total_available || 0;
+      const ds = data.downsampled ? ` (downsampled from ${tot})` : '';
+      status.textContent = `${n.toLocaleString()} GPS points${ds}`;
+    }
+    renderHistory();
+  } catch (err) {
+    console.warn('[history] load failed:', err);
+    if (status) status.textContent = 'Failed to load';
+  }
+}
+
+function clearHistoryLayers() {
+  const map = maps.liveMap;
+  if (!map) return;
+  for (const k of Object.keys(HISTORY.layers)) {
+    try { map.removeLayer(HISTORY.layers[k]); } catch (e) {}
+    delete HISTORY.layers[k];
+  }
+  // also clear playback markers/trails
+  for (const k of Object.keys(HISTORY.playback.markers)) {
+    try { map.removeLayer(HISTORY.playback.markers[k]); } catch (e) {}
+    delete HISTORY.playback.markers[k];
+  }
+  for (const k of Object.keys(HISTORY.playback.trails)) {
+    try { map.removeLayer(HISTORY.playback.trails[k]); } catch (e) {}
+    delete HISTORY.playback.trails[k];
+  }
+  stopPlayback();
+  const scrubber = document.getElementById('playbackScrubber');
+  if (scrubber) scrubber.style.display = 'none';
+}
+
+function renderHistory() {
+  clearHistoryLayers();
+  const map = maps.liveMap;
+  if (!map || !HISTORY.points.length) return;
+
+  if (HISTORY.vis === 'breadcrumbs')  renderBreadcrumbs();
+  else if (HISTORY.vis === 'heatmap') renderHeatmap();
+  else if (HISTORY.vis === 'playback') renderPlayback();
+
+  // Auto-fit bounds across all loaded points.
+  const bounds = L.latLngBounds(HISTORY.points.map(p => [p.lat, p.lng]));
+  if (bounds.isValid()) map.fitBounds(bounds, { padding: [40, 40] });
+}
+
+function renderBreadcrumbs() {
+  const map = maps.liveMap;
+  // Group points by bus so each bus has its own coloured trail.
+  const byBus = {};
+  for (const p of HISTORY.points) {
+    if (!byBus[p.bus_id]) byBus[p.bus_id] = [];
+    byBus[p.bus_id].push(p);
+  }
+  Object.keys(byBus).forEach(busId => {
+    const pts = byBus[busId];
+    const color = busColor(busId);
+    // Polyline connecting all points in time order.
+    const line = L.polyline(pts.map(p => [p.lat, p.lng]), {
+      color, weight: 3, opacity: 0.55, smoothFactor: 1.5,
+    }).addTo(map);
+    HISTORY.layers['line-' + busId] = line;
+    // Dots — small circle markers per sample.
+    const group = L.layerGroup();
+    pts.forEach((p, i) => {
+      // Slightly stronger opacity for first and last point so the trail has direction.
+      const isEnd = (i === 0 || i === pts.length - 1);
+      const m = L.circleMarker([p.lat, p.lng], {
+        radius: isEnd ? 6 : 3.5,
+        color,
+        weight: isEnd ? 2 : 1,
+        fillColor: isEnd ? '#ffffff' : color,
+        fillOpacity: isEnd ? 1 : 0.85,
+      });
+      m.bindTooltip(
+        `<strong>Bus ${p.bus_id}</strong><br>` +
+        `${new Date(p.timestamp).toLocaleString()}<br>` +
+        `Stop: ${p.stop || '—'}<br>` +
+        `Speed: ${p.speed ? p.speed.toFixed(1) : 0} · Onboard: ${p.onboard || 0}`,
+        { direction: 'top', sticky: true }
+      );
+      group.addLayer(m);
+    });
+    group.addTo(map);
+    HISTORY.layers['dots-' + busId] = group;
+  });
+}
+
+function renderHeatmap() {
+  const map = maps.liveMap;
+  if (typeof L.heatLayer !== 'function') {
+    console.warn('[history] L.heatLayer missing — Leaflet.heat plugin not loaded');
+    return;
+  }
+  // Slight weight by onboard so busier moments glow brighter.
+  const points = HISTORY.points.map(p => [p.lat, p.lng, Math.max(0.2, Math.min(1.0, (p.onboard || 0) / 20 + 0.3))]);
+  const heat = L.heatLayer(points, {
+    radius: 22,
+    blur: 18,
+    maxZoom: 17,
+    minOpacity: 0.35,
+    gradient: { 0.2: '#5b49a8', 0.45: '#8b74d1', 0.65: '#d4af37', 0.85: '#fb7185', 1.0: '#ffffff' },
+  }).addTo(map);
+  HISTORY.layers['heat'] = heat;
+}
+
+function renderPlayback() {
+  const map = maps.liveMap;
+  const scrubber = document.getElementById('playbackScrubber');
+  if (scrubber) scrubber.style.display = 'flex';
+
+  // Faint trail polylines for context (per bus).
+  const byBus = {};
+  for (const p of HISTORY.points) {
+    if (!byBus[p.bus_id]) byBus[p.bus_id] = [];
+    byBus[p.bus_id].push(p);
+  }
+  Object.keys(byBus).forEach(busId => {
+    const pts = byBus[busId];
+    const color = busColor(busId);
+    const trail = L.polyline(pts.map(p => [p.lat, p.lng]), {
+      color, weight: 2, opacity: 0.22, dashArray: '4,4',
+    }).addTo(map);
+    HISTORY.playback.trails[busId] = trail;
+    // Initial marker at first point.
+    const first = pts[0];
+    const marker = L.circleMarker([first.lat, first.lng], {
+      radius: 9, color: '#fff', weight: 3, fillColor: color, fillOpacity: 1,
+    }).addTo(map);
+    marker.bindTooltip(`Bus ${busId}`, { direction: 'top', permanent: true, className: 'history-bus-label', offset: [0, -14] });
+    HISTORY.playback.markers[busId] = marker;
+  });
+
+  // Slider mapped to point index across the entire dataset (in time order).
+  const slider = document.getElementById('playbackSlider');
+  if (slider) {
+    slider.min = 0;
+    slider.max = HISTORY.points.length - 1;
+    slider.value = 0;
+  }
+  HISTORY.playback.idx = 0;
+  HISTORY.playback.playing = false;
+  updatePlaybackUI();
+  seekPlayback(0);
+}
+
+function updatePlaybackUI() {
+  const btn = document.getElementById('playbackPlayBtn');
+  if (btn) {
+    btn.innerHTML = HISTORY.playback.playing
+      ? '<i data-lucide="pause" style="width:16px;height:16px"></i>'
+      : '<i data-lucide="play"  style="width:16px;height:16px"></i>';
+    if (window.lucide) window.lucide.createIcons();
+  }
+}
+
+function togglePlayback() {
+  if (!HISTORY.points.length) return;
+  HISTORY.playback.playing = !HISTORY.playback.playing;
+  updatePlaybackUI();
+  if (HISTORY.playback.playing) {
+    if (HISTORY.playback.idx >= HISTORY.points.length - 1) HISTORY.playback.idx = 0;
+    const step = () => {
+      if (!HISTORY.playback.playing) return;
+      seekPlayback(HISTORY.playback.idx + 1);
+      if (HISTORY.playback.idx >= HISTORY.points.length - 1) {
+        HISTORY.playback.playing = false;
+        updatePlaybackUI();
+        return;
+      }
+      // Interval scales with speed multiplier.
+      const interval = Math.max(20, 500 / HISTORY.playback.speed);
+      HISTORY.playback.timer = setTimeout(step, interval);
+    };
+    step();
+  } else {
+    stopPlayback();
+  }
+}
+
+function stopPlayback() {
+  if (HISTORY.playback.timer) clearTimeout(HISTORY.playback.timer);
+  HISTORY.playback.timer = null;
+  HISTORY.playback.playing = false;
+}
+
+function seekPlayback(idx) {
+  if (!HISTORY.points.length) return;
+  idx = Math.max(0, Math.min(HISTORY.points.length - 1, idx));
+  HISTORY.playback.idx = idx;
+  const slider = document.getElementById('playbackSlider');
+  if (slider && parseInt(slider.value, 10) !== idx) slider.value = idx;
+  // Time readout.
+  const p = HISTORY.points[idx];
+  const time = document.getElementById('playbackTime');
+  if (time && p) time.textContent = new Date(p.timestamp).toLocaleString();
+  // Move each bus marker to its most-recent point at or before this timestamp.
+  const cutoffTs = new Date(p.timestamp).getTime();
+  Object.keys(HISTORY.playback.markers).forEach(busId => {
+    // Linear scan is fine — points are pre-sorted and per-bus arrays are small.
+    let latest = null;
+    for (const pt of HISTORY.points) {
+      if (pt.bus_id !== busId) continue;
+      if (new Date(pt.timestamp).getTime() > cutoffTs) break;
+      latest = pt;
+    }
+    if (latest) {
+      HISTORY.playback.markers[busId].setLatLng([latest.lat, latest.lng]);
+    }
+  });
+}
+
+// Wire history controls once after the page loads. Safe to run before
+// initLiveMap fires — it just attaches listeners to the History toolbar.
+document.addEventListener('DOMContentLoaded', () => {
+  if (HISTORY._controlsWired) return;
+  initHistoryControls();
+  HISTORY._controlsWired = true;
+});
+// And immediately, in case DOMContentLoaded already fired (script loads at end of body).
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+  if (!HISTORY._controlsWired) {
+    initHistoryControls();
+    HISTORY._controlsWired = true;
+  }
+}
