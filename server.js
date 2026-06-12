@@ -45,8 +45,73 @@ const GATEWAYS = [
   { topic: 'bus/004', label: '419', route: '' },
 ];
 
-// Last-known GPS fallback (UR35 indoors, status 52)
-const LAST_KNOWN_GPS = { lat: 44.9778, lng: -93.2650 };
+// ============================================
+// GPS RESILIENT FALLBACK SYSTEM
+// ============================================
+// The UR35 gateway only emits a valid fix when it has line-of-sight to the
+// sky and the GPS antenna is connected. Indoors / no-antenna it reports
+// status=52 (no fix). Without resilience, the live map shows nothing useful.
+//
+// Priority order (highest first) for the live bus location:
+//   1. Real-time valid UR35 GPS fix
+//   2. Persisted last-known fix for this bus (survives restart)
+//   3. Static stop/depot coordinates for this bus_id
+//   4. Generic depot fallback
+//
+// Per-bus last-known GPS is written to disk on every valid fix so a Railway
+// redeploy doesn't lose location memory.
+
+// Per-bus static depot/stop coordinates (Minnesota — Twin Cities area).
+// Used when no real fix has ever been seen for that bus.
+const BUS_STATIC_LOCATIONS = {
+  '515': { lat: 44.9778, lng: -93.2650, label: 'Minneapolis depot' },
+  '419': { lat: 44.9537, lng: -93.0900, label: 'St. Paul depot' },
+};
+
+// Ultimate fallback when bus_id has no static mapping.
+const DEPOT_FALLBACK = { lat: 44.9778, lng: -93.2650, label: 'Twin Cities depot' };
+
+// Persisted last-known GPS file — survives restarts/redeploys.
+const GPS_CACHE_PATH = process.env.GPS_CACHE_PATH || path.join(__dirname, 'gps-cache.json');
+let lastKnownGpsByBus = {};
+try {
+  if (fs.existsSync(GPS_CACHE_PATH)) {
+    lastKnownGpsByBus = JSON.parse(fs.readFileSync(GPS_CACHE_PATH, 'utf8')) || {};
+    console.log(`[GPS] Loaded last-known fixes for ${Object.keys(lastKnownGpsByBus).length} bus(es) from ${GPS_CACHE_PATH}`);
+  }
+} catch (err) {
+  console.warn(`[GPS] Failed to load ${GPS_CACHE_PATH}:`, err.message);
+  lastKnownGpsByBus = {};
+}
+
+// Throttle disk writes — only persist once every 30s per bus at most.
+const gpsCacheLastWriteAt = {};
+function persistGpsCache(busId) {
+  const now = Date.now();
+  if (gpsCacheLastWriteAt[busId] && now - gpsCacheLastWriteAt[busId] < 30000) return;
+  gpsCacheLastWriteAt[busId] = now;
+  try {
+    fs.writeFileSync(GPS_CACHE_PATH, JSON.stringify(lastKnownGpsByBus, null, 2));
+  } catch (err) {
+    console.warn('[GPS] Failed to persist cache:', err.message);
+  }
+}
+
+// Resolve the best location for a bus given its current state.
+function resolveBusLocation(busId, devLat, devLng) {
+  // 1. Real-time valid fix already on dev (validated upstream)
+  if (devLat && devLng) return { lat: devLat, lng: devLng, source: 'live' };
+  // 2. Persisted last-known fix for this bus
+  const cached = lastKnownGpsByBus[busId];
+  if (cached && cached.lat && cached.lng) {
+    return { lat: cached.lat, lng: cached.lng, source: 'cached', ts: cached.ts };
+  }
+  // 3. Static per-bus depot/stop
+  const stat = BUS_STATIC_LOCATIONS[busId];
+  if (stat) return { lat: stat.lat, lng: stat.lng, source: 'static', label: stat.label };
+  // 4. Generic depot
+  return { lat: DEPOT_FALLBACK.lat, lng: DEPOT_FALLBACK.lng, source: 'depot', label: DEPOT_FALLBACK.label };
+}
 
 // VS125 field extraction paths (same as dashboard)
 const FIELD_PATHS = {
@@ -396,7 +461,13 @@ function handleMessage(topic, rawPayload) {
   // continuous occupancy rather than starting at 0.
   if (!liveDevices[busId]) {
     const seedOnboard = busRunningOnboard[busId] != null ? busRunningOnboard[busId] : 0;
-    liveDevices[busId] = { totalIn: 0, totalOut: 0, onboard: seedOnboard, lastEventIn: 0, lastEventOut: 0, lat: 0, lng: 0, speed: 0, ts: 0 };
+    const seed = resolveBusLocation(busId, 0, 0);
+    liveDevices[busId] = {
+      totalIn: 0, totalOut: 0, onboard: seedOnboard,
+      lastEventIn: 0, lastEventOut: 0,
+      lat: seed.lat, lng: seed.lng, gpsSource: seed.source, gpsLabel: seed.label || null,
+      speed: 0, ts: 0
+    };
   }
   const dev = liveDevices[busId];
   dev.ts = Date.now();
@@ -418,10 +489,22 @@ function handleMessage(topic, rawPayload) {
   const inRange = (v, max) => v != null && !isNaN(v) && Math.abs(v) <= max && v !== 0;
   const validFix = inRange(lat, 90) && inRange(lng, 180) && hasValidFix;
 
-  if (validFix) { dev.lat = lat; dev.lng = lng; dev.gpsValid = true; }
-  else if (lat != null || lng != null) console.warn(`[GPS] ${busId} ignoring invalid coords lat=${lat} lng=${lng} status=${gpsStatus}`);
-  if (!dev.lat && LAST_KNOWN_GPS.lat) dev.lat = LAST_KNOWN_GPS.lat;
-  if (!dev.lng && LAST_KNOWN_GPS.lng) dev.lng = LAST_KNOWN_GPS.lng;
+  if (validFix) {
+    dev.lat = lat; dev.lng = lng; dev.gpsValid = true; dev.gpsSource = 'live'; dev.gpsTs = Date.now();
+    // Persist the fix so the bus keeps its location across restarts.
+    lastKnownGpsByBus[busId] = { lat, lng, ts: dev.gpsTs };
+    persistGpsCache(busId);
+  } else if (lat != null || lng != null) {
+    console.warn(`[GPS] ${busId} ignoring invalid coords lat=${lat} lng=${lng} status=${gpsStatus}`);
+  }
+  // If no live fix on dev, fall through to cached / static / depot.
+  if (!dev.lat || !dev.lng) {
+    const resolved = resolveBusLocation(busId, dev.lat, dev.lng);
+    dev.lat = resolved.lat;
+    dev.lng = resolved.lng;
+    dev.gpsSource = resolved.source;
+    dev.gpsLabel = resolved.label || null;
+  }
   dev.speed = speed;
 
   // ---- EXTRACT COUNTING DATA ----
@@ -750,6 +833,8 @@ app.get('/api/live', (req, res) => {
       occupancy,
       lat: dev.lat || 0,
       lng: dev.lng || 0,
+      gpsSource: dev.gpsSource || 'unknown',
+      gpsLabel: dev.gpsLabel || null,
       speed: dev.speed || 0,
       status: ageSeconds < 300 ? 'active' : 'idle',
       sensorStatus: ageSeconds < 300 ? 'Online' : ageSeconds < 600 ? 'Degraded' : 'Offline',
@@ -764,6 +849,31 @@ app.get('/api/live', (req, res) => {
       lastMessage: mqttStats.lastMessage,
     },
     buses,
+  });
+});
+
+
+// --- GPS diagnostics ---
+// Shows current location resolution for each bus and the cached last-known
+// fixes on disk. Use this when you suspect the device isn't sending GPS or
+// is being rejected as invalid.
+app.get('/api/gps-debug', (req, res) => {
+  const live = Object.entries(liveDevices).map(([busId, dev]) => ({
+    busId,
+    lat: dev.lat || 0,
+    lng: dev.lng || 0,
+    gpsSource: dev.gpsSource || 'unknown',
+    gpsLabel: dev.gpsLabel || null,
+    gpsValid: !!dev.gpsValid,
+    gpsTs: dev.gpsTs || null,
+    lastMessageAgeSec: dev.ts ? Math.round((Date.now() - dev.ts) / 1000) : null,
+  }));
+  res.json({
+    live,
+    cached: lastKnownGpsByBus,
+    staticLocations: BUS_STATIC_LOCATIONS,
+    depotFallback: DEPOT_FALLBACK,
+    cachePath: GPS_CACHE_PATH,
   });
 });
 
