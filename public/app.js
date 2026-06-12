@@ -1612,36 +1612,71 @@ function initRidership() {
   const RID_PURPLE = 'rgba(139,116,209,0.85)';
   const RID_GOLD = 'rgba(212,175,55,0.95)';
 
-  // Trend (line): clean white line with a subtle purple-fade underlay
+  // Trend (line): hero size, clean white line with deep purple-fade underlay
   const trendCtx = document.getElementById('chartRidershipTrend').getContext('2d');
-  const trendGradient = trendCtx.createLinearGradient(0, 0, 0, 280);
-  trendGradient.addColorStop(0, 'rgba(139,116,209,0.32)');
-  trendGradient.addColorStop(1, 'rgba(91,73,168,0.02)');
+  const trendGradient = trendCtx.createLinearGradient(0, 0, 0, 460);
+  trendGradient.addColorStop(0, 'rgba(139,116,209,0.42)');
+  trendGradient.addColorStop(0.55, 'rgba(91,73,168,0.16)');
+  trendGradient.addColorStop(1, 'rgba(91,73,168,0.0)');
   charts.ridershipTrend = new Chart(trendCtx, {
     type: 'line',
     data: { labels: [], datasets: [{
       label: 'Boardings', data: [],
       borderColor: RID_WHITE,
       backgroundColor: trendGradient,
-      borderWidth: 2.5,
+      borderWidth: 3,
       fill: true, tension: 0.4,
-      pointRadius: 3.5, pointHoverRadius: 6,
+      pointRadius: 4.5, pointHoverRadius: 7,
       pointBackgroundColor: RID_WHITE,
-      pointBorderColor: 'rgba(91,73,168,0.9)',
-      pointBorderWidth: 1.5,
+      pointBorderColor: 'rgba(91,73,168,0.95)',
+      pointBorderWidth: 2,
+      pointHoverBorderWidth: 2.5,
+      pointHoverBackgroundColor: 'rgba(212,175,55,1)',
     }] },
-    options: chartDefaults('Passengers'),
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      animation: { duration: 900, easing: 'easeOutQuart' },
+      plugins: {
+        legend: { display: false },
+        tooltip: { ...tooltipDefaults(),
+          callbacks: { label: (c) => ' ' + Number(c.parsed.y).toLocaleString() + ' boardings' }
+        }
+      },
+      scales: {
+        x: { grid: { color: 'rgba(255,255,255,0.04)', drawTicks: false }, ticks: { color: '#b5b8d0', font: { size: 11, family: 'Inter' }, padding: 8 } },
+        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)', drawTicks: false }, ticks: { color: '#b5b8d0', font: { size: 11, family: 'Inter' }, padding: 8, callback: (v) => Number(v).toLocaleString() }, title: { display: true, text: 'Boardings', color: '#9094b2', font: { size: 11, family: 'Inter', weight: '600' } } }
+      }
+    },
   });
+  // Companion charts (no aspect ratio so they fill the larger panels)
+  const companionOpts = (yLabel) => ({
+    responsive: true, maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },
+    animation: { duration: 800, easing: 'easeOutQuart' },
+    plugins: {
+      legend: { labels: { color: '#c9cad8', font: { size: 12, family: 'Inter', weight: '500' }, padding: 18, usePointStyle: true, pointStyle: 'circle', boxWidth: 8, boxHeight: 8 } },
+      tooltip: { ...tooltipDefaults(),
+        callbacks: { label: (c) => ' ' + c.dataset.label + ': ' + Number(c.parsed.y).toLocaleString() }
+      }
+    },
+    scales: {
+      x: { grid: { color: 'rgba(255,255,255,0.04)', drawTicks: false }, ticks: { color: '#b5b8d0', font: { size: 11, family: 'Inter' }, padding: 8 } },
+      y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)', drawTicks: false }, ticks: { color: '#b5b8d0', font: { size: 11, family: 'Inter' }, padding: 8, callback: (v) => Number(v).toLocaleString() }, title: { display: true, text: yLabel, color: '#9094b2', font: { size: 11, family: 'Inter', weight: '600' } } }
+    }
+  });
+
   // Boardings vs Alightings (bar): white = boardings, gold = alightings
   const baCtx = document.getElementById('chartBoardAlightRidership').getContext('2d');
   charts.boardAlight = new Chart(baCtx, {
     type: 'bar',
     data: { labels: [], datasets: [
-      { label: 'Boardings', data: [], backgroundColor: RID_WHITE, borderRadius: 6, borderSkipped: false, maxBarThickness: 28 },
-      { label: 'Alightings', data: [], backgroundColor: RID_GOLD, borderRadius: 6, borderSkipped: false, maxBarThickness: 28 },
+      { label: 'Boardings', data: [], backgroundColor: RID_WHITE, hoverBackgroundColor: 'rgba(255,255,255,1)', borderRadius: 8, borderSkipped: false, maxBarThickness: 36 },
+      { label: 'Alightings', data: [], backgroundColor: RID_GOLD, hoverBackgroundColor: 'rgba(232,193,73,1)', borderRadius: 8, borderSkipped: false, maxBarThickness: 36 },
     ]},
-    options: chartDefaults('Passengers'),
+    options: companionOpts('Passengers'),
   });
+
   // Day of week: indigo-amethyst weekdays, gold weekends
   const dowCtx = document.getElementById('chartDayOfWeek').getContext('2d');
   charts.dayOfWeek = new Chart(dowCtx, {
@@ -1649,41 +1684,16 @@ function initRidership() {
     data: { labels: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'], datasets: [{
       label: 'Avg Passengers', data: [0,0,0,0,0,0,0],
       backgroundColor: [RID_PURPLE, RID_PURPLE, RID_PURPLE, RID_PURPLE, RID_PURPLE, RID_GOLD, RID_GOLD],
-      borderRadius: 8, borderSkipped: false, maxBarThickness: 36,
+      hoverBackgroundColor: ['rgba(159,138,221,0.95)','rgba(159,138,221,0.95)','rgba(159,138,221,0.95)','rgba(159,138,221,0.95)','rgba(159,138,221,0.95)','rgba(232,193,73,1)','rgba(232,193,73,1)'],
+      borderRadius: 10, borderSkipped: false, maxBarThickness: 64,
     }] },
-    options: chartDefaults('Avg Passengers'),
-  });
-  // Occupancy distribution: refined cool-to-warm gradient with white separators
-  const occCtx = document.getElementById('chartOccupancyDist').getContext('2d');
-  charts.occDist = new Chart(occCtx, {
-    type: 'doughnut',
-    data: { labels: ['0–25%','26–50%','51–75%','76–100%'], datasets: [{
-      data: [1,0,0,0],
-      backgroundColor: [
-        'rgba(139,116,209,0.45)',
-        'rgba(139,116,209,0.75)',
-        'rgba(91,73,168,0.95)',
-        'rgba(212,175,55,0.95)',
-      ],
-      borderColor: 'rgba(11,13,21,0.9)',
-      borderWidth: 2,
-      spacing: 2,
-      hoverOffset: 6,
-    }] },
-    options: {
-      responsive: true, maintainAspectRatio: true, cutout: '70%',
+    options: { ...companionOpts('Avg Passengers'),
       plugins: {
-        legend: { position: 'bottom', labels: { color:'#c9cad8', font:{size:11,family:'Inter'}, padding:16, usePointStyle:true, pointStyle:'circle' } },
+        legend: { display: false },
         tooltip: { ...tooltipDefaults(),
-          callbacks: {
-            label: (ctx) => {
-              const total = ctx.dataset.data.reduce((s,v)=>s+v,0);
-              const pct = total > 0 ? Math.round((ctx.parsed / total) * 100) : 0;
-              return ` ${ctx.label}: ${pct}% of operating time`;
-            }
-          }
+          callbacks: { label: (c) => ' ' + Number(c.parsed.y).toLocaleString() + ' avg boardings' }
         }
-      },
+      }
     },
   });
 
@@ -1791,12 +1801,6 @@ async function loadRidershipData() {
     renderRidershipChartsFromLive(viewMode, fromDate, now);
   }
 
-  // Time-at-occupancy distribution. Refresh the hourly cache first so the bands
-  // are time-weighted from authoritative DB data (not just the live snapshot).
-  await refreshOccHourlyCache();
-  const bands = computeOccupancyBands();
-  charts.occDist.data.datasets[0].data = bands;
-  charts.occDist.update('active');
 }
 
 /** Populate ridership KPIs from live MQTT state */
