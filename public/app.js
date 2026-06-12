@@ -1607,33 +1607,84 @@ function initLiveMap() {
 // ============================================
 
 function initRidership() {
-  // Create empty charts — will be populated from API
+  // Premium palette: white as the primary, indigo-amethyst & gold as accents
+  const RID_WHITE = 'rgba(255,255,255,0.95)';
+  const RID_PURPLE = 'rgba(139,116,209,0.85)';
+  const RID_GOLD = 'rgba(212,175,55,0.95)';
+
+  // Trend (line): clean white line with a subtle purple-fade underlay
   const trendCtx = document.getElementById('chartRidershipTrend').getContext('2d');
+  const trendGradient = trendCtx.createLinearGradient(0, 0, 0, 280);
+  trendGradient.addColorStop(0, 'rgba(139,116,209,0.32)');
+  trendGradient.addColorStop(1, 'rgba(91,73,168,0.02)');
   charts.ridershipTrend = new Chart(trendCtx, {
     type: 'line',
-    data: { labels: [], datasets: [{ label: 'Boardings', data: [], borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)', fill: true, tension: 0.4, pointRadius: 4, pointHoverRadius: 6 }] },
+    data: { labels: [], datasets: [{
+      label: 'Boardings', data: [],
+      borderColor: RID_WHITE,
+      backgroundColor: trendGradient,
+      borderWidth: 2.5,
+      fill: true, tension: 0.4,
+      pointRadius: 3.5, pointHoverRadius: 6,
+      pointBackgroundColor: RID_WHITE,
+      pointBorderColor: 'rgba(91,73,168,0.9)',
+      pointBorderWidth: 1.5,
+    }] },
     options: chartDefaults('Passengers'),
   });
+  // Boardings vs Alightings (bar): white = boardings, gold = alightings
   const baCtx = document.getElementById('chartBoardAlightRidership').getContext('2d');
   charts.boardAlight = new Chart(baCtx, {
     type: 'bar',
     data: { labels: [], datasets: [
-      { label: 'Boardings', data: [], backgroundColor: 'rgba(59,130,246,0.8)', borderRadius: 4 },
-      { label: 'Alightings', data: [], backgroundColor: 'rgba(16,185,129,0.8)', borderRadius: 4 },
+      { label: 'Boardings', data: [], backgroundColor: RID_WHITE, borderRadius: 6, borderSkipped: false, maxBarThickness: 28 },
+      { label: 'Alightings', data: [], backgroundColor: RID_GOLD, borderRadius: 6, borderSkipped: false, maxBarThickness: 28 },
     ]},
     options: chartDefaults('Passengers'),
   });
+  // Day of week: indigo-amethyst weekdays, gold weekends
   const dowCtx = document.getElementById('chartDayOfWeek').getContext('2d');
   charts.dayOfWeek = new Chart(dowCtx, {
     type: 'bar',
-    data: { labels: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'], datasets: [{ label: 'Avg Passengers', data: [0,0,0,0,0,0,0], backgroundColor: ['#3b82f6cc','#3b82f6cc','#3b82f6cc','#3b82f6cc','#3b82f6cc','#f59e0bcc','#f59e0bcc'], borderRadius: 6 }] },
+    data: { labels: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'], datasets: [{
+      label: 'Avg Passengers', data: [0,0,0,0,0,0,0],
+      backgroundColor: [RID_PURPLE, RID_PURPLE, RID_PURPLE, RID_PURPLE, RID_PURPLE, RID_GOLD, RID_GOLD],
+      borderRadius: 8, borderSkipped: false, maxBarThickness: 36,
+    }] },
     options: chartDefaults('Avg Passengers'),
   });
+  // Occupancy distribution: refined cool-to-warm gradient with white separators
   const occCtx = document.getElementById('chartOccupancyDist').getContext('2d');
   charts.occDist = new Chart(occCtx, {
     type: 'doughnut',
-    data: { labels: ['0-25%','26-50%','51-75%','76-100%'], datasets: [{ data: [1,0,0,0], backgroundColor: ['#10b981','#3b82f6','#f59e0b','#ef4444'], borderWidth: 0, spacing: 2 }] },
-    options: { responsive: true, maintainAspectRatio: true, cutout: '65%', plugins: { legend: { position: 'bottom', labels: { color:'#8b8ea5', font:{size:11,family:'Inter'}, padding:16, usePointStyle:true } }, tooltip: {...tooltipDefaults()} } },
+    data: { labels: ['0–25%','26–50%','51–75%','76–100%'], datasets: [{
+      data: [1,0,0,0],
+      backgroundColor: [
+        'rgba(139,116,209,0.45)',
+        'rgba(139,116,209,0.75)',
+        'rgba(91,73,168,0.95)',
+        'rgba(212,175,55,0.95)',
+      ],
+      borderColor: 'rgba(11,13,21,0.9)',
+      borderWidth: 2,
+      spacing: 2,
+      hoverOffset: 6,
+    }] },
+    options: {
+      responsive: true, maintainAspectRatio: true, cutout: '70%',
+      plugins: {
+        legend: { position: 'bottom', labels: { color:'#c9cad8', font:{size:11,family:'Inter'}, padding:16, usePointStyle:true, pointStyle:'circle' } },
+        tooltip: { ...tooltipDefaults(),
+          callbacks: {
+            label: (ctx) => {
+              const total = ctx.dataset.data.reduce((s,v)=>s+v,0);
+              const pct = total > 0 ? Math.round((ctx.parsed / total) * 100) : 0;
+              return ` ${ctx.label}: ${pct}% of operating time`;
+            }
+          }
+        }
+      },
+    },
   });
 
   // Wire up filter controls
@@ -1698,26 +1749,33 @@ async function loadRidershipData() {
   const from = displayDateStr(fromDate);
   const to = displayDateStr(now);
 
+  // Number of days in the selected window (inclusive of both ends)
+  const windowDays = Math.max(1, Math.round((now - fromDate) / 86400000) + 1);
+
   // Fetch summary KPIs from API; fall back to live MQTT data
   const summary = await apiFetch('/api/summary', { period: from });
   if (summary && summary.totals) {
     const t = summary.totals;
     setKPI('ridership-kpi-total', t.total_boardings > 0 ? t.total_boardings.toLocaleString() : '0');
-    const avgPerDay = t.days_count > 0 ? Math.round(t.total_boardings / t.days_count) : 0;
+    // Avg per day across the WHOLE selected window (not only days that had data)
+    const avgPerDay = windowDays > 0 ? Math.round(t.total_boardings / windowDays) : 0;
     setKPI('ridership-kpi-avg', avgPerDay > 0 ? avgPerDay.toLocaleString() : '0');
     setKPI('ridership-kpi-buses', t.bus_count > 0 ? t.bus_count : '0');
     const ph = summary.peakHour;
     if (ph && ph.total > 0) {
       setKPI('ridership-kpi-peak', `${String(utcHourToDisplayHour(ph.hour)).padStart(2,'0')}:00`);
       const peakSub = document.getElementById('ridership-kpi-peak-sub');
-      if (peakSub) peakSub.textContent = `${ph.total} boardings`;
+      if (peakSub) peakSub.textContent = `${ph.total} boardings at peak`;
     } else {
       setKPI('ridership-kpi-peak', '\u2014');
     }
     const totalSub = document.getElementById('ridership-kpi-total-sub');
     if (totalSub) totalSub.textContent = `${from} to ${to}`;
     const avgSub = document.getElementById('ridership-kpi-avg-sub');
-    if (avgSub) avgSub.textContent = `over ${t.days_count} day${t.days_count !== 1 ? 's' : ''}`;
+    if (avgSub) {
+      const dataDaysNote = (t.days_count && t.days_count < windowDays) ? ` (data on ${t.days_count}/${windowDays} days)` : '';
+      avgSub.textContent = `over ${windowDays} day${windowDays !== 1 ? 's' : ''}${dataDaysNote}`;
+    }
   } else {
     // --- MQTT live fallback for KPIs ---
     updateRidershipKPIsFromLive(from, to);
@@ -1743,10 +1801,12 @@ async function loadRidershipData() {
 
 /** Populate ridership KPIs from live MQTT state */
 function updateRidershipKPIsFromLive(from, to) {
+  void to;
   const totalIn = BUS_POSITIONS.reduce((s, b) => s + (b.lineIn || 0), 0);
   const totalOut = BUS_POSITIONS.reduce((s, b) => s + (b.lineOut || 0), 0);
   const activeBuses = BUS_POSITIONS.filter(b => b.status === 'active').length;
   setKPI('ridership-kpi-total', totalIn > 0 ? totalIn.toLocaleString() : (mqttState.connected ? '0' : '\u2014'));
+  // Live view is today only — average per day = today's total (single-day window)
   setKPI('ridership-kpi-avg', totalIn > 0 ? totalIn.toLocaleString() : (mqttState.connected ? '0' : '\u2014'));
   setKPI('ridership-kpi-buses', BUS_POSITIONS.length > 0 ? activeBuses : (mqttState.connected ? '0' : '\u2014'));
   // Peak hour from hourlyBuckets
