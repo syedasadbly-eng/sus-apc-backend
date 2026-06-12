@@ -2291,3 +2291,54 @@ html, body {
   box-shadow: 0 4px 10px rgba(0,0,0,0.4) !important;
 }
 .history-bus-label::before { display: none !important; }
+
+/* ===== Routes & Stops premium polish ===== */
+.btn-sm { padding: 6px 12px !important; font-size: 12px !important; border-radius: 8px !important; }
+#routePresetGroup .btn-ghost.active {
+  background: rgba(139,116,209,0.18);
+  color: #fff;
+  border-color: rgba(139,116,209,0.5);
+}
+#routeMap { background: #0e1018; }
+#routeMap .leaflet-tile { filter: brightness(0.85) saturate(0.85); }
+.stop-hour-cell {
+  display: inline-block; width: 22px; height: 22px; margin: 1px; border-radius: 3px;
+  vertical-align: middle; cursor: default; transition: transform 120ms ease;
+}
+.stop-hour-cell:hover { transform: scale(1.4); z-index: 2; position: relative; box-shadow: 0 2px 8px rgba(0,0,0,0.5); }
+.stop-hour-row { display: flex; align-items: center; padding: 2px 0; gap: 8px; }
+.stop-hour-rowname {
+  font-size: 12px; color: #c9cad8; font-family: 'Inter', sans-serif; font-weight: 500;
+  min-width: 240px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding-right: 8px;
+}
+.stop-hour-cells { display: flex; flex-wrap: nowrap; }
+.stop-hour-header {
+  display: flex; padding: 4px 0 8px; border-bottom: 1px solid rgba(255,255,255,0.06);
+  margin-bottom: 8px; gap: 8px; align-items: center;
+}
+.stop-hour-hourlabel {
+  width: 24px; font-size: 10px; color: #8b8ea5; text-align: center;
+  font-family: 'Inter', sans-serif; font-weight: 500;
+}
+.stop-hour-legend {
+  display: flex; align-items: center; gap: 6px; font-size: 11px;
+  color: #8b8ea5; padding: 8px 0 4px 248px; font-family: 'Inter', sans-serif;
+}
+.stop-hour-legend-grad {
+  display: inline-block; width: 140px; height: 10px; border-radius: 3px;
+  background: linear-gradient(90deg, rgba(139,116,209,0.08), rgba(139,116,209,0.95));
+}
+#stopLeaderTable tbody tr td { padding: 10px 14px; font-size: 13px; }
+#stopLeaderTable thead th { padding: 10px 14px; font-size: 12px; letter-spacing: 0.04em; }
+#stopLeaderTable .stop-rank-pill {
+  display: inline-block; min-width: 24px; padding: 2px 8px; border-radius: 999px;
+  background: rgba(139,116,209,0.18); color: #c9cad8; font-weight: 600; font-size: 12px; text-align: center;
+}
+#stopLeaderTable .stop-rank-pill.top { background: rgba(212,175,55,0.22); color: #f5d971; }
+#stopLeaderTable .route-pill {
+  display: inline-block; padding: 2px 10px; border-radius: 999px; font-weight: 600; font-size: 11px;
+  letter-spacing: 0.02em;
+}
+#stopLeaderTable .route-pill.r-515 { background: rgba(139,116,209,0.22); color: #c9b6ea; }
+#stopLeaderTable .route-pill.r-419 { background: rgba(212,175,55,0.20); color: #f0d175; }

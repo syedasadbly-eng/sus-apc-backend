@@ -2294,151 +2294,379 @@ function updateRidershipKPIs() {
 
 
 // ============================================
-// ROUTES & STOPS (Backend + Live hybrid)
+// ROUTES & STOPS (Backend-powered, per-stop)
 // ============================================
 
+// Module-scoped palette mirrors the Ridership premium look.
+const ROUTE_WHITE = 'rgba(255,255,255,0.95)';
+const ROUTE_PURPLE = 'rgba(139,116,209,0.85)';
+const ROUTE_PURPLE_SOFT = 'rgba(139,116,209,0.45)';
+const ROUTE_GOLD = 'rgba(212,175,55,0.95)';
+const ROUTE_GOLD_SOFT = 'rgba(212,175,55,0.50)';
+const ROUTE_COLOR = {
+  '515': { solid: ROUTE_PURPLE, soft: ROUTE_PURPLE_SOFT, hex: '#8b74d1' },
+  '419': { solid: ROUTE_GOLD, soft: ROUTE_GOLD_SOFT, hex: '#d4af37' },
+};
+const routeColorFor = (route) => ROUTE_COLOR[String(route)] || { solid: ROUTE_WHITE, soft: 'rgba(255,255,255,0.4)', hex: '#ffffff' };
+
+// Cached stops registry (route -> stop list with lat/lng)
+let STOPS_REGISTRY = null;
+let ROUTE_MAP = null;
+let ROUTE_MAP_LAYER = null;
+let CURRENT_STOPS_PAYLOAD = null; // last fetched /api/stops/boardings payload
+
+async function fetchStopsRegistry() {
+  if (STOPS_REGISTRY) return STOPS_REGISTRY;
+  const r = await apiFetch('/api/stops');
+  STOPS_REGISTRY = (r && r.routes) || {};
+  return STOPS_REGISTRY;
+}
+
+function shortStopName(s) {
+  if (!s) return '';
+  // Pretty-print "A -> B" stop segments and shorten common Mayo Clinic suffixes.
+  return String(s)
+    .replace(/\(return\)/g, '(rtn)')
+    .replace(/\s+\(([^)]{20,})\)/g, '') // drop long parenthetical addresses
+    .replace(/\s+-\>\s+/g, '  ->  ');
+}
+
 function initRoutes() {
+  // ----- Stop ranking bar chart -----
   const stopCtx = document.getElementById('chartStopBoardings').getContext('2d');
   charts.stopBoardings = new Chart(stopCtx, {
     type: 'bar',
-    data: { labels: ['Loading...'], datasets: [
-      { label: 'Boardings', data: [0], backgroundColor: 'rgba(59,130,246,0.8)', borderRadius: 4 },
-      { label: 'Alightings', data: [0], backgroundColor: 'rgba(239,68,68,0.6)', borderRadius: 4 },
+    data: { labels: [], datasets: [
+      { label: 'Boardings', data: [], backgroundColor: ROUTE_WHITE, hoverBackgroundColor: 'rgba(255,255,255,1)', borderRadius: 6, borderSkipped: false, maxBarThickness: 22 },
+      { label: 'Alightings', data: [], backgroundColor: ROUTE_GOLD, hoverBackgroundColor: 'rgba(232,193,73,1)', borderRadius: 6, borderSkipped: false, maxBarThickness: 22 },
     ]},
-    options: chartDefaults('Count'),
+    options: {
+      indexAxis: 'y',
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      animation: { duration: 600, easing: 'easeOutQuart' },
+      plugins: {
+        legend: { labels: { color: '#dbdce6', font: { size: 12, family: 'Inter', weight: '500' }, padding: 16, usePointStyle: true, pointStyle: 'circle', boxWidth: 10 } },
+        tooltip: { ...tooltipDefaults(), padding: 12, callbacks: { label: (c) => ' ' + c.dataset.label + ': ' + Number(c.parsed.x).toLocaleString() } },
+      },
+      scales: {
+        x: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)', drawTicks: false }, ticks: { color: '#c9cad8', font: { size: 12, family: 'Inter', weight: '500' }, padding: 6, callback: (v) => Number(v).toLocaleString() } },
+        y: { grid: { display: false }, ticks: { color: '#c9cad8', font: { size: 11, family: 'Inter', weight: '500' }, padding: 6, autoSkip: false } },
+      },
+    },
   });
-  const loadCtx = document.getElementById('chartLoadProfile').getContext('2d');
-  charts.loadProfile = new Chart(loadCtx, {
-    type: 'line',
-    data: { labels: ['Loading...'], datasets: [
-      { label: 'Passengers Onboard', data: [0], borderColor: '#8b5cf6', backgroundColor: 'rgba(139,92,246,0.15)', fill: true, tension: 0.4, pointRadius: 5, pointHoverRadius: 7, pointBackgroundColor: '#8b5cf6' },
-      { label: 'Capacity', data: [CONFIG.busCapacity], borderColor: '#ef4444', borderDash: [8,4], pointRadius: 0, borderWidth: 1.5, fill: false },
-    ]},
-    options: chartDefaults('Passengers'),
-  });
-  initHeatmapChart();
 
-  // Default the date filter to today and clamp it so the user can't pick a
-  // future date. (HTML defaulted to a stale value of 2026-03-09.)
-  const dateInput = document.getElementById('routeDate');
-  if (dateInput) {
-    const today = displayDateStr();
-    dateInput.value = today;
-    dateInput.max = today;
-    dateInput.addEventListener('change', () => loadRoutesData());
+  // ----- Leaflet route map -----
+  const mapEl = document.getElementById('routeMap');
+  if (mapEl && window.L) {
+    ROUTE_MAP = L.map('routeMap', { zoomControl: true, attributionControl: false, scrollWheelZoom: false })
+      .setView([44.024, -92.467], 13);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19, subdomains: 'abcd',
+    }).addTo(ROUTE_MAP);
+    ROUTE_MAP_LAYER = L.layerGroup().addTo(ROUTE_MAP);
   }
 
-  // Wire the bus/route selector. Options are populated by
-  // populateRouteSelectors() from the live bus list (515, 419, …).
+  // ----- Filters: default range = last 7 days -----
+  const today = displayDateStr();
+  const wkAgo = new Date(); wkAgo.setDate(wkAgo.getDate() - 6);
+  const wkAgoStr = displayDateStr(wkAgo);
+  const fromEl = document.getElementById('routeFromDate');
+  const toEl = document.getElementById('routeToDate');
+  if (fromEl) { fromEl.value = wkAgoStr; fromEl.max = today; fromEl.addEventListener('change', loadRoutesData); }
+  if (toEl) { toEl.value = today; toEl.max = today; toEl.addEventListener('change', loadRoutesData); }
   const routeSel = document.getElementById('routeSelect');
-  if (routeSel) routeSel.addEventListener('change', () => loadRoutesData());
+  if (routeSel) routeSel.addEventListener('change', loadRoutesData);
+
+  // Preset buttons (1d / 7d / 30d)
+  document.querySelectorAll('#routePresetGroup .btn[data-route-preset]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const days = parseInt(btn.getAttribute('data-route-preset'), 10) || 7;
+      const t = displayDateStr();
+      const f = new Date(); f.setDate(f.getDate() - (days - 1));
+      const fStr = displayDateStr(f);
+      if (fromEl) fromEl.value = fStr;
+      if (toEl) toEl.value = t;
+      document.querySelectorAll('#routePresetGroup .btn[data-route-preset]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      loadRoutesData();
+    });
+  });
+  // Mark 7d active by default
+  const sevenBtn = document.querySelector('#routePresetGroup .btn[data-route-preset="7"]');
+  if (sevenBtn) sevenBtn.classList.add('active');
+
+  // CSV export
+  const csvBtn = document.getElementById('routeExportCsv');
+  if (csvBtn) csvBtn.addEventListener('click', exportRoutesCsv);
 
   loadRoutesData();
 }
 
 async function loadRoutesData() {
-  // Read both filters from the page; fall back to sensible defaults.
-  const today = displayDateStr();
-  const dateInput = document.getElementById('routeDate');
+  const fromEl = document.getElementById('routeFromDate');
+  const toEl = document.getElementById('routeToDate');
   const routeSel = document.getElementById('routeSelect');
-  const date = (dateInput && dateInput.value) || today;
+  const today = displayDateStr();
+  const from = (fromEl && fromEl.value) || today;
+  const to = (toEl && toEl.value) || today;
   const busSel = (routeSel && routeSel.value) || 'all';
   const busFilter = busSel === 'all' ? null : busSel;
 
-  // --- Daily totals (per bus) for the Boardings / Load Profile charts. ---
-  const dailyParams = { from: date, to: date };
-  if (busFilter) dailyParams.bus_id = busFilter;
-  const dailyData = await apiFetch('/api/daily', dailyParams);
-  if (dailyData && dailyData.daily && dailyData.daily.length > 0) {
-    const rows = dailyData.daily;
-    const busLabels = rows.map(r => `Bus ${r.bus_id}`);
-    const busIn = rows.map(r => r.total_in);
-    const busOut = rows.map(r => r.total_out);
-    const busOnboard = rows.map(r => Math.max(0, r.total_in - r.total_out));
+  await fetchStopsRegistry();
 
-    charts.stopBoardings.data.labels = busLabels;
-    charts.stopBoardings.data.datasets[0].data = busIn;
-    charts.stopBoardings.data.datasets[1].data = busOut;
-    charts.stopBoardings.update('active');
+  // Per-stop boardings/alightings for the window
+  const params = { from, to };
+  if (busFilter) params.bus_id = busFilter;
+  const payload = await apiFetch('/api/stops/boardings', params);
+  CURRENT_STOPS_PAYLOAD = payload;
 
-    charts.loadProfile.data.labels = busLabels;
-    charts.loadProfile.data.datasets[0].data = busOnboard;
-    charts.loadProfile.data.datasets[1].data = busLabels.map(() => CONFIG.busCapacity);
-    charts.loadProfile.update('active');
-  } else if (date === today && BUS_POSITIONS.length > 0) {
-    // Live MQTT fallback only makes sense for *today*.
-    const positions = busFilter
-      ? BUS_POSITIONS.filter(b => b.id === busFilter)
-      : BUS_POSITIONS;
-    const busLabels = positions.map(b => `Bus ${b.id}`);
-    charts.stopBoardings.data.labels = busLabels;
-    charts.stopBoardings.data.datasets[0].data = positions.map(b => b.lineIn || 0);
-    charts.stopBoardings.data.datasets[1].data = positions.map(b => b.lineOut || 0);
-    charts.stopBoardings.update('active');
-    charts.loadProfile.data.labels = busLabels;
-    charts.loadProfile.data.datasets[0].data = positions.map(b => Math.max(0, (b.lineIn||0) - (b.lineOut||0)));
-    charts.loadProfile.data.datasets[1].data = busLabels.map(() => CONFIG.busCapacity);
-    charts.loadProfile.update('active');
+  const rawStops = (payload && payload.stops) || [];
+  // Apply route filter client-side too (in case bus_id wasn't honored)
+  const stops = busFilter ? rawStops.filter(s => String(s.route) === String(busFilter)) : rawStops;
+
+  // --- KPI strip ---
+  const totalBoard = stops.reduce((a, s) => a + (s.boardings || 0), 0);
+  const totalAlight = stops.reduce((a, s) => a + (s.alightings || 0), 0);
+  const activeStops = stops.filter(s => (s.boardings || 0) + (s.alightings || 0) > 0).length;
+  const busiest = stops.slice().sort((a, b) => (b.boardings || 0) - (a.boardings || 0))[0];
+
+  const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  const niceRange = (from === to) ? prettyDate(from) : (prettyDate(from) + ' - ' + prettyDate(to));
+  const niceRoute = busFilter ? ('Route ' + busFilter) : 'all routes';
+
+  setText('routeKpiBoard', totalBoard.toLocaleString());
+  setText('routeKpiBoardSub', niceRange + ' - ' + niceRoute);
+  setText('routeKpiAlight', totalAlight.toLocaleString());
+  setText('routeKpiAlightSub', niceRange + ' - ' + niceRoute);
+  setText('routeKpiStops', String(activeStops));
+  setText('routeKpiStopsSub', stops.length + ' total observed');
+  setText('routeKpiBusiest', busiest ? shortStopName(busiest.stop) : 'No data');
+  setText('routeKpiBusiestSub', busiest ? (Number(busiest.boardings).toLocaleString() + ' boardings - Route ' + busiest.route) : '--');
+
+  // --- Stop ranking bar chart (top 12 by boardings) ---
+  const topN = stops.slice().sort((a, b) => (b.boardings || 0) - (a.boardings || 0)).slice(0, 12);
+  const labels = topN.map(s => shortStopName(s.stop));
+  const boardings = topN.map(s => s.boardings || 0);
+  const alightings = topN.map(s => s.alightings || 0);
+  charts.stopBoardings.data.labels = labels;
+  charts.stopBoardings.data.datasets[0].data = boardings;
+  charts.stopBoardings.data.datasets[1].data = alightings;
+  // Color bars by route (overrides default white if a single route is selected)
+  if (busFilter) {
+    const col = routeColorFor(busFilter);
+    charts.stopBoardings.data.datasets[0].backgroundColor = ROUTE_WHITE;
+    charts.stopBoardings.data.datasets[1].backgroundColor = col.solid;
   } else {
-    // Explicit empty state so the chart doesn't keep showing the previous selection.
-    charts.stopBoardings.data.labels = ['No data for this selection'];
-    charts.stopBoardings.data.datasets[0].data = [0];
-    charts.stopBoardings.data.datasets[1].data = [0];
-    charts.stopBoardings.update('active');
-    charts.loadProfile.data.labels = ['No data for this selection'];
-    charts.loadProfile.data.datasets[0].data = [0];
-    charts.loadProfile.data.datasets[1].data = [CONFIG.busCapacity];
-    charts.loadProfile.update('active');
+    // mixed: keep white/gold defaults
+    charts.stopBoardings.data.datasets[0].backgroundColor = ROUTE_WHITE;
+    charts.stopBoardings.data.datasets[1].backgroundColor = ROUTE_GOLD;
   }
+  charts.stopBoardings.update('active');
+  setText('stopRankSubtitle', 'Top ' + topN.length + ' stops - ' + niceRange + ' - ' + niceRoute);
 
-  // --- Hourly heatmap for the selected day (and optional bus). ---
-  const hourlyParams = { date };
-  if (busFilter) hourlyParams.bus_id = busFilter;
-  const hourlyData = await apiFetch('/api/hourly', hourlyParams);
-  const hours = Array.from({length:24},(_,i)=>`${String(i).padStart(2,'0')}:00`);
-  if (hourlyData && hourlyData.hourly && hourlyData.hourly.length > 0) {
-    const hourMap = {};
-    hourlyData.hourly.forEach(h => { const dh = utcHourToDisplayHour(h.hour); hourMap[dh] = (hourMap[dh] || 0) + h.boardings; });
-    const hourData = hours.map((_, i) => hourMap[i] || 0);
-    charts.heatmap.data.labels = hours;
-    charts.heatmap.data.datasets[0].data = hourData;
-    charts.heatmap.update('active');
-  } else if (date === today) {
-    // Live MQTT fallback only for today.
-    const hourData = hours.map(h => hourlyBuckets[h] ? hourlyBuckets[h].boardings : 0);
-    charts.heatmap.data.labels = hours;
-    charts.heatmap.data.datasets[0].data = hourData;
-    charts.heatmap.update('active');
-  } else {
-    charts.heatmap.data.labels = hours;
-    charts.heatmap.data.datasets[0].data = hours.map(() => 0);
-    charts.heatmap.update('active');
-  }
+  // --- Leaderboard table (all observed stops, ranked) ---
+  renderStopLeaderboard(stops);
+  setText('stopLeaderSubtitle', stops.length + ' stops - ' + niceRange + ' - ' + niceRoute);
 
-  // Update the chart subtitles so users can see what they're looking at.
-  const stopSub = document.querySelector('#view-routes .chart-grid.cols-2 .chart-panel:nth-of-type(1) .chart-subtitle');
-  const loadSub = document.querySelector('#view-routes .chart-grid.cols-2 .chart-panel:nth-of-type(2) .chart-subtitle');
-  const heatSub = document.querySelector('#view-routes > .chart-panel .chart-subtitle');
-  const niceDate = date === today ? 'Today' : date;
-  const niceBus = busFilter ? `Bus ${busFilter}` : 'all buses';
-  if (stopSub) stopSub.textContent = `${niceDate} · ${niceBus}`;
-  if (loadSub) loadSub.textContent = `Onboard count per bus · ${niceDate}`;
-  if (heatSub) heatSub.textContent = `Hourly boardings · ${niceDate} · ${niceBus}`;
+  // --- Route map ---
+  renderRouteMap(stops, busFilter);
+  setText('routeMapSubtitle', 'Stops sized by boardings - ' + niceRange + ' - ' + niceRoute);
+
+  // --- Stop x Hour heatmap matrix ---
+  await renderStopHourMatrix(from, to, busFilter, topN.slice(0, 10).map(s => s.stop));
+  setText('heatmapSubtitle', 'Top stops x 24 hours - ' + niceRange + ' - ' + niceRoute);
 }
 
-function initHeatmapChart() {
-  const hours = Array.from({length:24},(_,i)=>`${String(i).padStart(2,'0')}:00`);
-  const ctx = document.getElementById('chartHeatmap').getContext('2d');
-  charts.heatmap = new Chart(ctx, {
-    type: 'bar', data: { labels: hours, datasets: [{
-      label: 'Boardings', data: hours.map(() => 0),
-      backgroundColor: 'rgba(59,130,246,0.7)', borderRadius: 2, barPercentage: 0.9, categoryPercentage: 0.8,
-    }] },
-    options: { ...chartDefaults('Boardings'),
-      plugins: { legend: { position:'right', labels:{color:'#8b8ea5',font:{size:10,family:'Inter'},padding:8,boxWidth:12,usePointStyle:true} }, tooltip:{...tooltipDefaults()} },
-      scales: { x:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#8b8ea5',font:{size:10}}}, y:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#8b8ea5',font:{size:10}}} },
-    },
+function prettyDate(yyyyMmDd) {
+  if (!yyyyMmDd) return '';
+  const d = new Date(yyyyMmDd + 'T12:00:00Z');
+  return d.toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric' });
+}
+
+function renderStopLeaderboard(stops) {
+  const tbody = document.getElementById('stopLeaderBody');
+  if (!tbody) return;
+  if (!stops.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:#8b8ea5">No stop activity in this window.</td></tr>';
+    return;
+  }
+  const sorted = stops.slice().sort((a, b) => (b.boardings || 0) - (a.boardings || 0));
+  const rows = sorted.map((s, i) => {
+    const rank = i + 1;
+    const pillCls = rank <= 3 ? 'stop-rank-pill top' : 'stop-rank-pill';
+    const route = String(s.route || '');
+    const routeCls = 'route-pill r-' + route;
+    const net = (s.boardings || 0) - (s.alightings || 0);
+    const netStr = (net > 0 ? '+' : '') + net.toLocaleString();
+    const netColor = net > 0 ? '#c9b6ea' : (net < 0 ? '#f0d175' : '#c9cad8');
+    return '<tr>'
+      + '<td><span class="' + pillCls + '">' + rank + '</span></td>'
+      + '<td><span class="' + routeCls + '">' + route + '</span></td>'
+      + '<td style="color:#dbdce6">' + escapeHtml(shortStopName(s.stop)) + '</td>'
+      + '<td style="text-align:right;color:#fff;font-weight:600">' + Number(s.boardings || 0).toLocaleString() + '</td>'
+      + '<td style="text-align:right;color:#f0d175">' + Number(s.alightings || 0).toLocaleString() + '</td>'
+      + '<td style="text-align:right;color:' + netColor + ';font-weight:600">' + netStr + '</td>'
+      + '<td style="text-align:right;color:#8b8ea5">' + Number(s.event_count || 0).toLocaleString() + '</td>'
+      + '</tr>';
   });
+  tbody.innerHTML = rows.join('');
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function renderRouteMap(stops, busFilter) {
+  if (!ROUTE_MAP || !ROUTE_MAP_LAYER) return;
+  ROUTE_MAP_LAYER.clearLayers();
+  if (!STOPS_REGISTRY) return;
+
+  // Build per-route registries we want to show (filtered)
+  const routesToShow = busFilter ? [busFilter] : Object.keys(STOPS_REGISTRY);
+  // Map stop boarding totals onto registry stops by name match for sizing
+  const boardingByStop = {};
+  stops.forEach(s => {
+    // s.stop may be a "A -> B" segment; use first segment's leading name as the key
+    const head = String(s.stop).split('->')[0].trim();
+    boardingByStop[head] = (boardingByStop[head] || 0) + (s.boardings || 0);
+  });
+
+  const allLatLngs = [];
+  routesToShow.forEach(rk => {
+    const route = STOPS_REGISTRY[rk];
+    if (!route) return;
+    const col = routeColorFor(rk);
+    const pts = (route.stops || []).map(st => [st.lat, st.lng]);
+    if (pts.length >= 2) {
+      L.polyline(pts, { color: col.hex, weight: 3, opacity: 0.7, dashArray: '6 6' }).addTo(ROUTE_MAP_LAYER);
+    }
+    // Find max boardings on this route for radius scaling
+    const routeMax = Math.max(1, ...((route.stops || []).map(st => boardingByStop[st.name] || 0)));
+    (route.stops || []).forEach(st => {
+      const v = boardingByStop[st.name] || 0;
+      const r = 6 + Math.sqrt(v / routeMax) * 18; // 6..24 radius
+      const marker = L.circleMarker([st.lat, st.lng], {
+        radius: r, color: col.hex, weight: 2, fillColor: col.hex, fillOpacity: 0.55,
+      });
+      const html = '<div style="font-family:Inter,sans-serif;font-size:12px;color:#222;min-width:180px">'
+        + '<div style="font-weight:700;margin-bottom:4px">' + escapeHtml(st.name) + '</div>'
+        + '<div>Route ' + escapeHtml(rk) + '</div>'
+        + '<div style="margin-top:4px">Boardings: <b>' + v.toLocaleString() + '</b></div>'
+        + '</div>';
+      marker.bindPopup(html);
+      marker.addTo(ROUTE_MAP_LAYER);
+      allLatLngs.push([st.lat, st.lng]);
+    });
+  });
+
+  if (allLatLngs.length) {
+    try { ROUTE_MAP.fitBounds(L.latLngBounds(allLatLngs), { padding: [24, 24], maxZoom: 15 }); } catch (e) { /* noop */ }
+  }
+  // Resize fix in case the panel just became visible
+  setTimeout(() => { try { ROUTE_MAP.invalidateSize(); } catch (e) {} }, 100);
+}
+
+async function renderStopHourMatrix(from, to, busFilter, topStopNames) {
+  const container = document.getElementById('stopHourMatrix');
+  if (!container) return;
+  if (!topStopNames.length) {
+    container.innerHTML = '<div style="padding:32px;text-align:center;color:#8b8ea5">No stop activity in this window.</div>';
+    return;
+  }
+  // We have /api/hourly (totals per hour, optionally per bus) but no per-stop-hour
+  // endpoint. For now, distribute the day's total hourly boardings to each top stop
+  // proportionally to that stop's share of total boardings. This is a defensible
+  // approximation when a true per-stop-hour endpoint isn't available.
+  const params = { date: to };
+  if (busFilter) params.bus_id = busFilter;
+  const hourly = await apiFetch('/api/hourly', params);
+  const hours = Array.from({ length: 24 }, (_, i) => i);
+  const hourTotals = hours.map(() => 0);
+  if (hourly && hourly.hourly) {
+    hourly.hourly.forEach(h => {
+      const dh = utcHourToDisplayHour(h.hour);
+      if (dh >= 0 && dh < 24) hourTotals[dh] += (h.boardings || 0);
+    });
+  }
+  // Find per-stop share from CURRENT_STOPS_PAYLOAD
+  const stops = (CURRENT_STOPS_PAYLOAD && CURRENT_STOPS_PAYLOAD.stops) || [];
+  const filtered = busFilter ? stops.filter(s => String(s.route) === String(busFilter)) : stops;
+  const total = filtered.reduce((a, s) => a + (s.boardings || 0), 0) || 1;
+  const stopRows = topStopNames.map(name => {
+    const found = filtered.find(s => s.stop === name);
+    const share = found ? (found.boardings || 0) / total : 0;
+    return { name, share, route: found ? found.route : '' };
+  });
+
+  // Find overall max intensity for color scale
+  let maxIntensity = 0;
+  stopRows.forEach(r => hourTotals.forEach(t => { const v = t * r.share; if (v > maxIntensity) maxIntensity = v; }));
+  if (maxIntensity <= 0) maxIntensity = 1;
+
+  const html = [];
+  // Header
+  html.push('<div class="stop-hour-header">');
+  html.push('<div class="stop-hour-rowname" style="font-size:11px;color:#8b8ea5;font-weight:600;letter-spacing:0.04em">STOP</div>');
+  html.push('<div class="stop-hour-cells">');
+  hours.forEach(h => {
+    const label = (h === 0 || h === 12 || h === 6 || h === 18) ? String(h).padStart(2, '0') : '';
+    html.push('<div class="stop-hour-hourlabel">' + label + '</div>');
+  });
+  html.push('</div></div>');
+
+  // Rows
+  stopRows.forEach(r => {
+    const col = routeColorFor(r.route);
+    html.push('<div class="stop-hour-row">');
+    html.push('<div class="stop-hour-rowname" title="' + escapeHtml(r.name) + '">' + escapeHtml(shortStopName(r.name)) + '</div>');
+    html.push('<div class="stop-hour-cells">');
+    hours.forEach(h => {
+      const v = hourTotals[h] * r.share;
+      const intensity = Math.min(1, v / maxIntensity);
+      const alpha = 0.08 + intensity * 0.87;
+      const baseHex = col.hex;
+      // baseHex -> rgba with alpha
+      const rgb = hexToRgb(baseHex);
+      const bg = 'rgba(' + rgb.r + ',' + rgb.g + ',' + rgb.b + ',' + alpha.toFixed(2) + ')';
+      const tip = shortStopName(r.name) + ' @ ' + String(h).padStart(2, '0') + ':00 - approx ' + Math.round(v).toLocaleString() + ' boardings';
+      html.push('<div class="stop-hour-cell" style="background:' + bg + '" title="' + escapeHtml(tip) + '"></div>');
+    });
+    html.push('</div></div>');
+  });
+
+  // Legend
+  html.push('<div class="stop-hour-legend"><span>Low</span><span class="stop-hour-legend-grad"></span><span>High</span><span style="margin-left:16px;font-style:italic;color:#6f7290">Approximation: hourly totals x per-stop share</span></div>');
+
+  container.innerHTML = html.join('');
+}
+
+function hexToRgb(hex) {
+  const m = /^#?([a-f0-9]{2})([a-f0-9]{2})([a-f0-9]{2})$/i.exec(hex);
+  if (!m) return { r: 255, g: 255, b: 255 };
+  return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) };
+}
+
+function exportRoutesCsv() {
+  const stops = (CURRENT_STOPS_PAYLOAD && CURRENT_STOPS_PAYLOAD.stops) || [];
+  if (!stops.length) { alert('No stop data to export.'); return; }
+  const f = (CURRENT_STOPS_PAYLOAD.filters && CURRENT_STOPS_PAYLOAD.filters.from) || 'from';
+  const t = (CURRENT_STOPS_PAYLOAD.filters && CURRENT_STOPS_PAYLOAD.filters.to) || 'to';
+  const header = ['route', 'stop', 'boardings', 'alightings', 'net_load', 'event_count', 'first_seen', 'last_seen'];
+  const lines = [header.join(',')];
+  stops.forEach(s => {
+    const net = (s.boardings || 0) - (s.alightings || 0);
+    const cells = [s.route, s.stop, s.boardings, s.alightings, net, s.event_count || 0, s.first_seen || '', s.last_seen || ''];
+    lines.push(cells.map(c => '"' + String(c == null ? '' : c).replace(/"/g, '""') + '"').join(','));
+  });
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'stops_' + f + '_to_' + t + '.csv';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 0);
 }
 
 
