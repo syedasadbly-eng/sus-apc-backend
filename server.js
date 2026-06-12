@@ -1459,6 +1459,85 @@ app.post('/api/reset-counter/:busId', (req, res) => {
   res.json({ success: true, busId, onboard: 0, resetAt: new Date().toISOString() });
 });
 
+// POST /api/admin/backfill-history-locations — re-snap stale Minneapolis-era
+// rows to their scheduled route position based on timestamp. Idempotent.
+app.post('/api/admin/backfill-history-locations', (req, res) => {
+  try {
+    const STALE_LAT = 44.9778;
+    const STALE_LNG = -93.265;
+    const TOL = 0.001;
+    const near = (a, b) => Math.abs(a - b) < TOL;
+    const lerp = (a, b, t) => a + (b - a) * t;
+
+    // Build per-bus route lookup from in-memory ROUTES (loaded from data/stops.json).
+    const busRoute = {};
+    try {
+      const stopsRaw = JSON.parse(fs.readFileSync(STOPS_PATH, 'utf8'));
+      for (const [routeKey, route] of Object.entries(stopsRaw.routes || {})) {
+        for (const busId of (route.bus_ids || [])) {
+          busRoute[busId] = {
+            routeKey,
+            loopMinutes: route.loop_minutes || 40,
+            stops: route.stops || [],
+          };
+        }
+      }
+    } catch (e) {
+      return res.status(500).json({ error: 'Failed to load stops.json', detail: e.message });
+    }
+
+    const rows = db.prepare(`
+      SELECT rowid, timestamp, bus_id, lat, lng
+      FROM records
+      WHERE lat IS NOT NULL AND lng IS NOT NULL
+    `).all();
+
+    const upd = db.prepare(`
+      UPDATE records SET lat = @lat, lng = @lng, stop = @stop, route = @route, stop_source = 'backfilled'
+      WHERE rowid = @rowid
+    `);
+
+    let touched = 0, skippedNotStale = 0, skippedNoRoute = 0;
+    const updates = [];
+    for (const r of rows) {
+      if (!(near(r.lat, STALE_LAT) && near(r.lng, STALE_LNG))) { skippedNotStale++; continue; }
+      const rt = busRoute[r.bus_id];
+      if (!rt || !rt.stops.length) { skippedNoRoute++; continue; }
+
+      const ts = new Date(r.timestamp);
+      const minsSinceEpoch = Math.floor(ts.getTime() / 60000);
+      const elapsed = minsSinceEpoch % rt.loopMinutes;
+      const n = rt.stops.length;
+      const segmentMinutes = rt.loopMinutes / n;
+      const rawSeg = elapsed / segmentMinutes;
+      const segIdx = Math.floor(rawSeg) % n;
+      const frac = rawSeg - Math.floor(rawSeg);
+      const a = rt.stops[segIdx];
+      const b = rt.stops[(segIdx + 1) % n];
+      const lat = Math.round(lerp(a.lat, b.lat, frac) * 1e6) / 1e6;
+      const lng = Math.round(lerp(a.lng, b.lng, frac) * 1e6) / 1e6;
+      const stop = frac < 0.2 ? a.name : (frac > 0.8 ? b.name : `${a.name} -> ${b.name}`);
+      updates.push({ rowid: r.rowid, lat, lng, stop, route: rt.routeKey });
+      touched++;
+    }
+
+    const tx = db.transaction((items) => {
+      for (const it of items) upd.run(it);
+    });
+    if (updates.length > 0) tx(updates);
+
+    res.json({
+      scanned: rows.length,
+      updated: touched,
+      skipped_not_stale: skippedNotStale,
+      skipped_no_route: skippedNoRoute,
+    });
+  } catch (e) {
+    console.error('[BACKFILL]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/api/health', (req, res) => {
   const recordCount = db.prepare('SELECT COUNT(*) as cnt FROM records').get().cnt;
   let dbFile = { path: DB_PATH, exists: false, sizeBytes: 0, mtime: null };
