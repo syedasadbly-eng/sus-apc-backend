@@ -609,11 +609,22 @@ function updateLiveBusPositions() {
     const occupancy = capacity > 0 ? Math.min(100, Math.round((passengers / capacity) * 100)) : 0;
     const ageSeconds = data.ts ? Math.round((Date.now() - data.ts) / 1000) : 999;
 
+    // Server-side resolved state for this bus (route, scheduled stop, gpsSource)
+    // — always merged in so the map can show a sensible position even when the
+    // bus hasn't yet emitted a real GPS fix.
+    const srv = SERVER_BUS_STATE[gw.label] || {};
+    const lat = (data.lat || 0) || srv.lat || 0;
+    const lng = (data.lng || 0) || srv.lng || 0;
+
     liveBuses.push({
       id: gw.label || key,
-      route: gw.route || '', routeName: gw.route || '', routeColor: color,
-      lat: data.lat || 0, lng: data.lng || 0,
+      route: gw.route || srv.routeName || '', routeName: gw.route || srv.routeName || '', routeColor: color,
+      lat, lng,
       gpsValid: data.gpsValid === true,
+      gpsSource: data.gpsValid === true ? 'live' : (srv.gpsSource || 'unknown'),
+      stopId: srv.stopId || null,
+      currentStopName: srv.gpsLabel || null,
+      nextStopName: srv.nextStopName || null,
       gpsAge: data.gpsFixTs ? Math.round((Date.now() - data.gpsFixTs) / 1000) : null,
       passengers, capacity, occupancy,
       speed: data.speed || 0, status: ageSeconds < 300 ? 'active' : 'idle',
@@ -623,6 +634,33 @@ function updateLiveBusPositions() {
       lineOut: data.lineOut || 0,
       lastEventIn: data.lastEventIn != null ? data.lastEventIn : (data.triggerAccumIn || 0),
       lastEventOut: data.lastEventOut != null ? data.lastEventOut : (data.triggerAccumOut || 0),
+    });
+  });
+
+  // Add ghost rows for buses the server knows about but MQTT hasn't seen yet,
+  // so the map can still display them at their current scheduled stop.
+  Object.values(SERVER_BUS_STATE).forEach((srv, i) => {
+    const already = liveBuses.find(b => b.id === srv.busId);
+    if (already) return;
+    if (!srv.lat || !srv.lng) return;
+    liveBuses.push({
+      id: srv.busId,
+      route: srv.routeName || '', routeName: srv.routeName || '',
+      routeColor: ROUTE_COLORS[i % ROUTE_COLORS.length],
+      lat: srv.lat, lng: srv.lng,
+      gpsValid: false, gpsSource: srv.gpsSource || 'unknown',
+      stopId: srv.stopId || null,
+      currentStopName: srv.gpsLabel || null,
+      nextStopName: srv.nextStopName || null,
+      gpsAge: null,
+      passengers: srv.passengers || 0, capacity: CONFIG.busCapacity,
+      occupancy: srv.occupancy || 0,
+      speed: srv.speed || 0,
+      status: srv.status || 'idle',
+      sensorStatus: srv.sensorStatus || 'Offline',
+      lastUpdate: srv.lastUpdate != null ? formatAge(srv.lastUpdate) : 'No MQTT yet',
+      lineIn: srv.lineIn || 0, lineOut: srv.lineOut || 0,
+      lastEventIn: srv.lastEventIn || 0, lastEventOut: srv.lastEventOut || 0,
     });
   });
 
@@ -686,6 +724,74 @@ async function seedKPIsFromAPI() {
     setKPI('kpi-alightings', dailyTotals.alightings.toLocaleString());
     if (t.avg_occupancy > 0) setKPI('kpi-occupancy', t.avg_occupancy + '%');
   } catch(e) { /* silent fail */ }
+}
+
+// ============================================
+// STOP REGISTRY (rendered as small pins along each route)
+// ============================================
+let STOP_REGISTRY_CACHE = null;
+const stopMarkers = { overview: [], liveMap: [] };
+// Server-resolved bus state keyed by busId. Holds gpsSource/stopId/routeName/
+// nextStopName for buses that haven't been seen via MQTT yet, so the map still
+// has somewhere to draw them.
+let SERVER_BUS_STATE = {};
+
+async function loadStopRegistry() {
+  if (STOP_REGISTRY_CACHE) return STOP_REGISTRY_CACHE;
+  try {
+    const res = await fetch(`${API_BASE}/api/stops`, { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return null;
+    const data = await res.json();
+    STOP_REGISTRY_CACHE = data.routes || {};
+    return STOP_REGISTRY_CACHE;
+  } catch (e) { return null; }
+}
+
+// Colour each route distinctly. Order matches the routes object keys.
+const ROUTE_LINE_COLORS = ['#8b74d1', '#d4af37', '#7dd3fc', '#fb7185'];
+function routeColorByIndex(i) { return ROUTE_LINE_COLORS[i % ROUTE_LINE_COLORS.length]; }
+
+// Draw small dot markers for every stop on every route. Idempotent per map.
+async function renderStopsOnMap(map, mapKey) {
+  if (!map) return;
+  const routes = await loadStopRegistry();
+  if (!routes) return;
+  // Clear existing stop markers for this map.
+  (stopMarkers[mapKey] || []).forEach(m => map.removeLayer(m));
+  stopMarkers[mapKey] = [];
+  let idx = 0;
+  for (const [routeKey, route] of Object.entries(routes)) {
+    const color = routeColorByIndex(idx++);
+    (route.stops || []).forEach((s, sIdx) => {
+      const isTerminal = sIdx === 0 || sIdx === route.stops.length - 1;
+      const dotIcon = L.divIcon({
+        className: '',
+        html: `<div class="stop-dot ${isTerminal ? 'stop-dot-terminal' : ''}" style="--stop-color:${color}" title="${s.name}"></div>`,
+        iconSize: isTerminal ? [14, 14] : [10, 10],
+        iconAnchor: isTerminal ? [7, 7] : [5, 5],
+      });
+      const m = L.marker([s.lat, s.lng], { icon: dotIcon }).addTo(map)
+        .bindTooltip(`<strong>${s.name}</strong><br><span style="opacity:0.7">Route ${routeKey}</span>`, { direction: 'top', offset: [0, -6] });
+      stopMarkers[mapKey].push(m);
+    });
+  }
+}
+
+// Merge the server's resolved live state into BUS_POSITIONS so the map always
+// has somewhere to draw each bus (current scheduled stop) until MQTT data
+// arrives. Called on the same 30s cadence as the other API seeders.
+async function seedBusPositionsFromAPI() {
+  try {
+    const res = await fetch(`${API_BASE}/api/live`, { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data || !Array.isArray(data.buses)) return;
+    SERVER_BUS_STATE = {};
+    data.buses.forEach(b => { SERVER_BUS_STATE[b.busId] = b; });
+    updateLiveBusPositions();
+    if (currentView === 'overview' || currentView === 'live-map') updateLiveMapMarkers();
+    if (currentView === 'overview' || currentView === 'fleet') updateLiveFleetList && updateLiveFleetList();
+  } catch (e) { /* silent */ }
 }
 
 // Seed the frontend's continuous running-onboard from the server's persisted
@@ -781,18 +887,26 @@ function updateMapBusMarkers(map, mapKey) {
       html: `<div class="bus-marker ${occClass}">${shortId}</div>`,
       iconSize: [32, 32], iconAnchor: [16, 16],
     });
+    const gpsLabelMap = { live: 'Live GPS', cached: 'Last known', stop: 'At scheduled stop', static: 'Depot (static)', depot: 'Depot fallback', unknown: 'Unknown' };
+    const gpsLabel = gpsLabelMap[bus.gpsSource] || (bus.gpsValid ? 'Live GPS' : 'No fix');
+    const stopLine = bus.currentStopName
+      ? `<span class="popup-label">Current stop</span><span class="popup-value">${bus.currentStopName}</span>` +
+        (bus.nextStopName ? `<span class="popup-label">Next stop</span><span class="popup-value">${bus.nextStopName}</span>` : '')
+      : '';
+    const routeHeader = bus.routeName ? ` — ${bus.routeName}` : (bus.route ? ' — Route ' + bus.route : '');
     const marker = L.marker([bus.lat, bus.lng], { icon })
       .addTo(map)
       .bindPopup(`
         <div class="bus-popup">
-          <h4>${bus.id}${bus.route ? ' — Route ' + bus.route : ''}</h4>
+          <h4>${bus.id}${routeHeader}</h4>
           <div class="popup-grid">
             <span class="popup-label">Passengers</span><span class="popup-value">${bus.passengers}/${bus.capacity}</span>
             <span class="popup-label">Occupancy</span><span class="popup-value">${bus.occupancy}%</span>
+            ${stopLine}
             <span class="popup-label">In (Total)</span><span class="popup-value">${bus.lineIn || 0}</span>
             <span class="popup-label">Out (Total)</span><span class="popup-value">${bus.lineOut || 0}</span>
             <span class="popup-label">Sensor</span><span class="popup-value">${bus.sensorStatus}</span>
-            <span class="popup-label">GPS</span><span class="popup-value">${bus.gpsValid ? 'Live fix' + (bus.gpsAge != null ? ' (' + formatAge(bus.gpsAge) + ')' : '') : 'No fix — last known'}</span>
+            <span class="popup-label">GPS</span><span class="popup-value">${gpsLabel}${bus.gpsAge != null ? ' (' + formatAge(bus.gpsAge) + ')' : ''}</span>
             <span class="popup-label">Position</span><span class="popup-value">${bus.lat.toFixed(5)}, ${bus.lng.toFixed(5)}</span>
             <span class="popup-label">Last Update</span><span class="popup-value">${bus.lastUpdate}</span>
           </div>
@@ -1005,13 +1119,16 @@ function initDashboard() {
   lucide.createIcons();
 
   // Pre-probe backend so it's cached before any view needs it
-  probeBackend().then(() => { seedKPIsFromAPI(); seedRunningOnboardFromAPI(); });
+  probeBackend().then(() => { seedKPIsFromAPI(); seedRunningOnboardFromAPI(); seedBusPositionsFromAPI(); });
   // Keep the authoritative daily totals fresh as new boardings accumulate.
   setInterval(() => seedKPIsFromAPI(), 30000);
   // Seed the continuous running-onboard from the server once each device is
   // known. Devices only appear after their first MQTT message, so retry on an
   // interval; the function is a no-op for devices already seeded.
   setInterval(() => seedRunningOnboardFromAPI(), 30000);
+  // Refresh server-resolved bus positions (scheduled-stop fallback) so the
+  // map advances buses along their routes even without MQTT.
+  setInterval(() => seedBusPositionsFromAPI(), 20000);
 
   // Auto-connect to MQTT broker if credentials are pre-configured
   if (configStore.mqtt.host) {
@@ -1137,6 +1254,7 @@ function initOverviewMap() {
   if (maps.overview) return;
   const map = L.map('overviewMap', { zoomControl: true, attributionControl: false }).setView(MAP_DEFAULT_CENTER, 12);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
+  renderStopsOnMap(map, 'overview');
   updateMapBusMarkers(map, 'overview');
   maps.overview = map;
   setTimeout(() => map.invalidateSize(), 100);
@@ -1586,6 +1704,7 @@ function initLiveMap() {
   if (maps.liveMap) return;
   const map = L.map('liveMapFull', { zoomControl: true, attributionControl: false }).setView(MAP_DEFAULT_CENTER, 12);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
+  renderStopsOnMap(map, 'liveMap');
   updateMapBusMarkers(map, 'liveMap');
   maps.liveMap = map;
   setTimeout(() => map.invalidateSize(), 100);
