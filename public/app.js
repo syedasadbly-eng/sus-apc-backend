@@ -957,26 +957,98 @@ function updateMqttStatus(status, text) {
 // PASSWORD GATE
 // ============================================
 
+// ============================================
+// AUTH STATE + LOGIN GATE (real accounts via /api/auth/*)
+// ============================================
+
+const AuthState = { user: null };
+
+async function apiAuth(path, opts = {}) {
+  const res = await fetch(path, {
+    method: opts.method || 'GET',
+    credentials: 'include',
+    headers: opts.body ? { 'Content-Type': 'application/json' } : undefined,
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  let data = null;
+  try { data = await res.json(); } catch {}
+  if (!res.ok) {
+    const err = new Error(data?.error || `Request failed (${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+
+function showLoginScreen() {
+  document.getElementById('loginScreen')?.classList.remove('hidden');
+  const dash = document.getElementById('dashboard');
+  if (dash) dash.style.display = 'none';
+}
+
+function enterDashboard(user) {
+  AuthState.user = user;
+  document.getElementById('loginScreen')?.classList.add('hidden');
+  const dash = document.getElementById('dashboard');
+  if (dash) dash.style.display = '';
+  // Footer / sidebar identity
+  const initials = ((user.name || user.email || '?').trim()[0] || '?').toUpperCase();
+  const userBox = document.getElementById('sidebarUser');
+  if (userBox) {
+    userBox.style.display = '';
+    document.getElementById('sidebarUserAvatar').textContent = initials;
+    document.getElementById('sidebarUserName').textContent = user.name || user.email;
+    document.getElementById('sidebarUserRole').textContent = user.role === 'admin' ? 'Administrator' : 'User';
+  }
+  document.getElementById('logoutBtn')?.style && (document.getElementById('logoutBtn').style.display = '');
+  // Show admin nav only for admins
+  if (user.role === 'admin') {
+    const navSec = document.getElementById('adminNavSection');
+    if (navSec) navSec.style.display = '';
+  }
+  if (!window._dashInitialized) {
+    window._dashInitialized = true;
+    initDashboard();
+  }
+}
+
 function initLoginGate() {
-  const loginScreen = document.getElementById('loginScreen');
   const loginForm = document.getElementById('loginForm');
   const loginError = document.getElementById('loginError');
-  const dashboard = document.getElementById('dashboard');
   if (!loginForm) return;
 
-  loginForm.addEventListener('submit', (e) => {
+  // If a valid session already exists, skip the login screen.
+  apiAuth('/api/auth/me')
+    .then(({ user }) => enterDashboard(user))
+    .catch(() => showLoginScreen());
+
+  loginForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const pwd = document.getElementById('loginPassword').value;
-    if (!configStore.dashPassword || pwd === configStore.dashPassword) {
-      loginScreen.classList.add('hidden');
-      dashboard.style.display = '';
-      initDashboard();
-    } else {
-      loginError.textContent = 'Incorrect password. Please try again.';
+    loginError.textContent = '';
+    const email = document.getElementById('loginEmail').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    if (!email || !password) {
+      loginError.textContent = 'Email and password are required.';
+      return;
+    }
+    try {
+      const { user } = await apiAuth('/api/auth/login', { method: 'POST', body: { email, password } });
+      enterDashboard(user);
+    } catch (err) {
+      loginError.textContent = err.message || 'Login failed.';
       document.getElementById('loginPassword').value = '';
       document.getElementById('loginPassword').focus();
     }
   });
+
+  const logoutBtn = document.getElementById('logoutBtn');
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', async () => {
+      try { await apiAuth('/api/auth/logout', { method: 'POST' }); } catch {}
+      // Hard reload to clear all in-memory dashboard state cleanly.
+      window.location.reload();
+    });
+  }
 }
 
 
@@ -1175,6 +1247,7 @@ function updateHeader(view) {
     'reports': ['Reports', 'Output / Reports'],
     'data-table': ['Data Explorer', 'Output / Raw Data'],
   };
+  titles['admin'] = ['Administration', 'Users & Login History'];
   const [title, breadcrumb] = titles[view] || ['Dashboard', 'Overview'];
   document.getElementById('headerTitle').textContent = title;
   document.getElementById('headerBreadcrumb').textContent = breadcrumb;
@@ -1198,6 +1271,7 @@ function initView(view) {
       case 'fleet': initFleet(); break;
       case 'reports': initReports(); break;
       case 'data-table': initDataTable(); break;
+      case 'admin': initAdminView(); break;
     }
   } else {
     // Refresh data-driven views when navigating back
@@ -1206,6 +1280,7 @@ function initView(view) {
       case 'routes': loadRoutesData(); break;
       case 'data-table': loadDataFromAPI(); break;
       case 'live-map': if (maps.liveMap) setTimeout(() => maps.liveMap.invalidateSize(), 100); break;
+      case 'admin': loadAdminUsers(); loadAdminEvents(); loadAdminSummary(); break;
     }
   }
 }
@@ -3896,4 +3971,177 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
     initHistoryControls();
     HISTORY._controlsWired = true;
   }
+}
+
+
+// ============================================
+// ADMIN VIEW — users + login audit
+// ============================================
+
+const AdminUI = { editingUserId: null };
+
+function initAdminView() {
+  document.getElementById('adminAddUserBtn')?.addEventListener('click', () => openAdminUserModal(null));
+  document.getElementById('adminUserModalClose')?.addEventListener('click', closeAdminUserModal);
+  document.getElementById('adminUserCancel')?.addEventListener('click', closeAdminUserModal);
+  document.getElementById('adminUserSave')?.addEventListener('click', saveAdminUser);
+  document.getElementById('adminUserModal')?.addEventListener('click', (e) => {
+    if (e.target.id === 'adminUserModal') closeAdminUserModal();
+  });
+  document.getElementById('adminEventsRefresh')?.addEventListener('click', loadAdminEvents);
+  document.getElementById('adminEventsExport')?.addEventListener('click', exportAdminEventsCsv);
+  // Default the date range to the last 14 days.
+  const today = new Date();
+  const two_weeks = new Date(Date.now() - 14 * 86400000);
+  const fmt = (d) => d.toISOString().slice(0, 10);
+  const fromEl = document.getElementById('adminEventsFrom');
+  const toEl = document.getElementById('adminEventsTo');
+  if (fromEl && !fromEl.value) fromEl.value = fmt(two_weeks);
+  if (toEl && !toEl.value) toEl.value = fmt(today);
+
+  loadAdminSummary();
+  loadAdminUsers();
+  loadAdminEvents();
+}
+
+async function loadAdminSummary() {
+  try {
+    const data = await apiAuth('/api/admin/login-events/summary');
+    document.getElementById('adminStatSuccess').textContent = data.successes ?? 0;
+    document.getElementById('adminStatFailure').textContent = data.failures ?? 0;
+    document.getElementById('adminStatUnique').textContent = data.unique_users ?? 0;
+  } catch (err) { console.warn('[ADMIN] summary failed', err.message); }
+}
+
+function fmtDateTime(s) {
+  if (!s) return '—';
+  // SQLite returns 'YYYY-MM-DD HH:MM:SS' in UTC; treat as UTC and show locally.
+  const iso = s.includes('T') ? s : s.replace(' ', 'T') + 'Z';
+  const d = new Date(iso);
+  if (isNaN(d)) return s;
+  return d.toLocaleString();
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+async function loadAdminUsers() {
+  const body = document.getElementById('adminUsersBody');
+  if (!body) return;
+  try {
+    const { users } = await apiAuth('/api/admin/users');
+    if (!users.length) { body.innerHTML = '<tr><td colspan="7" class="muted">No users yet.</td></tr>'; return; }
+    body.innerHTML = users.map(u => `
+      <tr>
+        <td>${escapeHtml(u.email)}</td>
+        <td>${escapeHtml(u.name || '')}</td>
+        <td><span class="badge-role badge-role-${u.role}">${u.role}</span></td>
+        <td>${u.active ? '<span class="badge-active">Active</span>' : '<span class="badge-inactive">Disabled</span>'}</td>
+        <td>${fmtDateTime(u.created_at)}</td>
+        <td>${u.last_login_at ? fmtDateTime(u.last_login_at) : '—'}</td>
+        <td style="white-space:nowrap">
+          <button class="btn btn-secondary btn-sm" data-edit-user="${u.id}">Edit</button>
+          <button class="btn btn-secondary btn-sm" data-delete-user="${u.id}">Delete</button>
+        </td>
+      </tr>`).join('');
+    body.querySelectorAll('[data-edit-user]').forEach(b => b.addEventListener('click', () => {
+      const u = users.find(x => x.id === Number(b.dataset.editUser));
+      openAdminUserModal(u);
+    }));
+    body.querySelectorAll('[data-delete-user]').forEach(b => b.addEventListener('click', async () => {
+      const id = Number(b.dataset.deleteUser);
+      const u = users.find(x => x.id === id);
+      if (!confirm(`Delete user ${u.email}? This cannot be undone.`)) return;
+      try {
+        await apiAuth(`/api/admin/users/${id}`, { method: 'DELETE' });
+        loadAdminUsers();
+      } catch (err) { alert(err.message); }
+    }));
+  } catch (err) {
+    body.innerHTML = `<tr><td colspan="7" class="muted">Failed to load users: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+function openAdminUserModal(user) {
+  AdminUI.editingUserId = user?.id || null;
+  document.getElementById('adminUserModalTitle').textContent = user ? `Edit ${user.email}` : 'Add user';
+  document.getElementById('adminUserId').value = user?.id || '';
+  document.getElementById('adminUserEmail').value = user?.email || '';
+  document.getElementById('adminUserEmail').disabled = !!user;
+  document.getElementById('adminUserName').value = user?.name || '';
+  document.getElementById('adminUserRole').value = user?.role || 'user';
+  document.getElementById('adminUserPassword').value = '';
+  document.getElementById('adminUserPwdHint').textContent = user ? '(leave blank to keep current)' : '(min 8 chars)';
+  document.getElementById('adminUserActive').checked = user ? !!user.active : true;
+  document.getElementById('adminUserActiveRow').style.display = user ? '' : 'none';
+  document.getElementById('adminUserError').textContent = '';
+  document.getElementById('adminUserModal').classList.add('open');
+}
+function closeAdminUserModal() {
+  document.getElementById('adminUserModal').classList.remove('open');
+}
+
+async function saveAdminUser() {
+  const err = document.getElementById('adminUserError');
+  err.textContent = '';
+  const id = AdminUI.editingUserId;
+  const email = document.getElementById('adminUserEmail').value.trim();
+  const name = document.getElementById('adminUserName').value.trim();
+  const role = document.getElementById('adminUserRole').value;
+  const password = document.getElementById('adminUserPassword').value;
+  const active = document.getElementById('adminUserActive').checked;
+  try {
+    if (id) {
+      const body = { name, role, active };
+      if (password) body.password = password;
+      await apiAuth(`/api/admin/users/${id}`, { method: 'PUT', body });
+    } else {
+      if (!email || !password) throw new Error('Email and password are required for new users.');
+      await apiAuth('/api/admin/users', { method: 'POST', body: { email, name, role, password } });
+    }
+    closeAdminUserModal();
+    loadAdminUsers();
+  } catch (e) { err.textContent = e.message; }
+}
+
+function buildEventsQuery() {
+  const p = new URLSearchParams();
+  const from = document.getElementById('adminEventsFrom')?.value;
+  const to = document.getElementById('adminEventsTo')?.value;
+  const email = document.getElementById('adminEventsEmail')?.value.trim();
+  const status = document.getElementById('adminEventsStatus')?.value;
+  if (from) p.set('from', from);
+  if (to) p.set('to', to);
+  if (email) p.set('email', email);
+  if (status) p.set('status', status);
+  p.set('limit', '500');
+  return p.toString();
+}
+
+async function loadAdminEvents() {
+  const body = document.getElementById('adminEventsBody');
+  if (!body) return;
+  try {
+    const data = await apiAuth('/api/admin/login-events?' + buildEventsQuery());
+    const rows = data.events || [];
+    if (!rows.length) { body.innerHTML = '<tr><td colspan="7" class="muted">No login events match these filters.</td></tr>'; return; }
+    body.innerHTML = rows.map(r => `
+      <tr>
+        <td>${fmtDateTime(r.login_at)}</td>
+        <td>${escapeHtml(r.user_name || '—')}</td>
+        <td>${escapeHtml(r.email)}</td>
+        <td>${r.status === 'success' ? '<span class="badge-active">Success</span>' : '<span class="badge-inactive">Failure</span>'}</td>
+        <td>${escapeHtml(r.reason || '')}</td>
+        <td>${escapeHtml(r.ip_address || '')}</td>
+        <td title="${escapeHtml(r.user_agent || '')}" style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(r.user_agent || '')}</td>
+      </tr>`).join('');
+  } catch (err) {
+    body.innerHTML = `<tr><td colspan="7" class="muted">Failed to load events: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+function exportAdminEventsCsv() {
+  const url = '/api/admin/login-events?' + buildEventsQuery() + '&format=csv';
+  window.open(url, '_blank');
 }

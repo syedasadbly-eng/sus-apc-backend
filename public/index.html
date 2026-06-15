@@ -64,10 +64,14 @@
         <img src="./assets/mayo-clinic-logo.svg" alt="Mayo Clinic" class="mayo-logo mayo-logo--login">
       </div>
     </div>
-    <form id="loginForm" autocomplete="off">
+    <form id="loginForm" autocomplete="on">
       <div class="login-field">
-        <label for="loginPassword">Dashboard Password</label>
-        <input type="password" id="loginPassword" placeholder="Enter password" autofocus>
+        <label for="loginEmail">Email</label>
+        <input type="email" id="loginEmail" placeholder="you@company.com" autocomplete="username" autofocus required>
+      </div>
+      <div class="login-field">
+        <label for="loginPassword">Password</label>
+        <input type="password" id="loginPassword" placeholder="Enter password" autocomplete="current-password" required>
       </div>
       <div class="login-error" id="loginError"></div>
       <button type="submit" class="btn btn-primary login-btn">Sign In</button>
@@ -237,12 +241,31 @@
           Data Explorer
         </button>
       </div>
+
+      <div class="nav-section" id="adminNavSection" style="display:none">
+        <div class="nav-section-label">Administration</div>
+        <button class="nav-item" data-view="admin">
+          <i data-lucide="shield-check"></i>
+          Admin
+        </button>
+      </div>
     </nav>
 
     <div class="sidebar-footer">
+      <div class="sidebar-user" id="sidebarUser" style="display:none">
+        <div class="sidebar-user-avatar" id="sidebarUserAvatar">?</div>
+        <div class="sidebar-user-info">
+          <div class="sidebar-user-name" id="sidebarUserName"></div>
+          <div class="sidebar-user-role" id="sidebarUserRole"></div>
+        </div>
+      </div>
       <button class="nav-item" id="settingsBtn">
         <i data-lucide="settings"></i>
         Settings
+      </button>
+      <button class="nav-item" id="logoutBtn" style="display:none">
+        <i data-lucide="log-out"></i>
+        Log out
       </button>
     </div>
   </aside>
@@ -1102,7 +1125,92 @@
       </div>
     </div>
 
+    <!-- ADMIN VIEW -->
+    <div class="view" id="view-admin">
+      <div class="admin-summary" id="adminSummary">
+        <div class="admin-stat"><span class="admin-stat-label">Successful logins (7d)</span><span class="admin-stat-value" id="adminStatSuccess">–</span></div>
+        <div class="admin-stat"><span class="admin-stat-label">Failed attempts (7d)</span><span class="admin-stat-value" id="adminStatFailure">–</span></div>
+        <div class="admin-stat"><span class="admin-stat-label">Unique users (7d)</span><span class="admin-stat-value" id="adminStatUnique">–</span></div>
+      </div>
+
+      <div class="chart-panel">
+        <div class="chart-panel-header">
+          <h3>Users</h3>
+          <button class="btn btn-primary" id="adminAddUserBtn">
+            <i data-lucide="user-plus" style="width:14px;height:14px"></i> Add user
+          </button>
+        </div>
+        <div class="table-wrapper">
+          <table class="data-table" id="adminUsersTable">
+            <thead>
+              <tr><th>Email</th><th>Name</th><th>Role</th><th>Status</th><th>Created</th><th>Last login</th><th></th></tr>
+            </thead>
+            <tbody id="adminUsersBody"><tr><td colspan="7" class="muted">Loading users…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="chart-panel" style="margin-top:24px">
+        <div class="chart-panel-header">
+          <h3>Login history</h3>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <input type="date" class="filter-input" id="adminEventsFrom" title="From date">
+            <input type="date" class="filter-input" id="adminEventsTo" title="To date">
+            <input type="text" class="filter-input" id="adminEventsEmail" placeholder="Email contains…" style="width:200px">
+            <select class="filter-select" id="adminEventsStatus">
+              <option value="">All</option>
+              <option value="success">Success</option>
+              <option value="failure">Failure</option>
+            </select>
+            <button class="btn btn-secondary" id="adminEventsRefresh">
+              <i data-lucide="refresh-cw" style="width:14px;height:14px"></i> Refresh
+            </button>
+            <button class="btn btn-secondary" id="adminEventsExport">
+              <i data-lucide="download" style="width:14px;height:14px"></i> Export CSV
+            </button>
+          </div>
+        </div>
+        <div class="table-wrapper" style="max-height:60vh;overflow-y:auto">
+          <table class="data-table" id="adminEventsTable">
+            <thead>
+              <tr><th>When</th><th>User</th><th>Email</th><th>Status</th><th>Reason</th><th>IP</th><th>Device</th></tr>
+            </thead>
+            <tbody id="adminEventsBody"><tr><td colspan="7" class="muted">Loading login history…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
   </main>
+</div>
+
+<!-- ADMIN: Add/Edit user modal -->
+<div class="modal-overlay" id="adminUserModal">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-header">
+      <h2 id="adminUserModalTitle">Add user</h2>
+      <button class="btn-icon modal-close" id="adminUserModalClose" aria-label="Close"><i data-lucide="x"></i></button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="adminUserId">
+      <div class="settings-field"><label>Email</label><input type="email" class="filter-input" id="adminUserEmail"></div>
+      <div class="settings-field"><label>Name</label><input type="text" class="filter-input" id="adminUserName"></div>
+      <div class="settings-field"><label>Role</label>
+        <select class="filter-select" id="adminUserRole"><option value="user">User</option><option value="admin">Admin</option></select>
+      </div>
+      <div class="settings-field"><label>Password <span class="muted" id="adminUserPwdHint">(min 8 chars)</span></label>
+        <input type="password" class="filter-input" id="adminUserPassword" placeholder="Leave blank to keep unchanged">
+      </div>
+      <div class="settings-field" id="adminUserActiveRow">
+        <label><input type="checkbox" id="adminUserActive" checked> Account active</label>
+      </div>
+      <div class="login-error" id="adminUserError"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="adminUserCancel">Cancel</button>
+      <button class="btn btn-primary" id="adminUserSave">Save</button>
+    </div>
+  </div>
 </div>
 
 <script src="./app.js"></script>
