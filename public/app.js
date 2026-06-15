@@ -613,15 +613,23 @@ function updateLiveBusPositions() {
     // — always merged in so the map can show a sensible position even when the
     // bus hasn't yet emitted a real GPS fix.
     const srv = SERVER_BUS_STATE[gw.label] || {};
-    const lat = (data.lat || 0) || srv.lat || 0;
-    const lng = (data.lng || 0) || srv.lng || 0;
+    // Detect 'stuck' GPS: device says gpsValid=true but the fix timestamp
+    // hasn't advanced in 10+ minutes (same coord repeated). Treat that as no
+    // fresh GPS and fall back to the scheduled-stop coordinate so the live map
+    // marker still moves along the route.
+    const GPS_STALE_SECONDS = 600;
+    const gpsAgeSec = data.gpsFixTs ? Math.round((Date.now() - data.gpsFixTs) / 1000) : null;
+    const gpsLikelyStuck = (gpsAgeSec != null && gpsAgeSec >= GPS_STALE_SECONDS);
+    const useScheduled = (!data.gpsValid || gpsLikelyStuck) && srv.lat && srv.lng;
+    const lat = useScheduled ? srv.lat : ((data.lat || 0) || srv.lat || 0);
+    const lng = useScheduled ? srv.lng : ((data.lng || 0) || srv.lng || 0);
 
     liveBuses.push({
       id: gw.label || key,
       route: gw.route || srv.routeName || '', routeName: gw.route || srv.routeName || '', routeColor: color,
       lat, lng,
-      gpsValid: data.gpsValid === true,
-      gpsSource: data.gpsValid === true ? 'live' : (srv.gpsSource || 'unknown'),
+      gpsValid: data.gpsValid === true && !gpsLikelyStuck,
+      gpsSource: useScheduled ? 'stop' : (data.gpsValid === true ? 'live' : (srv.gpsSource || 'unknown')),
       stopId: srv.stopId || null,
       currentStopName: srv.gpsLabel || null,
       nextStopName: srv.nextStopName || null,
@@ -3620,7 +3628,10 @@ const HISTORY = {
   busFilter: 'all',
   customFrom: null,
   customTo: null,
-  points: [],            // raw rows from API
+  points: [],            // raw rows from API (possibly substituted by scheduled-stop synthesis below)
+  rawPoints: [],         // unmodified GPS points as returned by the API
+  syntheticBuses: {},    // busId -> true when this bus's points were replaced with scheduled-stop synthesis
+  routes: null,          // cached /api/stops registry { '515': { stops:[{lat,lng,name,id}], loop_minutes }, ... }
   layers: {},            // active Leaflet layers, keyed by name
   // playback state
   playback: {
@@ -3633,6 +3644,11 @@ const HISTORY = {
   },
 };
 
+// Threshold: a bus whose unique GPS coords ≤ this value over the loaded range
+// is considered 'stuck'. We synthesise scheduled-stop coordinates for it so
+// playback still shows movement along the timetable.
+const STUCK_GPS_UNIQUE_THRESHOLD = 1;
+
 const BUS_COLORS = {
   '515': '#8b74d1',  // purple
   '419': '#d4af37',  // gold
@@ -3640,6 +3656,95 @@ const BUS_COLORS = {
 const BUS_COLOR_FALLBACK = '#7dd3fc';
 
 function busColor(busId) { return BUS_COLORS[busId] || BUS_COLOR_FALLBACK; }
+
+// Lazy-load the stop registry once per page and cache on HISTORY.routes.
+async function ensureStopRegistry() {
+  if (HISTORY.routes) return HISTORY.routes;
+  try {
+    const data = await apiFetch('/api/stops');
+    HISTORY.routes = data && data.routes ? data.routes : {};
+  } catch (e) {
+    console.warn('[history] failed to load /api/stops:', e);
+    HISTORY.routes = {};
+  }
+  return HISTORY.routes;
+}
+
+// Given a bus id, return the route the bus belongs to (the route whose
+// bus_ids array contains this bus). Falls back to a route keyed by busId.
+function routeForBus(busId) {
+  const routes = HISTORY.routes || {};
+  for (const r of Object.values(routes)) {
+    if (Array.isArray(r.bus_ids) && r.bus_ids.includes(busId)) return r;
+  }
+  return routes[busId] || null;
+}
+
+// For a stuck bus, synthesise a stream of GPS-shaped points that follow the
+// route's scheduled stops over the same time window as the real (collapsed)
+// data. Each stop dwell is spaced equally across the window so the marker
+// visibly hops along the route during playback.
+function synthesiseScheduledPoints(busId, busPoints) {
+  if (!busPoints.length) return busPoints;
+  const route = routeForBus(busId);
+  if (!route || !Array.isArray(route.stops) || !route.stops.length) return busPoints;
+  const stops = route.stops.filter(s => Number.isFinite(s.lat) && Number.isFinite(s.lng));
+  if (stops.length < 2) return busPoints;
+  const startMs = new Date(busPoints[0].timestamp).getTime();
+  const endMs   = new Date(busPoints[busPoints.length - 1].timestamp).getTime();
+  // Guarantee a sensible visual window even when start ≈ end
+  const spanMs = Math.max(endMs - startMs, (route.loop_minutes || 40) * 60 * 1000);
+  // Use the larger of (real point count, stops*4) so playback has enough frames.
+  const frames = Math.max(busPoints.length, stops.length * 4);
+  const synth = [];
+  for (let i = 0; i < frames; i++) {
+    const t = i / Math.max(1, frames - 1);              // 0..1
+    const stopIdx = Math.min(stops.length - 1, Math.floor(t * stops.length));
+    const stop = stops[stopIdx];
+    synth.push({
+      timestamp: new Date(startMs + t * spanMs).toISOString(),
+      bus_id: busId,
+      route: busPoints[0].route || busId,
+      stop: stop.name,
+      lat: stop.lat,
+      lng: stop.lng,
+      speed: 0,
+      onboard: busPoints[0].onboard || 0,
+      stop_source: 'scheduled-synth',
+    });
+  }
+  return synth;
+}
+
+// Count unique (rounded) coords per bus and replace stuck-bus points with
+// scheduled-stop synthesis. Returns { points, syntheticBuses, stuckBuses }.
+function applyScheduledFallback(points) {
+  const byBus = {};
+  for (const p of points) {
+    if (!byBus[p.bus_id]) byBus[p.bus_id] = [];
+    byBus[p.bus_id].push(p);
+  }
+  const out = [];
+  const synthetic = {};
+  const stuck = [];
+  Object.keys(byBus).forEach(busId => {
+    const pts = byBus[busId];
+    const uniq = new Set(pts.map(p => `${(+p.lat).toFixed(5)},${(+p.lng).toFixed(5)}`));
+    if (uniq.size <= STUCK_GPS_UNIQUE_THRESHOLD && pts.length > 0) {
+      const synth = synthesiseScheduledPoints(busId, pts);
+      if (synth !== pts) {
+        synthetic[busId] = true;
+        stuck.push(busId);
+        out.push(...synth);
+        return;
+      }
+    }
+    out.push(...pts);
+  });
+  // Re-sort combined points by time so the slider advances monotonically.
+  out.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+  return { points: out, syntheticBuses: synthetic, stuckBuses: stuck };
+}
 
 function initHistoryControls() {
   // Mode tabs
@@ -3742,13 +3847,26 @@ async function loadHistory() {
   const status = document.getElementById('historyStatus');
   if (status) status.textContent = 'Loading…';
   try {
-    const data = await apiFetch('/api/history-locations', historyParams());
-    HISTORY.points = (data && data.points) ? data.points : [];
+    // Load stop registry in parallel — needed for scheduled-stop fallback below.
+    const [data] = await Promise.all([
+      apiFetch('/api/history-locations', historyParams()),
+      ensureStopRegistry(),
+    ]);
+    const raw = (data && data.points) ? data.points : [];
+    HISTORY.rawPoints = raw;
+    // Detect stuck buses and substitute scheduled-stop coords for them.
+    const fb = applyScheduledFallback(raw);
+    HISTORY.points = fb.points;
+    HISTORY.syntheticBuses = fb.syntheticBuses;
     if (status) {
       const n = data.returned || 0;
       const tot = data.total_available || 0;
       const ds = data.downsampled ? ` (downsampled from ${tot})` : '';
-      status.textContent = `${n.toLocaleString()} GPS points${ds}`;
+      let note = '';
+      if (fb.stuckBuses.length) {
+        note = ` — bus ${fb.stuckBuses.join(', ')} GPS appears stationary; showing scheduled-stop route instead`;
+      }
+      status.textContent = `${n.toLocaleString()} GPS points${ds}${note}`;
     }
     renderHistory();
   } catch (err) {
@@ -3790,6 +3908,29 @@ function renderHistory() {
   // Auto-fit bounds across all loaded points.
   const bounds = L.latLngBounds(HISTORY.points.map(p => [p.lat, p.lng]));
   if (bounds.isValid()) map.fitBounds(bounds, { padding: [40, 40] });
+
+  // Show a small "using scheduled stops" pill above the scrubber for any
+  // bus whose data was substituted.
+  renderPlaybackBadge();
+}
+
+function renderPlaybackBadge() {
+  const synth = Object.keys(HISTORY.syntheticBuses || {});
+  let badge = document.getElementById('playbackSyntheticBadge');
+  if (!synth.length || HISTORY.vis !== 'playback') {
+    if (badge) badge.style.display = 'none';
+    return;
+  }
+  if (!badge) {
+    const scrubber = document.getElementById('playbackScrubber');
+    if (!scrubber) return;
+    badge = document.createElement('div');
+    badge.id = 'playbackSyntheticBadge';
+    badge.className = 'playback-badge';
+    scrubber.parentElement.insertBefore(badge, scrubber);
+  }
+  badge.textContent = `Using scheduled-stop coordinates for bus ${synth.join(', ')} (GPS stationary in this range)`;
+  badge.style.display = 'block';
 }
 
 function renderBreadcrumbs() {
@@ -3855,9 +3996,23 @@ function renderHeatmap() {
 function renderPlayback() {
   const map = maps.liveMap;
   const scrubber = document.getElementById('playbackScrubber');
-  if (scrubber) scrubber.style.display = 'flex';
+  if (scrubber) {
+    scrubber.style.display = 'flex';
+    // Stop Leaflet from swallowing pointer events that originate on the
+    // scrubber overlay — without this the slider thumb cannot be dragged
+    // because Leaflet's map drag handler eats the mousedown.
+    if (!scrubber._leafletDisabled && window.L && L.DomEvent) {
+      L.DomEvent.disableClickPropagation(scrubber);
+      L.DomEvent.disableScrollPropagation(scrubber);
+      // mousedown is the critical one for native range-input drag.
+      L.DomEvent.on(scrubber, 'mousedown touchstart pointerdown', L.DomEvent.stopPropagation);
+      scrubber._leafletDisabled = true;
+    }
+  }
 
-  // Faint trail polylines for context (per bus).
+  // Faint trail polylines for context (per bus). When a bus's points were
+  // substituted with scheduled-stop coords the trail naturally follows the
+  // route; otherwise it follows raw GPS.
   const byBus = {};
   for (const p of HISTORY.points) {
     if (!byBus[p.bus_id]) byBus[p.bus_id] = [];
@@ -3866,16 +4021,23 @@ function renderPlayback() {
   Object.keys(byBus).forEach(busId => {
     const pts = byBus[busId];
     const color = busColor(busId);
+    const isSynth = !!(HISTORY.syntheticBuses && HISTORY.syntheticBuses[busId]);
     const trail = L.polyline(pts.map(p => [p.lat, p.lng]), {
-      color, weight: 2, opacity: 0.22, dashArray: '4,4',
+      color, weight: isSynth ? 3 : 2, opacity: isSynth ? 0.55 : 0.30, dashArray: isSynth ? null : '4,4',
     }).addTo(map);
     HISTORY.playback.trails[busId] = trail;
-    // Initial marker at first point.
+    // Initial marker at first point — larger and outlined with the bus colour
+    // so 515 (purple) and 419 (gold) are immediately distinguishable on the map.
     const first = pts[0];
     const marker = L.circleMarker([first.lat, first.lng], {
-      radius: 9, color: '#fff', weight: 3, fillColor: color, fillOpacity: 1,
+      radius: 12,
+      color: color,            // outline matches bus colour
+      weight: 4,
+      fillColor: '#ffffff',    // white inner so the ring reads clearly at low zoom
+      fillOpacity: 1,
     }).addTo(map);
-    marker.bindTooltip(`Bus ${busId}`, { direction: 'top', permanent: true, className: 'history-bus-label', offset: [0, -14] });
+    const labelText = isSynth ? `Bus ${busId} · scheduled` : `Bus ${busId}`;
+    marker.bindTooltip(labelText, { direction: 'top', permanent: true, className: 'history-bus-label', offset: [0, -16] });
     HISTORY.playback.markers[busId] = marker;
   });
 
@@ -3883,7 +4045,7 @@ function renderPlayback() {
   const slider = document.getElementById('playbackSlider');
   if (slider) {
     slider.min = 0;
-    slider.max = HISTORY.points.length - 1;
+    slider.max = Math.max(0, HISTORY.points.length - 1);
     slider.value = 0;
   }
   HISTORY.playback.idx = 0;
