@@ -1258,6 +1258,43 @@ app.get('/api/stops/boardings', (req, res) => {
   }
 });
 
+// Real (non-approximated) per-stop, per-hour boardings/alightings breakdown.
+// Used by the Routes & Stops "Hourly Activity by Stop" heatmap so it reflects
+// actual counted events instead of distributing daily totals proportionally.
+//   GET /api/stops/hourly              — today, all buses
+//   GET /api/stops/hourly?date=YYYY-MM-DD
+//   GET /api/stops/hourly?from=YYYY-MM-DD&to=YYYY-MM-DD
+//   GET /api/stops/hourly?bus_id=515
+app.get('/api/stops/hourly', (req, res) => {
+  try {
+    const { date, from, to, bus_id } = req.query;
+    let where = ' WHERE stop != \'-\' ';
+    const params = {};
+    if (bus_id) { where += ' AND bus_id = @bus_id'; params.bus_id = bus_id; }
+    if (date)   { where += ' AND date = @date';     params.date = date; }
+    else if (from && to) { where += ' AND date BETWEEN @from AND @to'; params.from = from; params.to = to; }
+    else if (!date && !from && !to) {
+      const today = new Date().toISOString().slice(0, 10);
+      where += ' AND date = @today'; params.today = today;
+    }
+    const rows = db.prepare(`
+      SELECT
+        route,
+        stop,
+        hour,
+        SUM(evt_in)  AS boardings,
+        SUM(evt_out) AS alightings
+      FROM records
+      ${where}
+      GROUP BY route, stop, hour
+      ORDER BY route, stop, hour
+    `).all(params);
+    res.json({ filters: { date: date || null, from: from || null, to: to || null, bus_id: bus_id || null }, rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Historical GPS breadcrumbs for the Live Map playback view.
 // Returns one row per recorded GPS sample, filtered by date range / bus.
 //   GET /api/history-locations?from=YYYY-MM-DD&to=YYYY-MM-DD

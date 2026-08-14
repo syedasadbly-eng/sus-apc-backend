@@ -27,6 +27,7 @@
 <!-- Chart.js -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-matrix@2"></script>
 
 <!-- Lucide Icons -->
 <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
@@ -766,7 +767,7 @@
                   <th style="text-align:left">Stop</th>
                   <th style="text-align:right">Boardings</th>
                   <th style="text-align:right">Alightings</th>
-                  <th style="text-align:right">Net Load</th>
+                  <th style="text-align:right" title="Boardings minus Alightings. Positive (green) = more people got on than off; negative (red) = more got off than on.">Net Load</th>
                   <th style="text-align:right">Events</th>
                 </tr>
               </thead>
@@ -783,12 +784,16 @@
         <div class="chart-header">
           <div>
             <div class="chart-title">Hourly Activity by Stop</div>
-            <div class="chart-subtitle" id="heatmapSubtitle">Boarding intensity - rows are stops, columns are hours</div>
+            <div class="chart-subtitle" id="heatmapSubtitle">Actual boardings by hour - rows are stops, columns are hours (00:00–23:00)</div>
           </div>
         </div>
-        <div class="chart-body" style="padding:8px 4px">
-          <div id="stopHourMatrix" style="width:100%;overflow-x:auto">
-            <div style="padding:32px;text-align:center;color:#8b8ea5">Loading hourly activity...</div>
+        <div class="chart-body" style="padding:8px 4px 4px">
+          <div id="stopHourMatrixWrap" style="width:100%;height:220px;position:relative">
+            <canvas id="chartStopHourMatrix"></canvas>
+          </div>
+          <div id="stopHourMatrixEmpty" style="display:none;padding:32px;text-align:center;color:#8b8ea5">No stop activity in this window.</div>
+          <div class="stop-hour-legend" style="padding-left:0;justify-content:flex-end">
+            <span>Fewer boardings</span><span class="stop-hour-legend-grad"></span><span>More boardings</span>
           </div>
         </div>
       </div>

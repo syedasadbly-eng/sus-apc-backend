@@ -2348,6 +2348,7 @@ let STOPS_REGISTRY = null;
 let ROUTE_MAP = null;
 let ROUTE_MAP_LAYER = null;
 let CURRENT_STOPS_PAYLOAD = null; // last fetched /api/stops/boardings payload
+let STOP_HOUR_CHART = null; // Chart.js matrix instance for the Hourly Activity by Stop heatmap
 
 async function fetchStopsRegistry() {
   if (STOPS_REGISTRY) return STOPS_REGISTRY;
@@ -2365,11 +2366,38 @@ function shortStopName(s) {
     .replace(/\s+-\>\s+/g, '  ->  ');
 }
 
+// Draws the actual value at the end of each bar so exact numbers are visible
+// at a glance instead of requiring a hover. Scoped to this one chart instance
+// only (passed via the chart's own `plugins` array), so it never affects any
+// other chart on the dashboard.
+const stopBarValueLabels = {
+  id: 'stopBarValueLabels',
+  afterDatasetsDraw(chart) {
+    const { ctx } = chart;
+    chart.data.datasets.forEach((dataset, dsIndex) => {
+      const meta = chart.getDatasetMeta(dsIndex);
+      if (meta.hidden) return;
+      meta.data.forEach((bar, index) => {
+        const value = dataset.data[index];
+        if (!value) return;
+        ctx.save();
+        ctx.font = "600 11px Inter, sans-serif";
+        ctx.fillStyle = dsIndex === 0 ? 'rgba(255,255,255,0.95)' : 'rgba(232,193,73,1)';
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'left';
+        ctx.fillText(Number(value).toLocaleString(), bar.x + 6, bar.y);
+        ctx.restore();
+      });
+    });
+  },
+};
+
 function initRoutes() {
   // ----- Stop ranking bar chart -----
   const stopCtx = document.getElementById('chartStopBoardings').getContext('2d');
   charts.stopBoardings = new Chart(stopCtx, {
     type: 'bar',
+    plugins: [stopBarValueLabels],
     data: { labels: [], datasets: [
       { label: 'Boardings', data: [], backgroundColor: ROUTE_WHITE, hoverBackgroundColor: 'rgba(255,255,255,1)', borderRadius: 6, borderSkipped: false, maxBarThickness: 22 },
       { label: 'Alightings', data: [], backgroundColor: ROUTE_GOLD, hoverBackgroundColor: 'rgba(232,193,73,1)', borderRadius: 6, borderSkipped: false, maxBarThickness: 22 },
@@ -2379,16 +2407,20 @@ function initRoutes() {
       responsive: true, maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       animation: { duration: 600, easing: 'easeOutQuart' },
+      layout: { padding: { right: 48 } },
       plugins: {
         legend: { labels: { color: '#dbdce6', font: { size: 12, family: 'Inter', weight: '500' }, padding: 16, usePointStyle: true, pointStyle: 'circle', boxWidth: 10 } },
         tooltip: { ...tooltipDefaults(), padding: 12, callbacks: { label: (c) => ' ' + c.dataset.label + ': ' + Number(c.parsed.x).toLocaleString() } },
       },
       scales: {
-        x: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)', drawTicks: false }, ticks: { color: '#c9cad8', font: { size: 12, family: 'Inter', weight: '500' }, padding: 6, callback: (v) => Number(v).toLocaleString() } },
+        x: { beginAtZero: true, grace: '15%', grid: { color: 'rgba(255,255,255,0.05)', drawTicks: false }, ticks: { color: '#c9cad8', font: { size: 12, family: 'Inter', weight: '500' }, padding: 6, callback: (v) => Number(v).toLocaleString() } },
         y: { grid: { display: false }, ticks: { color: '#c9cad8', font: { size: 11, family: 'Inter', weight: '500' }, padding: 6, autoSkip: false } },
       },
     },
   });
+
+  // ----- Stop x Hour heatmap (real Chart.js matrix chart) -----
+  initStopHourMatrixChart();
 
   // ----- Leaflet route map -----
   const mapEl = document.getElementById('routeMap');
@@ -2501,15 +2533,15 @@ async function loadRoutesData() {
 
   // --- Leaderboard table (all observed stops, ranked) ---
   renderStopLeaderboard(stops);
-  setText('stopLeaderSubtitle', stops.length + ' stops - ' + niceRange + ' - ' + niceRoute);
+  setText('stopLeaderSubtitle', stops.length + ' stops - ' + niceRange + ' - ' + niceRoute + ' · Net Load = Boardings − Alightings');
 
   // --- Route map ---
   renderRouteMap(stops, busFilter);
   setText('routeMapSubtitle', 'Stops sized by boardings - ' + niceRange + ' - ' + niceRoute);
 
   // --- Stop x Hour heatmap matrix ---
-  await renderStopHourMatrix(from, to, busFilter, topN.slice(0, 10).map(s => s.stop));
-  setText('heatmapSubtitle', 'Top stops x 24 hours - ' + niceRange + ' - ' + niceRoute);
+  try { await renderStopHourMatrix(from, to, busFilter, topN.slice(0, 10)); } catch (err) { console.warn('Heatmap update failed:', err); }
+  setText('heatmapSubtitle', 'Actual boardings by hour for the top ' + Math.min(10, topN.length) + ' stops - ' + niceRange + ' - ' + niceRoute);
 }
 
 function prettyDate(yyyyMmDd) {
@@ -2533,7 +2565,7 @@ function renderStopLeaderboard(stops) {
     const routeCls = 'route-pill r-' + route;
     const net = (s.boardings || 0) - (s.alightings || 0);
     const netStr = (net > 0 ? '+' : '') + net.toLocaleString();
-    const netColor = net > 0 ? '#c9b6ea' : (net < 0 ? '#f0d175' : '#c9cad8');
+    const netColor = net > 0 ? '#4ade80' : (net < 0 ? '#f87171' : '#c9cad8');
     return '<tr>'
       + '<td><span class="' + pillCls + '">' + rank + '</span></td>'
       + '<td><span class="' + routeCls + '">' + route + '</span></td>'
@@ -2601,84 +2633,146 @@ function renderRouteMap(stops, busFilter) {
   setTimeout(() => { try { ROUTE_MAP.invalidateSize(); } catch (e) {} }, 100);
 }
 
-async function renderStopHourMatrix(from, to, busFilter, topStopNames) {
-  const container = document.getElementById('stopHourMatrix');
-  if (!container) return;
-  if (!topStopNames.length) {
-    container.innerHTML = '<div style="padding:32px;text-align:center;color:#8b8ea5">No stop activity in this window.</div>';
-    return;
+// Builds the Chart.js "matrix" heatmap once. Data is refreshed separately by
+// renderStopHourMatrix() every time filters change, using real per-stop,
+// per-hour counts from /api/stops/hourly (no more proportional guessing).
+function initStopHourMatrixChart() {
+  const canvas = document.getElementById('chartStopHourMatrix');
+  if (!canvas || typeof Chart === 'undefined') return;
+  // Guarded: if the chartjs-chart-matrix CDN script failed to load for any
+  // reason, fail quietly here instead of throwing and breaking the rest of
+  // initRoutes() (map, filters, other charts on this page).
+  try {
+    buildStopHourMatrixChart(canvas);
+  } catch (err) {
+    console.warn('Hourly Activity by Stop heatmap unavailable:', err);
+    const wrap = document.getElementById('stopHourMatrixWrap');
+    const emptyEl = document.getElementById('stopHourMatrixEmpty');
+    if (wrap) wrap.style.display = 'none';
+    if (emptyEl) { emptyEl.style.display = 'block'; emptyEl.textContent = 'Heatmap chart failed to load.'; }
   }
-  // We have /api/hourly (totals per hour, optionally per bus) but no per-stop-hour
-  // endpoint. For now, distribute the day's total hourly boardings to each top stop
-  // proportionally to that stop's share of total boardings. This is a defensible
-  // approximation when a true per-stop-hour endpoint isn't available.
-  const params = { date: to };
-  if (busFilter) params.bus_id = busFilter;
-  const hourly = await apiFetch('/api/hourly', params);
-  const hours = Array.from({ length: 24 }, (_, i) => i);
-  const hourTotals = hours.map(() => 0);
-  if (hourly && hourly.hourly) {
-    hourly.hourly.forEach(h => {
-      const dh = utcHourToDisplayHour(h.hour);
-      if (dh >= 0 && dh < 24) hourTotals[dh] += (h.boardings || 0);
-    });
-  }
-  // Find per-stop share from CURRENT_STOPS_PAYLOAD
-  const stops = (CURRENT_STOPS_PAYLOAD && CURRENT_STOPS_PAYLOAD.stops) || [];
-  const filtered = busFilter ? stops.filter(s => String(s.route) === String(busFilter)) : stops;
-  const total = filtered.reduce((a, s) => a + (s.boardings || 0), 0) || 1;
-  const stopRows = topStopNames.map(name => {
-    const found = filtered.find(s => s.stop === name);
-    const share = found ? (found.boardings || 0) / total : 0;
-    return { name, share, route: found ? found.route : '' };
-  });
-
-  // Find overall max intensity for color scale
-  let maxIntensity = 0;
-  stopRows.forEach(r => hourTotals.forEach(t => { const v = t * r.share; if (v > maxIntensity) maxIntensity = v; }));
-  if (maxIntensity <= 0) maxIntensity = 1;
-
-  const html = [];
-  // Header
-  html.push('<div class="stop-hour-header">');
-  html.push('<div class="stop-hour-rowname" style="font-size:11px;color:#8b8ea5;font-weight:600;letter-spacing:0.04em">STOP</div>');
-  html.push('<div class="stop-hour-cells">');
-  hours.forEach(h => {
-    const label = (h === 0 || h === 12 || h === 6 || h === 18) ? String(h).padStart(2, '0') : '';
-    html.push('<div class="stop-hour-hourlabel">' + label + '</div>');
-  });
-  html.push('</div></div>');
-
-  // Rows
-  stopRows.forEach(r => {
-    const col = routeColorFor(r.route);
-    html.push('<div class="stop-hour-row">');
-    html.push('<div class="stop-hour-rowname" title="' + escapeHtml(r.name) + '">' + escapeHtml(shortStopName(r.name)) + '</div>');
-    html.push('<div class="stop-hour-cells">');
-    hours.forEach(h => {
-      const v = hourTotals[h] * r.share;
-      const intensity = Math.min(1, v / maxIntensity);
-      const alpha = 0.08 + intensity * 0.87;
-      const baseHex = col.hex;
-      // baseHex -> rgba with alpha
-      const rgb = hexToRgb(baseHex);
-      const bg = 'rgba(' + rgb.r + ',' + rgb.g + ',' + rgb.b + ',' + alpha.toFixed(2) + ')';
-      const tip = shortStopName(r.name) + ' @ ' + String(h).padStart(2, '0') + ':00 - approx ' + Math.round(v).toLocaleString() + ' boardings';
-      html.push('<div class="stop-hour-cell" style="background:' + bg + '" title="' + escapeHtml(tip) + '"></div>');
-    });
-    html.push('</div></div>');
-  });
-
-  // Legend
-  html.push('<div class="stop-hour-legend"><span>Low</span><span class="stop-hour-legend-grad"></span><span>High</span><span style="margin-left:16px;font-style:italic;color:#6f7290">Approximation: hourly totals x per-stop share</span></div>');
-
-  container.innerHTML = html.join('');
 }
 
-function hexToRgb(hex) {
-  const m = /^#?([a-f0-9]{2})([a-f0-9]{2})([a-f0-9]{2})$/i.exec(hex);
-  if (!m) return { r: 255, g: 255, b: 255 };
-  return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) };
+function buildStopHourMatrixChart(canvas) {
+  const ctx = canvas.getContext('2d');
+  const hourLabels = Array.from({ length: 24 }, (_, h) => String(h).padStart(2, '0') + ':00');
+
+  STOP_HOUR_CHART = new Chart(ctx, {
+    type: 'matrix',
+    data: {
+      datasets: [{
+        label: 'Boardings',
+        data: [],
+        borderWidth: 1,
+        borderColor: 'rgba(10,11,18,0.85)',
+        backgroundColor(c) {
+          const raw = c.raw;
+          const max = (c.dataset && c.dataset._max) || 1;
+          if (!raw) return 'rgba(139,116,209,0.06)';
+          const intensity = Math.min(1, raw.v / max);
+          const alpha = 0.08 + intensity * 0.87;
+          return 'rgba(139,116,209,' + alpha.toFixed(2) + ')';
+        },
+        width: (c) => {
+          const area = c.chart.chartArea;
+          return area ? Math.max(2, area.width / 24 - 2) : 18;
+        },
+        height: (c) => {
+          const area = c.chart.chartArea;
+          const rows = (c.dataset && c.dataset._rowCount) || 1;
+          return area ? Math.max(2, area.height / rows - 2) : 18;
+        },
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      layout: { padding: { top: 4, right: 4, bottom: 0, left: 4 } },
+      scales: {
+        x: {
+          type: 'category', position: 'top', offset: true,
+          labels: hourLabels,
+          grid: { display: false },
+          ticks: { color: '#8b8ea5', font: { size: 10, family: 'Inter', weight: '500' }, autoSkip: false, maxRotation: 0 },
+        },
+        y: {
+          type: 'category', offset: true,
+          labels: [],
+          grid: { display: false },
+          ticks: { color: '#c9cad8', font: { size: 12, family: 'Inter', weight: '500' } },
+        },
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          ...tooltipDefaults(),
+          callbacks: {
+            title: (items) => (items[0] && items[0].raw) ? items[0].raw.y : '',
+            label: (item) => {
+              const r = item.raw || {};
+              return r.x + ' \u2014 ' + Number(r.v || 0).toLocaleString() + ' boardings, ' + Number(r.a || 0).toLocaleString() + ' alightings';
+            },
+          },
+        },
+      },
+    },
+  });
+}
+
+// Renders the heatmap with real per-stop, per-hour counts (route + stop objects,
+// as returned by /api/stops/boardings — same shape as the Top Stops bar chart uses).
+async function renderStopHourMatrix(from, to, busFilter, topStops) {
+  const wrap = document.getElementById('stopHourMatrixWrap');
+  const emptyEl = document.getElementById('stopHourMatrixEmpty');
+  if (!STOP_HOUR_CHART) return;
+
+  if (!topStops || !topStops.length) {
+    if (wrap) wrap.style.display = 'none';
+    if (emptyEl) emptyEl.style.display = 'block';
+    return;
+  }
+  if (wrap) wrap.style.display = '';
+  if (emptyEl) emptyEl.style.display = 'none';
+
+  const params = { from, to };
+  if (busFilter) params.bus_id = busFilter;
+  const resp = await apiFetch('/api/stops/hourly', params);
+  const rawRows = (resp && resp.rows) || [];
+
+  // Aggregate real events into stop|displayHour buckets (converting the
+  // backend's UTC hour into the dashboard's display timezone).
+  const byStopHour = {};
+  rawRows.forEach(r => {
+    const dh = utcHourToDisplayHour(r.hour);
+    const key = r.stop + '|' + dh;
+    if (!byStopHour[key]) byStopHour[key] = { boardings: 0, alightings: 0 };
+    byStopHour[key].boardings += (r.boardings || 0);
+    byStopHour[key].alightings += (r.alightings || 0);
+  });
+
+  const stopLabels = topStops.map(s => shortStopName(s.stop) + ' \u00b7 Route ' + s.route);
+  const points = [];
+  let maxVal = 0;
+  topStops.forEach(s => {
+    const rowLabel = shortStopName(s.stop) + ' \u00b7 Route ' + s.route;
+    for (let h = 0; h < 24; h++) {
+      const cell = byStopHour[s.stop + '|' + h] || { boardings: 0, alightings: 0 };
+      if (cell.boardings > maxVal) maxVal = cell.boardings;
+      points.push({ x: String(h).padStart(2, '0') + ':00', y: rowLabel, v: cell.boardings, a: cell.alightings });
+    }
+  });
+  if (maxVal <= 0) maxVal = 1;
+
+  // Resize the canvas's container to fit the number of stop rows before the
+  // chart recalculates cell height, so rows stay readable instead of squashed.
+  if (wrap) wrap.style.height = Math.max(140, stopLabels.length * 40 + 50) + 'px';
+
+  const ds = STOP_HOUR_CHART.data.datasets[0];
+  ds.data = points;
+  ds._max = maxVal;
+  ds._rowCount = stopLabels.length;
+  STOP_HOUR_CHART.options.scales.y.labels = stopLabels;
+  STOP_HOUR_CHART.resize();
+  STOP_HOUR_CHART.update();
 }
 
 function exportRoutesCsv() {
