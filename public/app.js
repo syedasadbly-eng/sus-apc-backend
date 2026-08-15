@@ -1665,20 +1665,22 @@ function initOverviewAnalyticsCharts() {
   const pctx = document.getElementById('chartPassengerOn');
   if (pctx) {
     const pctxCtx = pctx.getContext('2d');
-    // Single flat white — one uniform colour, no gradient, no sheen.
-    const premiumGradient = '#ffffff';
+    // Distinct colour per bus — matches the palette used on the Hourly
+    // Passenger Flow chart: Bus 515 = blue, Bus 419 = amber.
+    const bus515Color = '#3b82f6';
+    const bus419Color = '#f59e0b';
     charts.passengerOn = new Chart(pctxCtx, {
       type: 'bar',
       data: {
         labels: Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2, '0')}:00`),
         datasets: [
           {
-            // First bus (515) — flat white.
+            // First bus (515) — blue.
             label: 'Bus 515',
             data: new Array(24).fill(0),
-            backgroundColor: premiumGradient,
-            hoverBackgroundColor: '#ffffff',
-            borderColor: '#ffffff',
+            backgroundColor: bus515Color,
+            hoverBackgroundColor: bus515Color,
+            borderColor: bus515Color,
             borderWidth: 0,
             borderRadius: 5,
             borderSkipped: false,
@@ -1686,12 +1688,12 @@ function initOverviewAnalyticsCharts() {
             categoryPercentage: 0.85,
           },
           {
-            // Second bus (419) — flat white, same as all other buses.
+            // Second bus (419) — amber.
             label: 'Bus 419',
             data: new Array(24).fill(0),
-            backgroundColor: premiumGradient,
-            hoverBackgroundColor: '#ffffff',
-            borderColor: '#ffffff',
+            backgroundColor: bus419Color,
+            hoverBackgroundColor: bus419Color,
+            borderColor: bus419Color,
             borderWidth: 0,
             borderRadius: 5,
             borderSkipped: false,
@@ -2489,7 +2491,7 @@ async function refreshPassengerOnChart() {
   const busFilterArg = busSel === 'all' ? null : busSel;
 
   let labels = [];
-  // One bucket per bus: '515' is the first (white) series, '419' the second (red).
+  // One bucket per bus: '515' is the first (blue) series, '419' the second (amber).
   let series515 = [];
   let series419 = [];
 
