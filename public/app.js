@@ -2459,6 +2459,7 @@ let _passengerOnBusFilter = 'all';
 // 'daily'   — 24 hourly bars for today (uses /api/hourly).
 // 'weekly'  — 7 daily bars for the last 7 days (uses /api/daily).
 // 'monthly' — ~30 daily bars for the last 30 days (uses /api/daily).
+// 'yearly'  — 12 monthly bars (Jan-Dec) for the current year (uses /api/daily).
 let _passengerOnPeriod = 'daily';
 
 // Shift a YYYY-MM-DD date string in DISPLAY_TZ by N days (negative = past).
@@ -2483,7 +2484,8 @@ function shortDateLabel(yyyymmdd) {
 }
 
 // Refresh the Passenger On Counts chart based on the current period + bus filter.
-// Daily → hourly bars from /api/hourly. Weekly/Monthly → daily bars from /api/daily.
+// Daily → hourly bars from /api/hourly. Weekly/Monthly/Yearly → daily bars from /api/daily,
+// aggregated to day (Weekly/Monthly) or month (Yearly) buckets.
 async function refreshPassengerOnChart() {
   if (!charts.passengerOn) return;
   const period = _passengerOnPeriod || 'daily';
@@ -2511,6 +2513,32 @@ async function refreshPassengerOnChart() {
         else series515[dh] += v;
       });
     }
+  } else if (period === 'yearly') {
+    // Current calendar year, Jan-Dec, zero-filled — same pattern used by
+    // the Hourly Passenger Flow chart's Year tab.
+    const year = new Date().getFullYear();
+    const from = `${year}-01-01`;
+    const to = displayDateStr();
+    const params = { from, to };
+    if (busFilterArg) params.bus_id = busFilterArg;
+    const apiData = await apiFetch('/api/daily', params);
+    const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const monthKeys = monthNames.map((_, i) => `${year}-${String(i + 1).padStart(2, '0')}`);
+    const totals515 = {}; const totals419 = {};
+    monthKeys.forEach(k => { totals515[k] = 0; totals419[k] = 0; });
+    if (apiData && Array.isArray(apiData.daily)) {
+      apiData.daily.forEach(row => {
+        if (busFilterArg && row.bus_id !== busFilterArg) return;
+        const monthKey = row.date.slice(0, 7);
+        if (!(monthKey in totals515)) return;
+        const v = row.total_in || 0;
+        if (String(row.bus_id) === '419') totals419[monthKey] += v;
+        else totals515[monthKey] += v;
+      });
+    }
+    labels = monthNames;
+    series515 = monthKeys.map(k => totals515[k]);
+    series419 = monthKeys.map(k => totals419[k]);
   } else {
     // Weekly = last 7 days incl. today; Monthly = last 30 days incl. today.
     const span = period === 'weekly' ? 7 : 30;
@@ -2556,11 +2584,13 @@ async function refreshPassengerOnChart() {
     daily: 'Passenger On Counts by Hour',
     weekly: 'Passenger On Counts — Last 7 Days',
     monthly: 'Passenger On Counts — Last 30 Days',
+    yearly: 'Passenger On Counts — This Year',
   };
   const subPeriod = {
     daily: 'Boardings only',
     weekly: 'Boardings only — last 7 days',
     monthly: 'Boardings only — last 30 days',
+    yearly: 'Boardings only — Jan–Dec this year',
   };
   if (titleEl) titleEl.textContent = titleByPeriod[period] || titleByPeriod.daily;
   if (subEl) {
