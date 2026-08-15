@@ -118,6 +118,16 @@ let liveHistory = [];      // Accumulated records for charts — [{ts, lineIn, l
 let hourlyBuckets = {};    // { 'HH:00': { boardings: N, alightings: N } }
 
 let currentView = 'overview';
+// The chartjs-plugin-datalabels <script> tag exposes window.ChartDataLabels
+// but (in this plugin's v2+ build) does NOT auto-register itself with
+// Chart.js — it must be registered explicitly. Registering it here makes it
+// available globally, so default it OFF everywhere and opt in per-chart via
+// `options.plugins.datalabels.display: true` (used by the MoM % change chart).
+if (typeof Chart !== 'undefined' && typeof ChartDataLabels !== 'undefined') {
+  Chart.register(ChartDataLabels);
+  Chart.defaults.set('plugins.datalabels', { display: false });
+}
+
 let charts = {};
 let maps = {};
 let mapMarkers = {};
@@ -1521,6 +1531,7 @@ function initMomChangeChart() {
           },
         },
         datalabels: {
+          display: true,
           color: '#c9cad8', font: { size: 11, weight: '600', family: 'Inter' }, anchor: 'end', align: (ctx) => ctx.parsed && ctx.parsed.y < 0 ? 'bottom' : 'top',
           formatter: (v) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`,
         },
