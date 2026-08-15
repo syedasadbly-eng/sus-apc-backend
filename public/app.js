@@ -3811,10 +3811,27 @@ async function exportToCSV(title, from, to, busId) {
 // totals, a comparison against the immediately preceding period of equal
 // length (MoM when `from`/`to` span a full calendar month, which is the
 // default), busiest day, peak hour, and a plain-English narrative.
+// True when [from, to] exactly spans one calendar month (used to pick a
+// real previous calendar month for comparison instead of an equal-length
+// lookback, which drifts when adjacent months have different day counts).
+function isFullCalendarMonth(from, to) {
+  const [fy, fm, fd] = from.split('-').map(Number);
+  const [ty, tm, td] = to.split('-').map(Number);
+  if (fd !== 1 || fy !== ty || fm !== tm) return false;
+  const lastDay = new Date(Date.UTC(fy, fm, 0)).getUTCDate();
+  return td === lastDay;
+}
+
 async function computeMonthlyValueSummaryData(from, to, clientName) {
   const spanDays = Math.round((new Date(to + 'T00:00:00Z') - new Date(from + 'T00:00:00Z')) / 86400000) + 1;
-  const prevTo = shiftDateStr(from, -1);
-  const prevFrom = shiftDateStr(prevTo, -(spanDays - 1));
+  let prevFrom, prevTo;
+  if (isFullCalendarMonth(from, to)) {
+    const prevRange = prevCalendarMonthRange(from);
+    prevFrom = prevRange.from; prevTo = prevRange.to;
+  } else {
+    prevTo = shiftDateStr(from, -1);
+    prevFrom = shiftDateStr(prevTo, -(spanDays - 1));
+  }
 
   const [current, previous] = await Promise.all([
     apiFetch('/api/summary', { period: from, to }),
@@ -3841,7 +3858,7 @@ async function computeMonthlyValueSummaryData(from, to, clientName) {
   const ph = current && current.peakHour;
   const peakHourLabel = ph && ph.hour != null ? `${String(utcHourToDisplayHour(ph.hour)).padStart(2, '0')}:00` : 'N/A';
 
-  const monthLabel = new Date(from + 'T00:00:00Z').toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+  const monthLabel = new Date(from + 'T00:00:00Z').toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' });
   const trendWord = pctChange == null ? '' : (pctChange >= 0 ? 'up' : 'down');
   const trendPhrase = pctChange == null
     ? 'no prior-period data is available yet for a direct comparison.'
