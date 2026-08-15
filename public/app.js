@@ -1986,71 +1986,76 @@ async function loadRidershipData() {
 
 }
 
-/** Yearly view: shows Jan-Dec totals for one selected calendar year, using
- *  the dedicated /api/ridership/yearly endpoint (server-side aggregation). */
+/** Yearly view: shows Jan-Dec totals for one selected calendar year. KPIs
+ *  reuse the same /api/summary endpoint as Daily/Weekly/Monthly (scoped to
+ *  the full year via the `to` override) so Peak Hour stays a real time-of-day
+ *  value; the month-by-month chart uses the dedicated /api/ridership/yearly
+ *  endpoint (server-side aggregation), and the Day-of-Week chart is built
+ *  from the same /api/daily rows used across every other view. */
 async function loadYearlyRidershipData(busId) {
   const year = Number(document.getElementById('ridershipYear')?.value) || new Date().getFullYear();
   const currentYear = new Date().getFullYear();
-  const to = year < currentYear ? `${year}-12-31` : displayDateStr(new Date());
   const from = `${year}-01-01`;
+  const to = year < currentYear ? `${year}-12-31` : displayDateStr(new Date());
+  const windowDays = Math.max(1, Math.round((new Date(to + 'T00:00:00Z') - new Date(from + 'T00:00:00Z')) / 86400000) + 1);
 
-  const data = await apiFetch('/api/ridership/yearly', { year, bus_id: busId !== 'all' ? busId : null });
-
-  if (data && Array.isArray(data.months)) {
-    const months = data.months;
-    const monthsWithData = months.filter(m => m.days_count > 0).length;
-
-    // KPIs
-    const totalBoardings = data.totals ? data.totals.boardings : months.reduce((s, m) => s + m.boardings, 0);
-    const totalDays = months.reduce((s, m) => s + m.days_count, 0);
-    setKPI('ridership-kpi-total', totalBoardings > 0 ? totalBoardings.toLocaleString() : '0');
-    const avgPerDay = totalDays > 0 ? Math.round(totalBoardings / totalDays) : 0;
+  // --- KPIs ---
+  const summary = await apiFetch('/api/summary', { period: from, to });
+  if (summary && summary.totals) {
+    const t = summary.totals;
+    setKPI('ridership-kpi-total', t.total_boardings > 0 ? t.total_boardings.toLocaleString() : '0');
+    const avgPerDay = windowDays > 0 ? Math.round(t.total_boardings / windowDays) : 0;
     setKPI('ridership-kpi-avg', avgPerDay > 0 ? avgPerDay.toLocaleString() : '0');
-    const busCountEl = document.getElementById('ridership-kpi-buses');
-    if (busCountEl) {
-      // Bus count isn't returned by the yearly endpoint; reuse /api/buses length as a proxy.
-      apiFetch('/api/buses').then(bd => {
-        if (bd && Array.isArray(bd.buses)) setKPI('ridership-kpi-buses', bd.buses.length || '0');
-      });
+    setKPI('ridership-kpi-buses', t.bus_count > 0 ? t.bus_count : '0');
+    const ph = summary.peakHour;
+    if (ph && ph.total > 0) {
+      setKPI('ridership-kpi-peak', `${String(utcHourToDisplayHour(ph.hour)).padStart(2, '0')}:00`);
+      const peakSub = document.getElementById('ridership-kpi-peak-sub');
+      if (peakSub) peakSub.textContent = `${ph.total.toLocaleString()} boardings at peak`;
+    } else {
+      setKPI('ridership-kpi-peak', '\u2014');
     }
-    let peakMonth = null, peakVal = 0;
-    months.forEach(m => { if (m.boardings > peakVal) { peakVal = m.boardings; peakMonth = m.month; } });
-    setKPI('ridership-kpi-peak', peakMonth || '\u2014');
-    const peakSub = document.getElementById('ridership-kpi-peak-sub');
-    if (peakSub) peakSub.textContent = peakVal > 0 ? `${peakVal.toLocaleString()} boardings in ${peakMonth}` : 'no data yet';
     const totalSub = document.getElementById('ridership-kpi-total-sub');
     if (totalSub) totalSub.textContent = `Jan - Dec ${year}`;
     const avgSub = document.getElementById('ridership-kpi-avg-sub');
-    if (avgSub) avgSub.textContent = `over ${totalDays} day${totalDays !== 1 ? 's' : ''} of data (${monthsWithData}/12 months)`;
-
-    renderRidershipChartsYearly(months, year);
-  } else {
-    // Fallback: derive from /api/daily if the dedicated endpoint is unavailable
-    // (e.g. an older backend deploy that hasn't picked up this change yet).
-    const dailyData = await apiFetch('/api/daily', { from, to, bus_id: busId !== 'all' ? busId : null });
-    if (dailyData && dailyData.daily) {
-      const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-      const months = monthNames.map((name, i) => ({ month: name, month_num: i + 1, boardings: 0, alightings: 0, days_count: 0 }));
-      const seenDates = new Set();
-      dailyData.daily.forEach(r => {
-        const m = Number(r.date.slice(5, 7)) - 1;
-        months[m].boardings += r.total_in;
-        months[m].alightings += r.total_out;
-        seenDates.add(r.date);
-      });
-      seenDates.forEach(d => { months[Number(d.slice(5, 7)) - 1].days_count++; });
-      const totalBoardings = months.reduce((s, m) => s + m.boardings, 0);
-      setKPI('ridership-kpi-total', totalBoardings > 0 ? totalBoardings.toLocaleString() : '0');
-      const totalDays = seenDates.size;
-      setKPI('ridership-kpi-avg', totalDays > 0 ? Math.round(totalBoardings / totalDays).toLocaleString() : '0');
-      const totalSub = document.getElementById('ridership-kpi-total-sub');
-      if (totalSub) totalSub.textContent = `Jan - Dec ${year}`;
-      renderRidershipChartsYearly(months, year);
-    } else {
-      setKPI('ridership-kpi-total', '\u2014');
-      setKPI('ridership-kpi-avg', '\u2014');
-      setKPI('ridership-kpi-peak', '\u2014');
+    if (avgSub) {
+      const dataDaysNote = (t.days_count && t.days_count < windowDays) ? ` (data on ${t.days_count}/${windowDays} days)` : '';
+      avgSub.textContent = `over ${windowDays} day${windowDays !== 1 ? 's' : ''}${dataDaysNote}`;
     }
+  } else {
+    updateRidershipKPIsFromLive(from, to);
+  }
+
+  // --- Day-of-week chart: same per-day source every other view uses ---
+  const dailyData = await apiFetch('/api/daily', { from, to, bus_id: busId !== 'all' ? busId : null });
+  const byDate = {};
+  if (dailyData && dailyData.daily) {
+    dailyData.daily.forEach(r => {
+      if (!byDate[r.date]) byDate[r.date] = { boardings: 0, alightings: 0 };
+      byDate[r.date].boardings += r.total_in;
+      byDate[r.date].alightings += r.total_out;
+    });
+  }
+  updateDayOfWeekChart(byDate);
+
+  // --- Ridership Trend + Boardings vs Alightings: Jan-Dec month totals ---
+  const yearlyData = await apiFetch('/api/ridership/yearly', { year, bus_id: busId !== 'all' ? busId : null });
+  if (yearlyData && Array.isArray(yearlyData.months)) {
+    renderRidershipChartsYearly(yearlyData.months, year);
+  } else if (dailyData && dailyData.daily) {
+    // Fallback: derive month totals from /api/daily if the dedicated endpoint
+    // is unavailable (e.g. an older backend deploy that hasn't redeployed yet).
+    const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const months = monthNames.map((name, i) => ({ month: name, month_num: i + 1, boardings: 0, alightings: 0, days_count: 0 }));
+    const seenByMonth = monthNames.map(() => new Set());
+    dailyData.daily.forEach(r => {
+      const m = Number(r.date.slice(5, 7)) - 1;
+      months[m].boardings += r.total_in;
+      months[m].alightings += r.total_out;
+      seenByMonth[m].add(r.date);
+    });
+    months.forEach((m, i) => { m.days_count = seenByMonth[i].size; });
+    renderRidershipChartsYearly(months, year);
   }
 }
 
@@ -2076,13 +2081,6 @@ function renderRidershipChartsYearly(months, year) {
   const monthsWithData = months.filter(m => m.days_count > 0).length;
   setSubtitle('ridershipTrendSubtitle', `${year} boardings by month - ${monthsWithData}/12 month${monthsWithData !== 1 ? 's' : ''} with data`);
   setSubtitle('boardAlightSubtitle', `${year} boardings vs alightings by month`);
-
-  // Day-of-week chart doesn't apply to a whole-year monthly view; zero it out
-  // rather than showing stale data from a previous tab.
-  if (charts.dayOfWeek) {
-    charts.dayOfWeek.data.datasets[0].data = [0, 0, 0, 0, 0, 0, 0];
-    charts.dayOfWeek.update('active');
-  }
 }
 
 /** Populate ridership KPIs from live MQTT state */
@@ -2222,6 +2220,13 @@ function renderRidershipCharts(rows, viewMode, fromDate, now) {
   }
 
   // Day-of-week chart - aggregate by UNIQUE date (not per-bus-row).
+  updateDayOfWeekChart(byDate);
+}
+
+/** Shared by every Ridership view (Daily/Weekly/Monthly/Yearly): averages
+ *  boardings per weekday across a map of { 'YYYY-MM-DD': { boardings, alightings } }. */
+function updateDayOfWeekChart(byDate) {
+  if (!charts.dayOfWeek) return;
   const dowTotals = [0,0,0,0,0,0,0];
   const dowCounts = [0,0,0,0,0,0,0];
   Object.entries(byDate).forEach(([dateStr, v]) => {
