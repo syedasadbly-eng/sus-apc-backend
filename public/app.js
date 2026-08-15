@@ -1388,6 +1388,42 @@ async function refreshHourlyFlowChart() {
     return;
   }
 
+  if (hourlyFlowPeriod === 'year') {
+    // --- YEAR: one bar per calendar month (Jan-Dec), zero-filled ---
+    const year = now.getFullYear();
+    const from = `${year}-01-01`;
+    const to = displayDateStr(now);
+    const dailyData = await apiFetch('/api/daily', { from, to });
+    const perBus = { '515': {}, '419': {} };
+    if (dailyData && dailyData.daily) {
+      dailyData.daily.forEach(r => {
+        const bus = perBus[r.bus_id] ? r.bus_id : null;
+        if (!bus) return;
+        const monthKey = r.date.slice(0, 7); // YYYY-MM
+        if (!perBus[bus][monthKey]) perBus[bus][monthKey] = { boardings: 0, alightings: 0 };
+        perBus[bus][monthKey].boardings += r.total_in || 0;
+        perBus[bus][monthKey].alightings += r.total_out || 0;
+      });
+    }
+    const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const monthKeys = monthNames.map((_, i) => `${year}-${String(i + 1).padStart(2, '0')}`);
+    const b515 = monthKeys.map(k => perBus['515'][k]?.boardings || 0);
+    const a515 = monthKeys.map(k => perBus['515'][k]?.alightings || 0);
+    const b419 = monthKeys.map(k => perBus['419'][k]?.boardings || 0);
+    const a419 = monthKeys.map(k => perBus['419'][k]?.alightings || 0);
+    const totalBoardings = b515.map((v, i) => v + b419[i]);
+
+    setHourlyFlowAxis('Month');
+    charts.hourlyFlow.data.labels = monthNames;
+    charts.hourlyFlow.data.datasets[0].data = b515;
+    charts.hourlyFlow.data.datasets[1].data = a515;
+    charts.hourlyFlow.data.datasets[2].data = b419;
+    charts.hourlyFlow.data.datasets[3].data = a419;
+    charts.hourlyFlow.data.datasets[4].data = totalBoardings;
+    charts.hourlyFlow.update('active');
+    return;
+  }
+
   // --- WEEK / MONTH: one bar per day ---
   const dayCount = hourlyFlowPeriod === 'month' ? 30 : 7;
   const dates = [];
