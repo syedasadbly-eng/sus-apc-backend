@@ -492,6 +492,26 @@
           </div>
         </div>
       </div>
+
+      <!-- ===== Monthly Boardings — % Change (month-over-month) ===== -->
+      <div class="chart-grid" style="margin-top:var(--space-4)">
+        <div class="chart-panel">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Monthly Boardings — % Change</div>
+              <div class="chart-subtitle" id="momChangeSubtitle">Month-over-month change in total boardings, both buses combined. Green = growth, red = decline.</div>
+            </div>
+          </div>
+          <div class="chart-body" style="position:relative">
+            <canvas id="chartMomChange" height="260"></canvas>
+            <div id="momChangeEmpty" class="stop-empty-state" style="display:none">
+              <div class="empty-icon"><i data-lucide="trending-up" style="width:28px;height:28px"></i></div>
+              <div class="empty-title">Not enough history yet</div>
+              <div class="empty-sub">Once at least two full months of data are recorded, month-over-month change will appear here.</div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- ===== LIVE MAP VIEW ===== -->

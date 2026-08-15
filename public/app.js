@@ -1247,7 +1247,7 @@ function animateValue(id, start, end, duration, suffix) {
 // ============================================
 
 function initOverview() {
-  initOverviewMap(); renderFleetList(); initHourlyFlowChart(); initOverviewAnalyticsCharts(); initPeriodTabs();
+  initOverviewMap(); renderFleetList(); initHourlyFlowChart(); initOverviewAnalyticsCharts(); initPeriodTabs(); initMomChangeChart();
 }
 
 function initOverviewMap() {
@@ -1475,6 +1475,127 @@ function setHourlyFlowAxis(xTitle) {
   if (opts && opts.scales && opts.scales.x) {
     opts.scales.x.title = { display: true, text: xTitle, color: '#9094b2', font: { size: 13, weight: '600', family: 'Inter' }, padding: { top: 6 } };
   }
+}
+
+// ==========================================
+// MONTHLY BOARDINGS — % CHANGE (month-over-month)
+// Bar chart: one bar per calendar month showing % change in total
+// boardings (both buses combined) vs the previous month. Green = growth,
+// red = decline — matches the Net Load convention on the Ridership table.
+// The first month with any data has no prior month to compare against, so
+// it's excluded from the chart entirely.
+// ==========================================
+function initMomChangeChart() {
+  const ctx = document.getElementById('chartMomChange');
+  if (!ctx) return;
+  charts.momChange = new Chart(ctx.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: [],
+      datasets: [{
+        label: '% change vs previous month',
+        data: [],
+        backgroundColor: [],
+        borderRadius: 6,
+        borderSkipped: false,
+        barPercentage: 0.6,
+        categoryPercentage: 0.7,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: true, aspectRatio: 3.4,
+      animation: { duration: 800, easing: 'easeOutQuart' },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          ...tooltipDefaults(),
+          callbacks: {
+            label: (item) => {
+              const raw = item.raw || {};
+              const sign = item.parsed.y >= 0 ? '+' : '';
+              return [
+                `${sign}${item.parsed.y.toFixed(1)}% vs ${raw.prevLabel || 'previous month'}`,
+                `${raw.current?.toLocaleString() ?? '—'} boardings (was ${raw.previous?.toLocaleString() ?? '—'})`,
+              ];
+            },
+          },
+        },
+        datalabels: {
+          color: '#c9cad8', font: { size: 11, weight: '600', family: 'Inter' }, anchor: 'end', align: (ctx) => ctx.parsed && ctx.parsed.y < 0 ? 'bottom' : 'top',
+          formatter: (v) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`,
+        },
+      },
+      scales: {
+        x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#b5b8d0', font: { size: 12, weight: '500' }, padding: 8 } },
+        y: {
+          grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#b5b8d0', font: { size: 12, weight: '500' }, padding: 8, callback: v => v + '%' },
+          title: { display: true, text: '% change (MoM)', color: '#9094b2', font: { size: 12, weight: '600' }, padding: { bottom: 6 } },
+        },
+      },
+    },
+  });
+  refreshMomChangeChart();
+  setInterval(() => refreshMomChangeChart(), 60000);
+}
+
+async function refreshMomChangeChart() {
+  if (!charts.momChange) return;
+  const now = new Date();
+  // Pull the last 13 full calendar months so we always have a prior month
+  // to diff the earliest bar against.
+  const from = new Date(now.getFullYear(), now.getMonth() - 12, 1);
+  const fromStr = `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, '0')}-01`;
+  const toStr = displayDateStr(now);
+  const dailyData = await apiFetch('/api/daily', { from: fromStr, to: toStr });
+  const byMonth = {};
+  if (dailyData && dailyData.daily) {
+    dailyData.daily.forEach(r => {
+      const monthKey = r.date.slice(0, 7); // YYYY-MM
+      byMonth[monthKey] = (byMonth[monthKey] || 0) + (r.total_in || 0);
+    });
+  }
+  const monthKeys = Object.keys(byMonth).sort();
+  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const fmtLabel = (k) => { const [y, m] = k.split('-'); return `${monthNames[Number(m) - 1]} ${y}`; };
+
+  const labels = [];
+  const pctData = [];
+  const colors = [];
+  const rawPoints = [];
+  for (let i = 1; i < monthKeys.length; i++) {
+    const prevKey = monthKeys[i - 1];
+    const curKey = monthKeys[i];
+    const prev = byMonth[prevKey];
+    const cur = byMonth[curKey];
+    if (!prev) continue; // avoid divide-by-zero / meaningless % on an empty prior month
+    const pct = ((cur - prev) / prev) * 100;
+    labels.push(fmtLabel(curKey));
+    pctData.push(Math.round(pct * 10) / 10);
+    colors.push(pct >= 0 ? 'rgba(34, 197, 94, 0.85)' : 'rgba(239, 68, 68, 0.85)');
+    rawPoints.push({ current: cur, previous: prev, prevLabel: fmtLabel(prevKey) });
+  }
+
+  const emptyState = document.getElementById('momChangeEmpty');
+  if (labels.length === 0) {
+    if (emptyState) emptyState.style.display = 'flex';
+  } else if (emptyState) {
+    emptyState.style.display = 'none';
+  }
+
+  // Chart.js bar charts want plain numbers for the y-scale; raw boardings
+  // metadata for tooltips is kept in the parallel rawPoints array instead.
+  charts.momChange.data.labels = labels;
+  charts.momChange.data.datasets[0].data = pctData;
+  charts.momChange.data.datasets[0].backgroundColor = colors;
+  charts.momChange.options.plugins.tooltip.callbacks.label = (item) => {
+    const raw = rawPoints[item.dataIndex] || {};
+    const sign = item.parsed.y >= 0 ? '+' : '';
+    return [
+      `${sign}${item.parsed.y.toFixed(1)}% vs ${raw.prevLabel || 'previous month'}`,
+      `${raw.current?.toLocaleString() ?? '—'} boardings (was ${raw.previous?.toLocaleString() ?? '—'})`,
+    ];
+  };
+  charts.momChange.update('active');
 }
 
 // ==========================================
