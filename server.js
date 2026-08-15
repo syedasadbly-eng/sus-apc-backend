@@ -74,7 +74,10 @@ const BUS_STATIC_LOCATIONS = {
 const DEPOT_FALLBACK = { lat: 44.02302, lng: -92.46657, label: 'Mayo Clinic Rochester (downtown)' };
 
 // Persisted last-known GPS file — survives restarts/redeploys.
-const GPS_CACHE_PATH = process.env.GPS_CACHE_PATH || path.join(__dirname, 'gps-cache.json');
+// Defaults to living alongside the SQLite DB (same directory as DB_PATH) so it
+// lands on the persistent /data volume in production instead of the app's
+// ephemeral container filesystem, which gets wiped on every redeploy.
+const GPS_CACHE_PATH = process.env.GPS_CACHE_PATH || path.join(path.dirname(DB_PATH), 'gps-cache.json');
 let lastKnownGpsByBus = {};
 try {
   if (fs.existsSync(GPS_CACHE_PATH)) {
