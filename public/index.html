@@ -982,6 +982,11 @@
       </div>
 
       <div class="report-grid">
+        <div class="report-card" data-report="monthly-value-summary">
+          <div class="report-icon amber"><i data-lucide="award"></i></div>
+          <div class="report-name">Monthly Value Summary</div>
+          <div class="report-desc">Executive-ready monthly ridership summary with month-over-month trend, highlights, and a plain-English narrative — built to share directly with clients and stakeholders.</div>
+        </div>
         <div class="report-card" data-report="daily-summary">
           <div class="report-icon blue"><i data-lucide="calendar"></i></div>
           <div class="report-name">Daily Summary</div>
@@ -1027,6 +1032,7 @@
             <div class="filter-group">
               <span class="filter-label">Report Type</span>
               <select class="filter-select" id="reportType">
+                <option>Monthly Value Summary</option>
                 <option>Daily Summary</option>
                 <option>Weekly Analysis</option>
                 <option>Monthly Performance</option>
@@ -1034,6 +1040,10 @@
                 <option>Fleet Health</option>
                 <option>Custom Report</option>
               </select>
+            </div>
+            <div class="filter-group" id="reportClientNameGroup">
+              <span class="filter-label">Client / Site Name</span>
+              <input type="text" class="filter-input" id="reportClientName" placeholder="e.g. Mayo Clinic Shuttle" style="min-width:180px">
             </div>
             <div class="filter-group">
               <span class="filter-label">From</span>

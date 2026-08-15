@@ -3387,10 +3387,21 @@ async function initReports() {
   // Map report-card to a sensible default date range
   const cardRangeFor = (key) => {
     const end = latestDataDate;
+    if (key === 'monthly-value-summary') return prevCalendarMonthRange(end);
     if (key === 'weekly-analysis') return { from: shiftDateStr(end, -6), to: end };
     if (key === 'monthly-performance') return { from: shiftDateStr(end, -29), to: end };
     if (key === 'custom-report') return null; // keep current range
     return { from: end, to: end };
+  };
+
+  // Monthly Value Summary is a fleet-wide, client-facing report by design —
+  // disable the per-bus filter while it's selected so the numbers in the
+  // narrative always match the headline totals.
+  const busGroup = reportBus ? reportBus.closest('.filter-group') : null;
+  const syncBusFilterState = (key) => {
+    const isMvs = key === 'monthly-value-summary';
+    if (reportBus) { reportBus.disabled = isMvs; if (isMvs) reportBus.value = ''; }
+    if (busGroup) busGroup.style.opacity = isMvs ? '0.45' : '1';
   };
 
   document.querySelectorAll('.report-card').forEach(card => {
@@ -3406,14 +3417,21 @@ async function initReports() {
         if (reportFrom) reportFrom.value = range.from;
         if (reportTo) reportTo.value = range.to;
       }
+      syncBusFilterState(key);
       document.querySelectorAll('.report-card').forEach(c => c.classList.remove('report-card-selected'));
       card.classList.add('report-card-selected');
     });
   });
 
-  // Pre-select the default card
-  const preselect = document.querySelector('.report-card[data-report="daily-summary"]');
-  if (preselect) preselect.classList.add('report-card-selected');
+  // Pre-select the default card — Monthly Value Summary, since it's the
+  // report most clients want to see first.
+  const preselect = document.querySelector('.report-card[data-report="monthly-value-summary"]');
+  if (preselect) {
+    preselect.classList.add('report-card-selected');
+    const range = cardRangeFor('monthly-value-summary');
+    if (range) { if (reportFrom) reportFrom.value = range.from; if (reportTo) reportTo.value = range.to; }
+    syncBusFilterState('monthly-value-summary');
+  }
 
   if (generateBtn) {
     generateBtn.addEventListener('click', async () => {
@@ -3422,6 +3440,8 @@ async function initReports() {
       let from = reportFrom.value;
       let to = reportTo.value;
       const busId = reportBus ? reportBus.value : '';
+      const clientNameEl = document.getElementById('reportClientName');
+      const clientName = clientNameEl ? clientNameEl.value.trim() : '';
 
       if (!from || !to) {
         if (reportStatus) reportStatus.textContent = 'Please choose both From and To dates.';
@@ -3437,7 +3457,11 @@ async function initReports() {
       const busLabel = busId ? ', Bus ' + busId : '';
       if (reportStatus) reportStatus.textContent = 'Generating ' + format.toUpperCase() + ' for ' + type + ' (' + from + ' to ' + to + busLabel + ')...';
       try {
-        if (format === 'pdf') await exportToPDF(type, from, to, busId);
+        if (type === 'Monthly Value Summary') {
+          if (format === 'pdf') await exportMonthlyValueSummaryPDF(from, to, clientName);
+          else if (format === 'excel') await exportMonthlyValueSummaryExcel(from, to, clientName);
+          else await exportMonthlyValueSummaryCSV(from, to, clientName);
+        } else if (format === 'pdf') await exportToPDF(type, from, to, busId);
         else if (format === 'excel') await exportToExcel(type, from, to, busId);
         else await exportToCSV(type, from, to, busId);
         if (reportStatus) reportStatus.textContent = 'Downloaded ' + format.toUpperCase() + ' for ' + from + ' to ' + to + (busId ? ' (Bus ' + busId + ')' : '') + '.';
@@ -3449,6 +3473,14 @@ async function initReports() {
       }
     });
   }
+}
+
+// Full previous calendar month relative to a YYYY-MM-DD reference date.
+function prevCalendarMonthRange(dateStr) {
+  const [y, m] = dateStr.split('-').map(Number);
+  const lastOfPrevMonth = new Date(Date.UTC(y, m - 1, 0));
+  const firstOfPrevMonth = new Date(Date.UTC(lastOfPrevMonth.getUTCFullYear(), lastOfPrevMonth.getUTCMonth(), 1));
+  return { from: firstOfPrevMonth.toISOString().slice(0, 10), to: lastOfPrevMonth.toISOString().slice(0, 10) };
 }
 
 // Add/subtract days from a YYYY-MM-DD string
@@ -3771,6 +3803,163 @@ async function exportToCSV(title, from, to, busId) {
   const a = document.createElement('a'); a.href = url; a.download = `SUS_Data_${from}_${to || new Date().toISOString().slice(0,10)}.csv`; a.click(); URL.revokeObjectURL(url);
 }
 
+// ============================================
+// MONTHLY VALUE SUMMARY — client-facing narrative report
+// ============================================
+
+// Builds the full dataset for a Monthly Value Summary report: current-period
+// totals, a comparison against the immediately preceding period of equal
+// length (MoM when `from`/`to` span a full calendar month, which is the
+// default), busiest day, peak hour, and a plain-English narrative.
+async function computeMonthlyValueSummaryData(from, to, clientName) {
+  const spanDays = Math.round((new Date(to + 'T00:00:00Z') - new Date(from + 'T00:00:00Z')) / 86400000) + 1;
+  const prevTo = shiftDateStr(from, -1);
+  const prevFrom = shiftDateStr(prevTo, -(spanDays - 1));
+
+  const [current, previous] = await Promise.all([
+    apiFetch('/api/summary', { period: from, to }),
+    apiFetch('/api/summary', { period: prevFrom, to: prevTo }).catch(() => null),
+  ]);
+
+  const curTotals = (current && current.totals) || {};
+  const prevTotals = (previous && previous.totals) || {};
+  const curBoardings = curTotals.total_boardings || 0;
+  const prevBoardings = prevTotals.total_boardings || 0;
+  const hasPrev = !!(previous && previous.totals && prevBoardings > 0);
+  const pctChange = hasPrev ? ((curBoardings - prevBoardings) / prevBoardings) * 100 : null;
+
+  const breakdown = (current && current.dailyBreakdown) || [];
+  let busiestDay = null;
+  breakdown.forEach(d => {
+    const val = d.boardings || 0;
+    if (!busiestDay || val > busiestDay.value) busiestDay = { date: d.date, value: val };
+  });
+
+  const daysCount = curTotals.days_count || breakdown.length || spanDays;
+  const avgDaily = daysCount ? curBoardings / daysCount : 0;
+
+  const ph = current && current.peakHour;
+  const peakHourLabel = ph && ph.hour != null ? `${String(utcHourToDisplayHour(ph.hour)).padStart(2, '0')}:00` : 'N/A';
+
+  const monthLabel = new Date(from + 'T00:00:00Z').toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+  const trendWord = pctChange == null ? '' : (pctChange >= 0 ? 'up' : 'down');
+  const trendPhrase = pctChange == null
+    ? 'no prior-period data is available yet for a direct comparison.'
+    : `${trendWord} ${Math.abs(pctChange).toFixed(1)}% compared with the previous period (${prevFrom} to ${prevTo}).`;
+
+  const narrative = `${clientName ? clientName + '’s' : 'Your'} shuttle service carried ${curBoardings.toLocaleString()} passengers in ${monthLabel}, ${trendPhrase} `
+    + `The busiest day was ${busiestDay ? busiestDay.date : 'N/A'}${busiestDay ? ' with ' + busiestDay.value.toLocaleString() + ' boardings' : ''}, and the busiest hour of the day was typically around ${peakHourLabel}. `
+    + `On average, the service moved ${Math.round(avgDaily).toLocaleString()} people per day across ${daysCount} day${daysCount === 1 ? '' : 's'} of operation.`;
+
+  return {
+    from, to, clientName, monthLabel,
+    curTotals, prevTotals, curBoardings, prevBoardings, pctChange, hasPrev,
+    prevFrom, prevTo, busiestDay, daysCount, avgDaily, peakHourLabel, breakdown, narrative,
+  };
+}
+
+async function exportMonthlyValueSummaryPDF(from, to, clientName) {
+  const d = await computeMonthlyValueSummaryData(from, to, clientName);
+  const { jsPDF } = window.jspdf; const doc = new jsPDF();
+
+  doc.setFillColor(15,17,23); doc.rect(0,0,210,40,'F');
+  doc.setTextColor(255,255,255); doc.setFontSize(18); doc.text('Smart Urban Sensing Ltd',14,18);
+  doc.setFontSize(12); doc.text(`Monthly Value Summary — ${d.monthLabel}`,14,28);
+  doc.setFontSize(9);
+  doc.text(`${d.clientName ? 'Prepared for: ' + d.clientName + '  |  ' : ''}Generated: ${new Date().toLocaleString('en-GB')}`,14,35);
+
+  doc.setTextColor(0,0,0); doc.setFontSize(14); doc.text('Summary',14,52);
+  doc.setFontSize(10.5);
+  const narrativeLines = doc.splitTextToSize(d.narrative, 182);
+  doc.text(narrativeLines,14,60);
+  let y = 60 + narrativeLines.length * 5.5 + 8;
+
+  doc.setFontSize(14); doc.text('Highlights',14,y); y += 6;
+  const changeCell = d.pctChange == null ? 'N/A (no prior period)' : `${d.pctChange >= 0 ? '+' : ''}${d.pctChange.toFixed(1)}% vs previous period`;
+  doc.autoTable({ startY:y, head:[['Metric','This Period','Previous Period']], body:[
+    ['Total Boardings', (d.curBoardings||0).toLocaleString(), d.hasPrev ? d.prevBoardings.toLocaleString() : 'N/A'],
+    ['Total Alightings', (d.curTotals.total_alightings||0).toLocaleString(), d.hasPrev ? (d.prevTotals.total_alightings||0).toLocaleString() : 'N/A'],
+    ['Month-over-Month Change', changeCell, ''],
+    ['Busiest Day', d.busiestDay ? `${d.busiestDay.date} (${d.busiestDay.value.toLocaleString()} boardings)` : 'N/A', ''],
+    ['Typical Peak Hour', d.peakHourLabel, ''],
+    ['Avg Daily Boardings', Math.round(d.avgDaily).toLocaleString(), ''],
+    ['Peak Onboard (single trip)', String(d.curTotals.peak_onboard || 0), ''],
+    ['Avg Occupancy', (d.curTotals.avg_occupancy != null ? d.curTotals.avg_occupancy.toFixed(1) : '0.0') + '%', ''],
+  ], theme:'grid', headStyles:{fillColor:[245,158,11]} });
+
+  if (d.breakdown && d.breakdown.length) {
+    doc.setFontSize(14); doc.text('Daily Breakdown',14,doc.lastAutoTable.finalY+14);
+    doc.autoTable({ startY:doc.lastAutoTable.finalY+20, head:[['Date','Boardings','Alightings','Avg Occupancy']],
+      body: d.breakdown.map(r => [r.date, r.boardings||0, r.alightings||0, (r.avg_occ!=null ? r.avg_occ.toFixed(1) : '0.0') + '%']),
+      theme:'grid', headStyles:{fillColor:[245,158,11]} });
+  }
+
+  const pc = doc.internal.getNumberOfPages();
+  for (let i=1;i<=pc;i++) { doc.setPage(i); doc.setFontSize(8); doc.setTextColor(150); doc.text('Smart Urban Sensing Ltd — Monthly Value Summary',14,287); doc.text(`Page ${i}/${pc}`,180,287); }
+  doc.save(`SUS_MonthlyValueSummary_${from}_${to}.pdf`);
+}
+
+async function exportMonthlyValueSummaryExcel(from, to, clientName) {
+  const d = await computeMonthlyValueSummaryData(from, to, clientName);
+  const wb = XLSX.utils.book_new();
+  const changeCell = d.pctChange == null ? 'N/A (no prior period)' : `${d.pctChange >= 0 ? '+' : ''}${d.pctChange.toFixed(1)}%`;
+
+  const ws1 = XLSX.utils.aoa_to_sheet([
+    ['Smart Urban Sensing Ltd — Monthly Value Summary'],
+    [`${d.monthLabel}`],
+    d.clientName ? ['Prepared for:', d.clientName] : [],
+    ['Generated:', new Date().toLocaleString('en-GB')],
+    [],
+    ['Summary'],
+    [d.narrative],
+    [],
+    ['Metric','This Period','Previous Period'],
+    ['Total Boardings', d.curBoardings||0, d.hasPrev ? d.prevBoardings : ''],
+    ['Total Alightings', d.curTotals.total_alightings||0, d.hasPrev ? (d.prevTotals.total_alightings||0) : ''],
+    ['Month-over-Month Change', changeCell, ''],
+    ['Busiest Day', d.busiestDay ? d.busiestDay.date : 'N/A', ''],
+    ['Busiest Day Boardings', d.busiestDay ? d.busiestDay.value : '', ''],
+    ['Typical Peak Hour', d.peakHourLabel, ''],
+    ['Avg Daily Boardings', Math.round(d.avgDaily), ''],
+    ['Peak Onboard (single trip)', d.curTotals.peak_onboard || 0, ''],
+    ['Avg Occupancy %', d.curTotals.avg_occupancy != null ? d.curTotals.avg_occupancy.toFixed(1) : '0.0', ''],
+  ].filter(r => r.length));
+  XLSX.utils.book_append_sheet(wb, ws1, 'Summary');
+
+  if (d.breakdown && d.breakdown.length) {
+    const ws2 = XLSX.utils.aoa_to_sheet([
+      ['Date','Boardings','Alightings','Avg Occupancy %'],
+      ...d.breakdown.map(r => [r.date, r.boardings||0, r.alightings||0, r.avg_occ!=null ? Number(r.avg_occ.toFixed(1)) : 0])
+    ]);
+    XLSX.utils.book_append_sheet(wb, ws2, 'Daily Breakdown');
+  }
+
+  XLSX.writeFile(wb, `SUS_MonthlyValueSummary_${from}_${to}.xlsx`);
+}
+
+async function exportMonthlyValueSummaryCSV(from, to, clientName) {
+  const d = await computeMonthlyValueSummaryData(from, to, clientName);
+  const changeCell = d.pctChange == null ? 'N/A' : `${d.pctChange >= 0 ? '+' : ''}${d.pctChange.toFixed(1)}%`;
+  const lines = [
+    `Smart Urban Sensing Ltd - Monthly Value Summary`,
+    `${d.monthLabel}${d.clientName ? ' - Prepared for: ' + d.clientName : ''}`,
+    `Generated: ${new Date().toLocaleString('en-GB')}`,
+    '',
+    'Metric,This Period,Previous Period',
+    `Total Boardings,${d.curBoardings||0},${d.hasPrev ? d.prevBoardings : ''}`,
+    `Total Alightings,${d.curTotals.total_alightings||0},${d.hasPrev ? (d.prevTotals.total_alightings||0) : ''}`,
+    `Month-over-Month Change,${changeCell},`,
+    `Busiest Day,${d.busiestDay ? d.busiestDay.date : 'N/A'},`,
+    `Typical Peak Hour,${d.peakHourLabel},`,
+    `Avg Daily Boardings,${Math.round(d.avgDaily)},`,
+    '',
+    'Date,Boardings,Alightings,Avg Occupancy %',
+    ...(d.breakdown || []).map(r => `${r.date},${r.boardings||0},${r.alightings||0},${r.avg_occ!=null ? r.avg_occ.toFixed(1) : '0.0'}`),
+  ];
+  const csv = lines.join('\n');
+  const blob = new Blob([csv],{type:'text/csv'}); const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = `SUS_MonthlyValueSummary_${from}_${to}.csv`; a.click(); URL.revokeObjectURL(url);
+}
 
 // ============================================
 // CHART DEFAULTS
