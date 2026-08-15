@@ -1845,20 +1845,53 @@ function initRidership() {
   // Wire up filter controls
   const periodSel = document.getElementById('ridershipPeriod');
   const routeSel = document.getElementById('ridershipRoute');
+  const yearSel = document.getElementById('ridershipYear');
   if (periodSel) periodSel.addEventListener('change', () => loadRidershipData());
   if (routeSel) routeSel.addEventListener('change', () => loadRidershipData());
+  if (yearSel) yearSel.addEventListener('change', () => loadRidershipData());
 
-  // Wire up view tabs (daily/weekly/monthly)
+  // Wire up view tabs (daily/weekly/monthly/yearly)
   document.querySelectorAll('#ridershipViewTabs .period-tab').forEach(tab => {
     tab.addEventListener('click', () => {
       document.querySelectorAll('#ridershipViewTabs .period-tab').forEach(t => t.classList.remove('active'));
       tab.classList.add('active');
+      // The Yearly view picks a single calendar year instead of a rolling
+      // window, so swap the Period dropdown for a Year dropdown.
+      const isYearly = tab.dataset.view === 'yearly';
+      const periodGroup = document.getElementById('ridershipPeriodGroup');
+      const yearGroup = document.getElementById('ridershipYearGroup');
+      if (periodGroup) periodGroup.style.display = isYearly ? 'none' : '';
+      if (yearGroup) yearGroup.style.display = isYearly ? '' : 'none';
       loadRidershipData();
     });
   });
 
-  // Ensure backend probe completes, then populate bus dropdown and load data
-  probeBackend().then(() => populateBusDropdowns()).then(() => loadRidershipData());
+  // Ensure backend probe completes, then populate bus/year dropdowns and load data
+  probeBackend().then(() => Promise.all([populateBusDropdowns(), populateYearDropdown()])).then(() => loadRidershipData());
+}
+
+/** Populate the Yearly tab's year selector from the backend (falls back to a
+ *  simple 5-year window ending this year if the API/DB has no data yet). */
+async function populateYearDropdown() {
+  const sel = document.getElementById('ridershipYear');
+  if (!sel) return;
+  const currentYear = new Date().getFullYear();
+  let years = [];
+  try {
+    const data = await apiFetch('/api/ridership/years');
+    if (data && Array.isArray(data.years) && data.years.length > 0) years = data.years;
+  } catch (e) { /* fall through to default range */ }
+  if (years.length === 0) {
+    years = [currentYear, currentYear - 1, currentYear - 2, currentYear - 3, currentYear - 4];
+  }
+  sel.innerHTML = '';
+  years.forEach(y => {
+    const opt = document.createElement('option');
+    opt.value = String(y);
+    opt.textContent = String(y);
+    sel.appendChild(opt);
+  });
+  sel.value = String(currentYear);
 }
 
 async function populateBusDropdowns() {
@@ -1890,6 +1923,11 @@ async function loadRidershipData() {
   const busId = document.getElementById('ridershipRoute')?.value;
   const activeTab = document.querySelector('#ridershipViewTabs .period-tab.active');
   const viewMode = activeTab ? activeTab.dataset.view : 'daily';
+
+  if (viewMode === 'yearly') {
+    await loadYearlyRidershipData(busId);
+    return;
+  }
 
   // Calculate date range
   const now = new Date();
@@ -1946,6 +1984,105 @@ async function loadRidershipData() {
     renderRidershipChartsFromLive(viewMode, fromDate, now);
   }
 
+}
+
+/** Yearly view: shows Jan-Dec totals for one selected calendar year, using
+ *  the dedicated /api/ridership/yearly endpoint (server-side aggregation). */
+async function loadYearlyRidershipData(busId) {
+  const year = Number(document.getElementById('ridershipYear')?.value) || new Date().getFullYear();
+  const currentYear = new Date().getFullYear();
+  const to = year < currentYear ? `${year}-12-31` : displayDateStr(new Date());
+  const from = `${year}-01-01`;
+
+  const data = await apiFetch('/api/ridership/yearly', { year, bus_id: busId !== 'all' ? busId : null });
+
+  if (data && Array.isArray(data.months)) {
+    const months = data.months;
+    const monthsWithData = months.filter(m => m.days_count > 0).length;
+
+    // KPIs
+    const totalBoardings = data.totals ? data.totals.boardings : months.reduce((s, m) => s + m.boardings, 0);
+    const totalDays = months.reduce((s, m) => s + m.days_count, 0);
+    setKPI('ridership-kpi-total', totalBoardings > 0 ? totalBoardings.toLocaleString() : '0');
+    const avgPerDay = totalDays > 0 ? Math.round(totalBoardings / totalDays) : 0;
+    setKPI('ridership-kpi-avg', avgPerDay > 0 ? avgPerDay.toLocaleString() : '0');
+    const busCountEl = document.getElementById('ridership-kpi-buses');
+    if (busCountEl) {
+      // Bus count isn't returned by the yearly endpoint; reuse /api/buses length as a proxy.
+      apiFetch('/api/buses').then(bd => {
+        if (bd && Array.isArray(bd.buses)) setKPI('ridership-kpi-buses', bd.buses.length || '0');
+      });
+    }
+    let peakMonth = null, peakVal = 0;
+    months.forEach(m => { if (m.boardings > peakVal) { peakVal = m.boardings; peakMonth = m.month; } });
+    setKPI('ridership-kpi-peak', peakMonth || '\u2014');
+    const peakSub = document.getElementById('ridership-kpi-peak-sub');
+    if (peakSub) peakSub.textContent = peakVal > 0 ? `${peakVal.toLocaleString()} boardings in ${peakMonth}` : 'no data yet';
+    const totalSub = document.getElementById('ridership-kpi-total-sub');
+    if (totalSub) totalSub.textContent = `Jan - Dec ${year}`;
+    const avgSub = document.getElementById('ridership-kpi-avg-sub');
+    if (avgSub) avgSub.textContent = `over ${totalDays} day${totalDays !== 1 ? 's' : ''} of data (${monthsWithData}/12 months)`;
+
+    renderRidershipChartsYearly(months, year);
+  } else {
+    // Fallback: derive from /api/daily if the dedicated endpoint is unavailable
+    // (e.g. an older backend deploy that hasn't picked up this change yet).
+    const dailyData = await apiFetch('/api/daily', { from, to, bus_id: busId !== 'all' ? busId : null });
+    if (dailyData && dailyData.daily) {
+      const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      const months = monthNames.map((name, i) => ({ month: name, month_num: i + 1, boardings: 0, alightings: 0, days_count: 0 }));
+      const seenDates = new Set();
+      dailyData.daily.forEach(r => {
+        const m = Number(r.date.slice(5, 7)) - 1;
+        months[m].boardings += r.total_in;
+        months[m].alightings += r.total_out;
+        seenDates.add(r.date);
+      });
+      seenDates.forEach(d => { months[Number(d.slice(5, 7)) - 1].days_count++; });
+      const totalBoardings = months.reduce((s, m) => s + m.boardings, 0);
+      setKPI('ridership-kpi-total', totalBoardings > 0 ? totalBoardings.toLocaleString() : '0');
+      const totalDays = seenDates.size;
+      setKPI('ridership-kpi-avg', totalDays > 0 ? Math.round(totalBoardings / totalDays).toLocaleString() : '0');
+      const totalSub = document.getElementById('ridership-kpi-total-sub');
+      if (totalSub) totalSub.textContent = `Jan - Dec ${year}`;
+      renderRidershipChartsYearly(months, year);
+    } else {
+      setKPI('ridership-kpi-total', '\u2014');
+      setKPI('ridership-kpi-avg', '\u2014');
+      setKPI('ridership-kpi-peak', '\u2014');
+    }
+  }
+}
+
+/** Render the Ridership Trend + Boardings vs Alightings charts for the Yearly
+ *  tab: fixed Jan-Dec x-axis for the selected year, zero-filled. */
+function renderRidershipChartsYearly(months, year) {
+  const setSubtitle = (id, text) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+  };
+  const labels = months.map(m => m.month);
+  const boardings = months.map(m => m.boardings);
+  const alightings = months.map(m => m.alightings);
+
+  charts.ridershipTrend.data.labels = labels;
+  charts.ridershipTrend.data.datasets[0].data = boardings;
+  charts.ridershipTrend.update('active');
+  charts.boardAlight.data.labels = labels;
+  charts.boardAlight.data.datasets[0].data = boardings;
+  charts.boardAlight.data.datasets[1].data = alightings;
+  charts.boardAlight.update('active');
+
+  const monthsWithData = months.filter(m => m.days_count > 0).length;
+  setSubtitle('ridershipTrendSubtitle', `${year} boardings by month - ${monthsWithData}/12 month${monthsWithData !== 1 ? 's' : ''} with data`);
+  setSubtitle('boardAlightSubtitle', `${year} boardings vs alightings by month`);
+
+  // Day-of-week chart doesn't apply to a whole-year monthly view; zero it out
+  // rather than showing stale data from a previous tab.
+  if (charts.dayOfWeek) {
+    charts.dayOfWeek.data.datasets[0].data = [0, 0, 0, 0, 0, 0, 0];
+    charts.dayOfWeek.update('active');
+  }
 }
 
 /** Populate ridership KPIs from live MQTT state */

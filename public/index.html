@@ -582,7 +582,7 @@
     <!-- ===== RIDERSHIP VIEW ===== -->
     <div class="view ridership-premium" id="view-ridership">
       <div class="filter-bar">
-        <div class="filter-group">
+        <div class="filter-group" id="ridershipPeriodGroup">
           <span class="filter-label">Period</span>
           <select class="filter-select" id="ridershipPeriod">
             <option value="7d">Last 7 Days</option>
@@ -590,6 +590,10 @@
             <option value="90d">Last 90 Days</option>
             <option value="1y">Last 12 Months</option>
           </select>
+        </div>
+        <div class="filter-group" id="ridershipYearGroup" style="display:none">
+          <span class="filter-label">Year</span>
+          <select class="filter-select" id="ridershipYear"></select>
         </div>
         <div class="filter-group">
           <span class="filter-label">Route</span>
@@ -603,6 +607,7 @@
             <button class="period-tab active" data-view="daily">Daily</button>
             <button class="period-tab" data-view="weekly">Weekly</button>
             <button class="period-tab" data-view="monthly">Monthly</button>
+            <button class="period-tab" data-view="yearly">Yearly</button>
           </div>
         </div>
       </div>

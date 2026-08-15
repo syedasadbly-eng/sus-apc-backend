@@ -1451,10 +1451,74 @@ app.get('/api/daily', (req, res) => {
 });
 
 
+// --- Years that have any recorded data (for the Yearly tab's year picker) ---
+
+app.get('/api/ridership/years', (req, res) => {
+  const rows = db.prepare(`
+    SELECT DISTINCT strftime('%Y', date) as year FROM daily_summary ORDER BY year DESC
+  `).all();
+  const years = rows.map(r => Number(r.year)).filter(y => !Number.isNaN(y));
+  const currentYear = new Date().getFullYear();
+  if (!years.includes(currentYear)) years.unshift(currentYear);
+  res.json({ years: years.sort((a, b) => b - a) });
+});
+
+
+// --- Yearly ridership (Jan-Dec totals per month for a selected year) ---
+
+app.get('/api/ridership/yearly', (req, res) => {
+  const year = String(req.query.year || new Date().getFullYear());
+  const busId = req.query.bus_id;
+
+  let sql = `
+    SELECT strftime('%m', date) as month, 
+           COALESCE(SUM(total_in), 0) as boardings,
+           COALESCE(SUM(total_out), 0) as alightings,
+           COALESCE(MAX(peak_onboard), 0) as peak_onboard,
+           COUNT(DISTINCT date) as days_count
+    FROM daily_summary
+    WHERE strftime('%Y', date) = @year
+  `;
+  const params = { year };
+  if (busId && busId !== 'all') {
+    sql += ' AND bus_id = @busId';
+    params.busId = busId;
+  }
+  sql += ' GROUP BY month ORDER BY month';
+  const rows = db.prepare(sql).all(params);
+
+  // Zero-fill every calendar month so the chart always shows Jan-Dec.
+  const byMonth = {};
+  rows.forEach(r => { byMonth[r.month] = r; });
+  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const months = monthNames.map((name, i) => {
+    const key = String(i + 1).padStart(2, '0');
+    const r = byMonth[key];
+    return {
+      month: name,
+      month_num: i + 1,
+      boardings: r ? r.boardings : 0,
+      alightings: r ? r.alightings : 0,
+      net: r ? (r.boardings - r.alightings) : 0,
+      peak_onboard: r ? r.peak_onboard : 0,
+      days_count: r ? r.days_count : 0,
+    };
+  });
+
+  const totals = months.reduce((acc, m) => {
+    acc.boardings += m.boardings;
+    acc.alightings += m.alightings;
+    return acc;
+  }, { boardings: 0, alightings: 0 });
+
+  res.json({ year: Number(year), months, totals });
+});
+
+
 // --- Summary (aggregated stats for a period) ---
 
 app.get('/api/summary', (req, res) => {
-  const { period = 'today' } = req.query;
+  const { period = 'today', to: toOverride } = req.query;
   const now = new Date();
   let fromDate;
 
@@ -1484,7 +1548,7 @@ app.get('/api/summary', (req, res) => {
       fromDate = period; // Allow raw date
   }
 
-  const toDate = displayDateStr(now);
+  const toDate = toOverride || displayDateStr(now);
 
   const totals = db.prepare(`
     SELECT
