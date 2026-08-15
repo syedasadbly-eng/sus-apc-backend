@@ -3719,6 +3719,25 @@ async function exportToPDF(title, from, to, busId) {
     .map(c => ({ ...c, chart: charts[c.key] }))
     .filter(c => c.chart && typeof c.chart.toBase64Image === 'function' && c.chart.canvas && c.chart.canvas.width > 0);
 
+  // Chart canvases render at devicePixelRatio (often 2-3x), so grabbing them
+  // at native resolution can produce a 30MB+ PDF. Downscale onto an offscreen
+  // canvas (capped width, matched to a white background since JPEG has no
+  // alpha channel) and compress to JPEG so file size stays reasonable for
+  // emailing/sharing while charts remain sharp enough to read.
+  function chartToCompressedImage(chart, maxWidthPx) {
+    const src = chart.canvas;
+    const scale = Math.min(1, maxWidthPx / src.width);
+    const w = Math.max(1, Math.round(src.width * scale));
+    const h = Math.max(1, Math.round(src.height * scale));
+    const tmp = document.createElement('canvas');
+    tmp.width = w; tmp.height = h;
+    const tctx = tmp.getContext('2d');
+    tctx.fillStyle = '#ffffff';
+    tctx.fillRect(0, 0, w, h);
+    tctx.drawImage(src, 0, 0, w, h);
+    return tmp.toDataURL('image/jpeg', 0.85);
+  }
+
   if (availableCharts.length > 0) {
     doc.addPage();
     doc.setFontSize(14); doc.setTextColor(0,0,0); doc.text('Dashboard Charts',14,20);
@@ -3731,8 +3750,8 @@ async function exportToPDF(title, from, to, busId) {
       if (y + 8 + imgHeight > pageBottom) { doc.addPage(); y = 20; }
       doc.setFontSize(11); doc.setTextColor(30,30,30); doc.text(title, margin, y);
       try {
-        const imgData = chart.toBase64Image('image/png', 1.0);
-        doc.addImage(imgData, 'PNG', margin, y + 4, imgWidth, imgHeight);
+        const imgData = chartToCompressedImage(chart, 1400);
+        doc.addImage(imgData, 'JPEG', margin, y + 4, imgWidth, imgHeight);
       } catch (err) {
         doc.setFontSize(9); doc.setTextColor(150); doc.text('(chart image unavailable)', margin, y + 12);
       }
