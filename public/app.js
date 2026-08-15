@@ -3704,6 +3704,42 @@ async function exportToPDF(title, from, to, busId) {
       theme:'grid', headStyles:{fillColor:[59,130,246]} });
   }
 
+  // Dashboard charts — snapshot every graph on the home page as an image so
+  // the PDF export mirrors what's on screen, not just the underlying tables.
+  const homeCharts = [
+    { key: 'hourlyFlow', title: 'Hourly Passenger Flow' },
+    { key: 'passengerOn', title: 'Passenger On Counts by Hour' },
+    { key: 'occGauge', title: 'Live Occupancy' },
+    { key: 'cumulativeLoad', title: 'Cumulative Load Today' },
+    { key: 'netFlow', title: 'Net Passenger Flow by Hour' },
+    { key: 'stopBoardingsHome', title: 'Boardings by Stop' },
+    { key: 'momChange', title: 'Monthly Boardings — % Change' },
+  ];
+  const availableCharts = homeCharts
+    .map(c => ({ ...c, chart: charts[c.key] }))
+    .filter(c => c.chart && typeof c.chart.toBase64Image === 'function' && c.chart.canvas && c.chart.canvas.width > 0);
+
+  if (availableCharts.length > 0) {
+    doc.addPage();
+    doc.setFontSize(14); doc.setTextColor(0,0,0); doc.text('Dashboard Charts',14,20);
+    const margin = 14, maxImgWidth = 210 - margin * 2, maxImgHeight = 110, pageBottom = 280;
+    let y = 30;
+    availableCharts.forEach(({ title, chart }) => {
+      let imgWidth = maxImgWidth;
+      let imgHeight = imgWidth * (chart.canvas.height / chart.canvas.width);
+      if (imgHeight > maxImgHeight) { imgHeight = maxImgHeight; imgWidth = imgHeight * (chart.canvas.width / chart.canvas.height); }
+      if (y + 8 + imgHeight > pageBottom) { doc.addPage(); y = 20; }
+      doc.setFontSize(11); doc.setTextColor(30,30,30); doc.text(title, margin, y);
+      try {
+        const imgData = chart.toBase64Image('image/png', 1.0);
+        doc.addImage(imgData, 'PNG', margin, y + 4, imgWidth, imgHeight);
+      } catch (err) {
+        doc.setFontSize(9); doc.setTextColor(150); doc.text('(chart image unavailable)', margin, y + 12);
+      }
+      y += imgHeight + 16;
+    });
+  }
+
   const pc = doc.internal.getNumberOfPages();
   for (let i=1;i<=pc;i++) { doc.setPage(i); doc.setFontSize(8); doc.setTextColor(150); doc.text('Smart Urban Sensing Ltd — APC',14,287); doc.text(`Page ${i}/${pc}`,180,287); }
   doc.save(`SUS_Report_${from}_${to}.pdf`);
