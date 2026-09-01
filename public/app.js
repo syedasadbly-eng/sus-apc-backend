@@ -1184,12 +1184,6 @@ function updateHeader(view) {
     'fleet': ['Fleet Status', 'Fleet / Management'],
     'reports': ['Reports', 'Output / Reports'],
     'data-table': ['Data Explorer', 'Output / Raw Data'],
-    // Welfare development interface (see public/welfare.js)
-    'welfare-console': ['Welfare Console', 'Welfare / Development'],
-    'welfare-signals': ['Signal Delivery', 'Welfare / Delivery Status'],
-    'welfare-health': ['Sensor Integrity', 'Welfare / Rule 12'],
-    'welfare-log': ['Welfare Event Log', 'Welfare / Audit Trail'],
-    'welfare-rules': ['Rules & Testing', 'Welfare / Configuration'],
   };
   const [title, breadcrumb] = titles[view] || ['Dashboard', 'Overview'];
   document.getElementById('headerTitle').textContent = title;
