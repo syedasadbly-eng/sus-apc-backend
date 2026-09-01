@@ -10,6 +10,10 @@ const fs = require('fs');
 const Database = require('better-sqlite3');
 const mqtt = require('mqtt');
 
+// Welfare development module — inert unless FEATURE_WELFARE=true.
+// Additive only: one new table, no change to any existing query path.
+const welfare = require('./welfare');
+
 // ============================================
 // CONFIGURATION
 // ============================================
@@ -730,6 +734,20 @@ function handleMessage(topic, rawPayload) {
   // If no counting data at all, this is a pure GPS/status message - done
   if (!hasPeriodic && !hasDailyTotals && !hasTrigger) {
     recordMqttFlow(busId, topic, brokerNow, totalDataStartTime, deviceClockSkewSec, 'gps_only', 'No counting fields in payload', 0, 0);
+    // Welfare hook: position and liveness still matter even with no counts.
+    // End-of-service and stale-feed rules depend on seeing these messages.
+    welfare.observe({
+      busId,
+      onboard: busRunningOnboard[busId] != null ? busRunningOnboard[busId] : null,
+      dayIn: busDayTotals[busId] ? busDayTotals[busId].dayIn : undefined,
+      dayOut: busDayTotals[busId] ? busDayTotals[busId].dayOut : undefined,
+      lat: dev.gpsValid ? dev.lat : null,
+      lng: dev.gpsValid ? dev.lng : null,
+      speed: dev.speed,
+      gpsValid: !!dev.gpsValid,
+      route: (GATEWAYS.find(g => g.label === busId) || {}).route || null,
+      ts: brokerNow.getTime(),
+    });
     console.log(`[MQTT] ${busId} (${topic}) GPS/status only - no counting data`);
     return;
   }
@@ -980,6 +998,25 @@ function flushBusDelta(busId) {
     console.error('[DB] Insert error:', err.message);
   }
 
+  // ---- Welfare hook ----
+  // Runs after the record is safely committed so a welfare fault can never
+  // affect APC ingest. observe() never throws and is a no-op when disabled.
+  {
+    const wDev = liveDevices[busId] || {};
+    welfare.observe({
+      busId,
+      onboard,
+      dayIn: dayState.dayIn,
+      dayOut: dayState.dayOut,
+      lat: wDev.gpsValid ? pending.lat : null,
+      lng: wDev.gpsValid ? pending.lng : null,
+      speed: pending.speed || 0,
+      gpsValid: !!wDev.gpsValid,
+      route: recordRoute || null,
+      ts: now.getTime(),
+    });
+  }
+
   console.log(`[FLUSH] ${busId} merged: Δin=${deltaIn} Δout=${deltaOut} onboard=${onboard} dayTotal: in=${dayState.dayIn} out=${dayState.dayOut}`);
 }
 
@@ -989,6 +1026,14 @@ function flushBusDelta(busId) {
 // ============================================
 
 function connectMqtt() {
+  // Dev safety valve. Defaults to enabled, so production behaviour is unchanged.
+  // Set MQTT_ENABLED=false when running a local or branch instance so it does not
+  // subscribe to the live Mayo feed and write a second copy of the data.
+  if (process.env.MQTT_ENABLED === 'false') {
+    console.log('[MQTT] Disabled via MQTT_ENABLED=false — no broker connection');
+    return;
+  }
+
   const url = `mqtts://${MQTT_CONFIG.host}:${MQTT_CONFIG.port}`;
   console.log(`[MQTT] Connecting to ${url}...`);
 
@@ -1083,6 +1128,10 @@ function scheduleMidnightReset() {
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Welfare development interface — mounts /api/welfare and creates the
+// welfare_events table. Returns null and does nothing when the flag is off.
+welfare.initWelfare(app, db, { topicMode: MQTT_CONFIG.topic });
 
 // Serve static dashboard files from public/ folder
 app.use(express.static(path.join(__dirname, 'public')));

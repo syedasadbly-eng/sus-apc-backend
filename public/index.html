@@ -238,6 +238,35 @@
           Data Explorer
         </button>
       </div>
+
+      <!-- ===== WELFARE DEVELOPMENT (feature-flagged, hidden unless enabled) ===== -->
+      <div class="nav-section welfare-nav" id="welfareNavSection" hidden>
+        <div class="nav-section-label welfare-nav-label">
+          Welfare
+          <span class="dev-tag">DEV</span>
+        </div>
+        <button class="nav-item" data-view="welfare-console">
+          <i data-lucide="shield-alert"></i>
+          Welfare Console
+          <span class="nav-count" id="welfareNavCount" hidden>0</span>
+        </button>
+        <button class="nav-item" data-view="welfare-signals">
+          <i data-lucide="activity"></i>
+          Signal Delivery
+        </button>
+        <button class="nav-item" data-view="welfare-health">
+          <i data-lucide="heart-pulse"></i>
+          Sensor Integrity
+        </button>
+        <button class="nav-item" data-view="welfare-log">
+          <i data-lucide="scroll-text"></i>
+          Event Log
+        </button>
+        <button class="nav-item" data-view="welfare-rules">
+          <i data-lucide="sliders-horizontal"></i>
+          Rules &amp; Testing
+        </button>
+      </div>
     </nav>
 
     <div class="sidebar-footer">
@@ -1144,10 +1173,314 @@
       </div>
     </div>
 
+    <!-- ================================================================= -->
+    <!-- ===== WELFARE DEVELOPMENT INTERFACE ============================= -->
+    <!-- Feature-flagged. All views inert unless FEATURE_WELFARE=true.     -->
+    <!-- ================================================================= -->
+
+    <!-- ===== WELFARE CONSOLE ===== -->
+    <div class="view" id="view-welfare-console">
+      <div class="dev-banner">
+        <i data-lucide="flask-conical"></i>
+        <div>
+          <strong>Development interface.</strong>
+          Welfare rules run alongside the live APC feed and write only to the
+          <code>welfare_events</code> table. Nothing here affects passenger counting,
+          reporting, or the Mayo Clinic views.
+        </div>
+        <span class="dev-tag" id="welfareModeTag">checking…</span>
+      </div>
+
+      <div class="kpi-grid" style="margin-bottom:var(--space-4)">
+        <div class="kpi-card pink">
+          <div class="kpi-label">Open Escalations</div>
+          <div class="kpi-value" id="wKpiEscalations">—</div>
+          <div class="kpi-sub">Severity 4, unacknowledged</div>
+        </div>
+        <div class="kpi-card amber">
+          <div class="kpi-label">Alerts (7 days)</div>
+          <div class="kpi-value" id="wKpiAlerts">—</div>
+          <div class="kpi-sub">Severity 3 and above</div>
+        </div>
+        <div class="kpi-card green">
+          <div class="kpi-label">Signals Live</div>
+          <div class="kpi-value" id="wKpiSignals">—</div>
+          <div class="kpi-sub">Of six SUS welfare signals</div>
+        </div>
+        <div class="kpi-card blue">
+          <div class="kpi-label">Feed Integrity</div>
+          <div class="kpi-value" id="wKpiIntegrity">—</div>
+          <div class="kpi-sub">Vehicles with a trusted feed</div>
+        </div>
+      </div>
+
+      <div class="chart-grid cols-2">
+        <div class="chart-panel">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Live Alert Feed</div>
+              <div class="chart-subtitle">Newest first, refreshed every 15 seconds</div>
+            </div>
+            <div class="chart-actions">
+              <button class="btn btn-sm" id="wRefreshBtn">
+                <i data-lucide="refresh-cw"></i> Refresh
+              </button>
+            </div>
+          </div>
+          <div class="chart-body welfare-feed" id="wAlertFeed">
+            <div class="welfare-empty">Waiting for events.</div>
+          </div>
+        </div>
+
+        <div class="chart-panel">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Vehicle Welfare State</div>
+              <div class="chart-subtitle">Live rule state per vehicle</div>
+            </div>
+          </div>
+          <div class="chart-body welfare-feed" id="wVehicleCards">
+            <div class="welfare-empty">No vehicles reporting.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="chart-panel" style="margin-top:var(--space-4)">
+        <div class="chart-header">
+          <div>
+            <div class="chart-title">Event Volume by Day</div>
+            <div class="chart-subtitle">Use this to calibrate thresholds — alerts should be rare</div>
+          </div>
+        </div>
+        <div class="chart-body" style="height:240px">
+          <canvas id="wVolumeChart"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== SIGNAL DELIVERY ===== -->
+    <div class="view" id="view-welfare-signals">
+      <div class="dev-banner">
+        <i data-lucide="info"></i>
+        <div>
+          Delivery status of the six SUS welfare signals against the seven grant use cases.
+          <strong>Live</strong> means running on installed hardware today.
+          <strong>Blocked</strong> means waiting on a vendor answer.
+          <strong>Camera</strong> means dependent on the AI Pro Dome.
+        </div>
+      </div>
+
+      <div class="chart-panel">
+        <div class="chart-header">
+          <div>
+            <div class="chart-title">Signal Delivery Matrix</div>
+            <div class="chart-subtitle" id="wSignalsSubtitle">Loading…</div>
+          </div>
+        </div>
+        <div class="table-wrapper">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Signal</th>
+                <th>Use Case</th>
+                <th>Status</th>
+                <th>Source</th>
+                <th>Detail</th>
+                <th>Events</th>
+              </tr>
+            </thead>
+            <tbody id="wSignalsBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="chart-grid cols-2" style="margin-top:var(--space-4)">
+        <div class="chart-panel">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Use Case Coverage</div>
+              <div class="chart-subtitle">Seven grant use cases by delivery route</div>
+            </div>
+          </div>
+          <div class="chart-body" id="wUseCases"></div>
+        </div>
+        <div class="chart-panel">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Blocking Dependencies</div>
+              <div class="chart-subtitle">What has to happen next, and who owns it</div>
+            </div>
+          </div>
+          <div class="chart-body" id="wBlockers"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== SENSOR INTEGRITY ===== -->
+    <div class="view" id="view-welfare-health">
+      <div class="dev-banner">
+        <i data-lucide="shield-check"></i>
+        <div>
+          <strong>Rule 12 gates every other welfare rule.</strong>
+          A stuck counter reporting a permanent occupancy of 1 would fire
+          “passenger left on the bus” every night. When a feed is untrusted,
+          the welfare rules go silent rather than guess.
+        </div>
+      </div>
+
+      <div class="chart-panel">
+        <div class="chart-header">
+          <div>
+            <div class="chart-title">Feed Integrity by Vehicle</div>
+            <div class="chart-subtitle" id="wHealthSubtitle">Loading…</div>
+          </div>
+        </div>
+        <div class="table-wrapper">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Bus</th>
+                <th>Health</th>
+                <th>Trusted</th>
+                <th>Onboard</th>
+                <th>GPS Fix</th>
+                <th>Last Seen</th>
+                <th>Day In / Out</th>
+                <th>Reasons</th>
+              </tr>
+            </thead>
+            <tbody id="wHealthBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="chart-panel" style="margin-top:var(--space-4)">
+        <div class="chart-header">
+          <div>
+            <div class="chart-title">Integrity Checks</div>
+            <div class="chart-subtitle">What Rule 12 watches for, and the current threshold</div>
+          </div>
+        </div>
+        <div class="chart-body" id="wChecks"></div>
+      </div>
+    </div>
+
+    <!-- ===== EVENT LOG ===== -->
+    <div class="view" id="view-welfare-log">
+      <div class="chart-panel">
+        <div class="chart-header">
+          <div>
+            <div class="chart-title">Welfare Event Log</div>
+            <div class="chart-subtitle" id="wLogSubtitle">Full audit trail from welfare_events</div>
+          </div>
+          <div class="chart-actions">
+            <select class="filter-input" id="wLogSeverity" style="width:150px">
+              <option value="">All severities</option>
+              <option value="2">Notify and above</option>
+              <option value="3" selected>Alerts and above</option>
+              <option value="4">Escalations only</option>
+            </select>
+            <select class="filter-input" id="wLogBus" style="width:130px">
+              <option value="">All buses</option>
+            </select>
+            <button class="btn btn-sm" id="wLogExport">
+              <i data-lucide="download"></i> CSV
+            </button>
+          </div>
+        </div>
+        <div class="table-wrapper" style="max-height:calc(100vh - 280px);overflow-y:auto">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Detected</th>
+                <th>Bus</th>
+                <th>Event</th>
+                <th>Severity</th>
+                <th>Reason</th>
+                <th>Onboard</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="wLogBody"></tbody>
+          </table>
+        </div>
+        <div class="pagination">
+          <div class="pagination-info" id="wLogInfo">—</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== RULES & TESTING ===== -->
+    <div class="view" id="view-welfare-rules">
+      <div class="dev-banner">
+        <i data-lucide="triangle-alert"></i>
+        <div>
+          These thresholds are <strong>reasoned, not evidenced</strong>. Calibrate them by
+          replaying stored history before treating any alert volume as meaningful.
+        </div>
+      </div>
+
+      <div class="chart-grid cols-2">
+        <div class="chart-panel">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Active Rules</div>
+              <div class="chart-subtitle">Read-only — set via environment variables</div>
+            </div>
+          </div>
+          <div class="chart-body" id="wRulesList"></div>
+        </div>
+
+        <div class="chart-panel">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Geofences</div>
+              <div class="chart-subtitle">Depots and termini used by Rule 6</div>
+            </div>
+          </div>
+          <div class="chart-body" id="wGeofences"></div>
+        </div>
+      </div>
+
+      <!-- Hidden unless WELFARE_ALLOW_SIM=true. Never exposed on a client-facing service. -->
+      <div class="chart-panel" id="welfareSimPanel" style="margin-top:var(--space-4)" hidden>
+        <div class="chart-header">
+          <div>
+            <div class="chart-title">Inject Test Event</div>
+            <div class="chart-subtitle">
+              Writes a row flagged <code>source=simulated</code> so the interface can be
+              exercised before the camera is fitted
+            </div>
+          </div>
+        </div>
+        <div class="chart-body">
+          <div class="welfare-sim-grid">
+            <button class="btn btn-sm sim-btn" data-scenario="lone_night">Lone traveller, night</button>
+            <button class="btn btn-sm sim-btn" data-scenario="end_of_service">Passenger at depot</button>
+            <button class="btn btn-sm sim-btn" data-scenario="sensor_offline">Feed offline</button>
+            <button class="btn btn-sm sim-btn" data-scenario="stuck_counter">Stuck counter</button>
+            <button class="btn btn-sm sim-btn camera" data-scenario="fall">Camera: fall</button>
+            <button class="btn btn-sm sim-btn camera" data-scenario="violence">Camera: violence</button>
+          </div>
+          <div class="welfare-sim-row">
+            <select class="filter-input" id="wSimBus" style="width:140px">
+              <option value="515">Bus 515</option>
+              <option value="419">Bus 419</option>
+            </select>
+            <button class="btn btn-sm btn-danger" id="wPurgeBtn">
+              <i data-lucide="trash-2"></i> Clear all welfare events
+            </button>
+            <span class="welfare-sim-note" id="wSimStatus"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </main>
 </div>
 
 <script src="./app.js"></script>
+<script src="./welfare.js"></script>
 
 <footer style="display:none">
   <a href="https://www.perplexity.ai/computer" target="_blank" rel="noopener noreferrer">
