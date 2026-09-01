@@ -1442,7 +1442,8 @@
         </div>
       </div>
 
-      <div class="chart-panel" style="margin-top:var(--space-4)">
+      <!-- Hidden unless WELFARE_ALLOW_SIM=true. Never exposed on a client-facing service. -->
+      <div class="chart-panel" id="welfareSimPanel" style="margin-top:var(--space-4)" hidden>
         <div class="chart-header">
           <div>
             <div class="chart-title">Inject Test Event</div>

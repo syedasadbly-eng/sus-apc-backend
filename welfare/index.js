@@ -21,6 +21,12 @@ const { WelfareEngine, SEVERITY } = require('./engine');
 
 const ENABLED = process.env.FEATURE_WELFARE === 'true';
 
+// Second, independent gate for the dev write endpoints: /simulate,
+// /simulate/observe and /simulate/purge. Defaults to OFF, so enabling
+// FEATURE_WELFARE on a client-facing service does not also hand its users
+// event injection and a purge button.
+const ALLOW_SIM = process.env.WELFARE_ALLOW_SIM === 'true';
+
 // ---------------------------------------------------------------------------
 // SQLite store
 // ---------------------------------------------------------------------------
@@ -150,6 +156,7 @@ function createRouter(engine, store, meta) {
   router.get('/status', (req, res) => {
     res.json({
       enabled: true,
+      allow_sim: ALLOW_SIM,
       topic_mode: meta.topicMode,
       camera_connected: false,
       started_at: meta.startedAt,
@@ -196,7 +203,18 @@ function createRouter(engine, store, meta) {
   // ---- Dev-only simulation ------------------------------------------------
   // Lets the interface be exercised and demonstrated before the camera is
   // fitted. Writes into welfare_events flagged source='simulated'.
-  router.post('/simulate', (req, res) => {
+  // Single guard for all three dev write endpoints.
+  const requireSim = (req, res, next) => {
+    if (!ALLOW_SIM) {
+      return res.status(403).json({
+        error: 'Simulation is disabled on this instance',
+        hint: 'Set WELFARE_ALLOW_SIM=true to enable. Do not set it on a client-facing service.',
+      });
+    }
+    return next();
+  };
+
+  router.post('/simulate', requireSim, (req, res) => {
     const { bus_id: busId = '515', scenario = 'lone_night' } = req.body ?? {};
     const scenarios = {
       lone_night: {
@@ -246,7 +264,7 @@ function createRouter(engine, store, meta) {
     res.json({ created: row });
   });
 
-  router.post('/simulate/purge', (req, res) => {
+  router.post('/simulate/purge', requireSim, (req, res) => {
     res.json({ deleted: store.purgeAll() });
   });
 
@@ -259,7 +277,7 @@ function createRouter(engine, store, meta) {
    * Fields match engine.ingest(): busId, onboard, dayIn, dayOut, lat, lng,
    * speed, gpsValid, route, ts.
    */
-  router.post('/simulate/observe', (req, res) => {
+  router.post('/simulate/observe', requireSim, (req, res) => {
     const body = req.body ?? {};
     const list = Array.isArray(body.observations) ? body.observations : [body];
     const raised = [];

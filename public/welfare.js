@@ -103,6 +103,12 @@
     const tag = document.getElementById('welfareModeTag');
     if (tag) tag.textContent = lastStatus.camera_connected ? 'CAMERA LIVE' : 'NO CAMERA';
 
+    // Simulator panel is opt-in via WELFARE_ALLOW_SIM. On a client-facing
+    // service it stays hidden, so injection and purge are never reachable
+    // from the UI even by a logged-in user.
+    const simPanel = document.getElementById('welfareSimPanel');
+    if (simPanel) simPanel.hidden = !lastStatus.allow_sim;
+
     hookNavigation();
     wireControls();
     icons();

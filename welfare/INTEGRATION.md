@@ -121,6 +121,7 @@ so a persistent condition produces a handful of events, not one per message.
 | Variable | Default | Meaning |
 |---|---|---|
 | `FEATURE_WELFARE` | unset | `true` enables the whole module |
+| `WELFARE_ALLOW_SIM` | unset | `true` enables event injection and purge. **Never set this on a client-facing service.** |
 | `MQTT_ENABLED` | `true` | set `false` on dev instances |
 | `WELFARE_STALE_SEC` | 600 | feed considered stale |
 | `WELFARE_OFFLINE_SEC` | 1800 | feed considered lost |
@@ -165,6 +166,17 @@ All routes are mounted at `/api/welfare` and exist only when the flag is on.
 | POST | `/simulate` | writes a canned row, `source=simulated` |
 | POST | `/simulate/observe` | pushes observations through the **real** rule path |
 | POST | `/simulate/purge` | deletes all welfare rows; touches nothing else |
+
+The three `POST` routes require `WELFARE_ALLOW_SIM=true` and return **403**
+otherwise. This is a second, independent gate: a service can have the welfare
+interface fully enabled and still refuse event injection and purge. The
+simulator panel in Rules & Testing is hidden unless `/status` reports
+`allow_sim: true`, so the controls are not reachable from the UI either.
+
+The dashboard password gate is client-side only, so every `/api` route on this
+project — welfare and pre-existing alike — is reachable by anyone who knows the
+URL. `WELFARE_ALLOW_SIM` defaulting to off is what keeps the welfare module from
+adding a destructive endpoint to that surface.
 
 ---
 
@@ -258,7 +270,8 @@ where fallback coordinates must not fake a depot arrival.
    code is then live in production and provably inert. Confirm the Mayo
    dashboard is unchanged.
 2. Deploy a second Railway service from the same repo with
-   `FEATURE_WELFARE=true` and its own volume and database. Because the MQTT
+   `FEATURE_WELFARE=true`, `WELFARE_ALLOW_SIM=true`, and its own volume and
+   database. Because the MQTT
    client ID is randomised per process, it can safely subscribe alongside
    production — but keep an eye on it, since a duplicate client ID on HiveMQ
    causes an infinite disconnect loop that would look like a broker outage on
