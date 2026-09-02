@@ -9,6 +9,7 @@ const path = require('path');
 const fs = require('fs');
 const Database = require('better-sqlite3');
 const mqtt = require('mqtt');
+const { installAuth } = require('./auth');
 
 // ============================================
 // CONFIGURATION
@@ -1081,8 +1082,13 @@ function scheduleMidnightReset() {
 // ============================================
 
 const app = express();
-app.use(cors());
+// Trust proxy so req.ip and Secure cookies work behind Railway / any HTTPS proxy.
+app.set('trust proxy', 1);
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
+
+// Install auth + audit module (users, login_events, /api/auth/*, /api/admin/users, /api/admin/login-events).
+const { requireAuth, requireAdmin } = installAuth(app, db);
 
 // Serve static dashboard files from public/ folder
 app.use(express.static(path.join(__dirname, 'public')));
@@ -1184,7 +1190,7 @@ app.get('/api/stops', (req, res) => {
 // Admin: replace the entire stop registry. Body should match the data/stops.json
 // shape: { routes: { '<key>': { name, loop_minutes, bus_ids, stops: [...] } } }.
 // Persists to disk and reloads the in-memory lookup, no redeploy needed.
-app.put('/api/stops', express.json({ limit: '256kb' }), (req, res) => {
+app.put('/api/stops', requireAdmin, express.json({ limit: '256kb' }), (req, res) => {
   const body = req.body;
   if (!body || typeof body !== 'object' || typeof body.routes !== 'object') {
     return res.status(400).json({ error: 'Body must be { routes: { ... } }' });
@@ -1682,7 +1688,7 @@ app.post('/api/reset-counter/:busId', (req, res) => {
 
 // POST /api/admin/backfill-history-locations — re-snap stale Minneapolis-era
 // rows to their scheduled route position based on timestamp. Idempotent.
-app.post('/api/admin/backfill-history-locations', (req, res) => {
+app.post('/api/admin/backfill-history-locations', requireAdmin, (req, res) => {
   try {
     const STALE_LAT = 44.9778;
     const STALE_LNG = -93.265;

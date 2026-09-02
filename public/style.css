@@ -2217,7 +2217,33 @@ html, body {
   box-shadow: 0 16px 40px rgba(0,0,0,0.55);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  z-index: 500;
+  /* Above Leaflet's tile/marker panes (z-index 200-650) so the scrubber
+     reliably receives pointer events, including slider drag. */
+  z-index: 1000;
+  pointer-events: auto;
+}
+.playback-scrubber * { pointer-events: auto; }
+
+/* Badge shown above the scrubber when one or more buses are using
+   synthesised scheduled-stop coordinates (because GPS is stationary). */
+.playback-badge {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 78px;
+  z-index: 1000;
+  padding: 8px 14px;
+  background: rgba(212,175,55,0.16);
+  border: 1px solid rgba(212,175,55,0.45);
+  color: #f4e4a8;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  border-radius: 10px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  text-align: center;
+  pointer-events: none;
 }
 .playback-btn {
   width: 38px;
@@ -2389,3 +2415,48 @@ html, body {
   height: 72px;
   opacity: 0.95;
 }
+
+/* ============================================
+   ADMIN VIEW + AUTH IDENTITY
+   ============================================ */
+.sidebar-user {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; margin: 0 8px 6px; border-radius: 8px;
+  background: rgba(255,255,255,0.04);
+}
+.sidebar-user-avatar {
+  width: 32px; height: 32px; border-radius: 50%;
+  background: #3b82f6; color: #fff; font-weight: 600;
+  display: flex; align-items: center; justify-content: center; font-size: 14px;
+}
+.sidebar-user-info { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
+.sidebar-user-name { font-size: 13px; font-weight: 600; color: var(--text-strong, #fff); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-user-role { font-size: 11px; color: var(--text-muted, #9ca3af); }
+
+.admin-summary {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 20px;
+}
+.admin-stat {
+  background: var(--panel-bg, rgba(255,255,255,0.03));
+  border: 1px solid var(--panel-border, rgba(255,255,255,0.08));
+  border-radius: 10px; padding: 16px 20px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.admin-stat-label { font-size: 12px; color: var(--text-muted, #9ca3af); text-transform: uppercase; letter-spacing: 0.5px; }
+.admin-stat-value { font-size: 28px; font-weight: 700; color: var(--text-strong, #fff); }
+
+.badge-role { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; text-transform: uppercase; }
+.badge-role-admin { background: rgba(59,130,246,0.15); color: #60a5fa; }
+.badge-role-user  { background: rgba(148,163,184,0.15); color: #cbd5e1; }
+.badge-active   { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; background: rgba(34,197,94,0.15); color: #4ade80; }
+.badge-inactive { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; background: rgba(239,68,68,0.15); color: #f87171; }
+
+.btn-sm { padding: 4px 10px; font-size: 12px; }
+
+.chart-panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap: 12px; flex-wrap: wrap; }
+.chart-panel-header h3 { margin: 0; font-size: 16px; }
+
+.modal-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 16px 20px; border-top: 1px solid var(--panel-border, rgba(255,255,255,0.08)); }
+.settings-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.settings-field label { font-size: 12px; color: var(--text-muted, #9ca3af); font-weight: 600; }
+.muted { color: var(--text-muted, #9ca3af); }
