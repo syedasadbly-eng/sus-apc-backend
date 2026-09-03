@@ -1415,11 +1415,17 @@
       <div class="dev-banner">
         <i data-lucide="triangle-alert"></i>
         <div>
-          Calibrated against <strong>68 service days of real history</strong> (54,704 records).
-          Only the sensor-health family is enabled: with every rule on, the defaults produced
-          <strong>60.96 events per service day</strong>, because <code>speed</code> is 0 in every
-          record and bus 515 logs 1.48 boardings per alighting, so its count never returns to
-          zero. The occupancy rules stay off until those two are fixed.
+          Calibrated against <strong>68 service days of real history</strong> (54,704 records),
+          replayed through the same occupancy model this service runs. Sensor health, lone
+          traveller and end of service are enabled, measuring
+          <strong>1.00 events per service day</strong>. The sustain windows were widened to get
+          there &mdash; 30 min for lone traveller, 60 min at a depot &mdash; from 23.71/day at the
+          original 5 min. <code>R9 Stationary</code> stays off because <code>speed</code> is 0 in
+          every record, which makes its movement test permanently true.
+          <strong>End of service will raise nothing until GNSS push is enabled on the UR35s</strong>,
+          as it requires a live fix and both buses report a fallback position. Occupancy is a
+          <strong>modelled</strong> tally with a p90 error of 55 passengers, so treat these two
+          rules as leads rather than observations.
         </div>
       </div>
 
