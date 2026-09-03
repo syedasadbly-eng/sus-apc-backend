@@ -240,9 +240,15 @@
     // Show both figures whenever occupancy is modelled. The measured counter
     // must stay visible — the modelled one invents alightings, and nobody
     // reading this panel should have to guess which they are looking at.
+    // Values are escaped by the renderer below. Where markup is needed, pass
+    // { html } and escape each interpolated value here instead.
     const onboardCell = h.onboard_is_modelled
-      ? `${h.onboard ?? '—'} <span class="welfare-chip muted">modelled</span>`
-        + (h.onboard_raw != null ? `<br><span class="welfare-sub">counter reads ${h.onboard_raw}</span>` : '')
+      ? {
+        html: `${esc(h.onboard ?? '—')} <span class="welfare-chip muted">modelled</span>`
+            + (h.onboard_raw != null
+              ? `<br><span class="welfare-sub">counter reads ${esc(h.onboard_raw)}</span>`
+              : ''),
+      }
       : (h.onboard ?? '—');
     const rows = [
       ['Onboard', onboardCell],
@@ -262,7 +268,10 @@
           <span class="welfare-health-pill ${cls}">${esc(h.health)}</span>
         </div>
         <dl class="welfare-kv">
-          ${rows.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('')}
+          ${rows.map(([k, v]) => {
+      const cell = (v && typeof v === 'object' && typeof v.html === 'string') ? v.html : esc(v);
+      return `<div><dt>${esc(k)}</dt><dd>${cell}</dd></div>`;
+    }).join('')}
         </dl>
         ${h.reasons?.length
       ? `<div class="welfare-card-meta">${h.reasons.map((r) => `<span class="welfare-chip bad">${esc(r)}</span>`).join('')}</div>`
