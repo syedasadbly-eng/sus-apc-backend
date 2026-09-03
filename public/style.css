@@ -2718,3 +2718,15 @@ html, body {
   .dev-banner { flex-wrap: wrap; }
   .dev-banner .dev-tag { margin-left: 0; }
 }
+
+/* Secondary line under a modelled figure, e.g. the measured counter shown
+   beneath derived occupancy on the Welfare Console vehicle cards. */
+.welfare-sub {
+  display: inline-block;
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: .01em;
+  color: var(--text-muted, #8b95a5);
+  white-space: nowrap;
+}

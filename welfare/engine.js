@@ -171,6 +171,8 @@ class VehicleState {
     this.reportCount = 0;
 
     this.onboard = null;
+    this.onboardRaw = null;
+    this.occupancyModel = null;
     this.lat = null;
     this.lng = null;
     this.speed = null;
@@ -287,6 +289,9 @@ class WelfareEngine extends EventEmitter {
     if (Number.isFinite(o.dayIn)) v.dayIn = o.dayIn;
     if (Number.isFinite(o.dayOut)) v.dayOut = o.dayOut;
     if (o.onboard != null) v.onboard = o.onboard;
+    // The measured counter, kept for display when occupancy is modelled.
+    if (o.onboardRaw != null) v.onboardRaw = o.onboardRaw;
+    if (o.occupancyModel) v.occupancyModel = o.occupancyModel;
     if (Number.isFinite(o.lat)) v.lat = o.lat;
     if (Number.isFinite(o.lng)) v.lng = o.lng;
     if (o.speed != null) v.speed = o.speed;
@@ -560,6 +565,8 @@ class WelfareEngine extends EventEmitter {
       lat: v.gpsValid ? v.lat : null,
       lng: v.gpsValid ? v.lng : null,
       onboard: v.onboard,
+      onboard_raw: v.onboardRaw ?? null,
+      onboard_is_modelled: Boolean(v.occupancyModel),
       sensor_health: v.health,
       rule: spec.rule,
       reason: spec.reason,
@@ -592,6 +599,8 @@ class WelfareEngine extends EventEmitter {
       reasons: [...v.healthReasons],
       trustworthy: this.isTrustworthy(v),
       onboard: v.onboard,
+      onboard_raw: v.onboardRaw ?? null,
+      onboard_is_modelled: Boolean(v.occupancyModel),
       route: v.route,
       gps_valid: v.gpsValid,
       speed: v.speed,

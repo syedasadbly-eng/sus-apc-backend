@@ -19,6 +19,7 @@
 const express = require('express');
 const { WelfareEngine, SEVERITY } = require('./engine');
 const doorlog = require('./doorlog');
+const occupancy = require('./occupancy');
 
 const ENABLED = process.env.FEATURE_WELFARE === 'true';
 
@@ -327,6 +328,16 @@ function initWelfare(app, db, opts = {}) {
       console.error('[doorlog] mount failed, continuing without it:', err.message);
     }
 
+    // Derived occupancy. Welfare console only — see the header of
+    // occupancy.js for why this exists and what it deliberately does not do.
+    try {
+      if (occupancy.initOccupancy(db, { capacity: opts.capacity })) {
+        app.use('/api/welfare', occupancy.createOccupancyRouter());
+      }
+    } catch (err) {
+      console.error('[occupancy] mount failed, continuing on raw counts:', err.message);
+    }
+
     engine.on('alert', (row) => {
       console.log(`[welfare] ${String(row.severity_name).toUpperCase()} ${row.bus_id} ${row.event_type}: ${row.reason}`);
     });
@@ -350,9 +361,42 @@ function initWelfare(app, db, opts = {}) {
  * Feed one observation. Safe to call unconditionally — no-op when disabled.
  * Never throws.
  */
+/* Substitute the derived occupancy before the engine sees the reading, so the
+   rules run on a tally that can return to zero. The raw counter travels
+   alongside as onboardRaw and is what the console displays as measured.
+
+   Deliberately the only place this swap happens: server.js has already
+   committed the true value to `records` by this point, so nothing upstream
+   and nothing the Mayo dashboard reads can be reached from here. */
+function applyDerivedOccupancy(o) {
+  if (!occupancy.isEnabled()) return o;
+  const model = occupancy.derive({
+    busId: o.busId,
+    dayIn: o.dayIn,
+    dayOut: o.dayOut,
+    onboardRaw: o.onboard,
+  });
+  if (!model.derived) return o;
+  return {
+    ...o,
+    onboard: model.onboard,
+    onboardRaw: model.onboard != null ? o.onboard : null,
+    occupancyModel: model,
+  };
+}
+
 function observe(o) {
   if (!engine) return;
-  try { engine.ingest(o); } catch (err) {
+  let reading = o;
+  // Wrapped separately: if the model throws, welfare must still see the raw
+  // reading rather than lose the observation entirely.
+  try {
+    reading = applyDerivedOccupancy(o);
+  } catch (err) {
+    console.error('[occupancy] derive failed, falling back to raw count:', err.message);
+    reading = o;
+  }
+  try { engine.ingest(reading); } catch (err) {
     console.error('[welfare] ingest error:', err.message);
   }
 }

@@ -1165,7 +1165,7 @@ app.use(express.json());
 
 // Welfare development interface — mounts /api/welfare and creates the
 // welfare_events table. Returns null and does nothing when the flag is off.
-welfare.initWelfare(app, db, { topicMode: MQTT_CONFIG.topic });
+welfare.initWelfare(app, db, { topicMode: MQTT_CONFIG.topic, capacity: BUS_CAPACITY });
 
 // Serve static dashboard files from public/ folder
 app.use(express.static(path.join(__dirname, 'public')));

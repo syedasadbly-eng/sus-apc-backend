@@ -237,8 +237,15 @@
 
   function vehicleCard(h) {
     const cls = { ok: 'ok', degraded: 'warn', stale: 'warn', faulty: 'bad', offline: 'bad' }[h.health] || 'warn';
+    // Show both figures whenever occupancy is modelled. The measured counter
+    // must stay visible — the modelled one invents alightings, and nobody
+    // reading this panel should have to guess which they are looking at.
+    const onboardCell = h.onboard_is_modelled
+      ? `${h.onboard ?? '—'} <span class="welfare-chip muted">modelled</span>`
+        + (h.onboard_raw != null ? `<br><span class="welfare-sub">counter reads ${h.onboard_raw}</span>` : '')
+      : (h.onboard ?? '—');
     const rows = [
-      ['Onboard', h.onboard ?? '—'],
+      ['Onboard', onboardCell],
       ['Feed', h.health],
       ['Rules active', h.trustworthy ? 'yes' : 'suppressed'],
       ['GPS fix', h.gps_valid ? 'live' : 'fallback'],
