@@ -16,29 +16,49 @@
   ];
 
   const SEV = {
-    1: { name: 'Log', cls: 'sev-log' },
-    2: { name: 'Notify', cls: 'sev-notify' },
-    3: { name: 'Alert', cls: 'sev-alert' },
-    4: { name: 'Escalate', cls: 'sev-escalate' },
+    1: { name: 'For the record', cls: 'sev-log' },
+    2: { name: 'Worth knowing', cls: 'sev-notify' },
+    3: { name: 'Needs attention', cls: 'sev-alert' },
+    4: { name: 'Urgent', cls: 'sev-escalate' },
   };
 
   const EVENT_LABELS = {
-    lone_traveller: 'Lone traveller',
-    lone_traveller_late_night: 'Lone traveller (night)',
-    end_of_service_occupancy: 'Passenger at depot',
-    terminus_occupancy: 'Passenger at terminus',
-    stationary_with_occupants: 'Stationary with occupants',
-    dwell_no_alighting: 'Dwell — nobody alighting',
-    sensor_stale: 'Feed stale',
-    sensor_offline: 'Feed offline',
-    sensor_recovered: 'Feed recovered',
-    sensor_fault: 'Counter fault',
-    sensor_suspect: 'Counter suspect',
-    data_quality_drift: 'Data quality drift',
-    fall: 'Fall detected',
-    violence: 'Violence detected',
-    dwell_exceeded: 'Dwell exceeded',
+    lone_traveller: 'Someone travelling alone',
+    lone_traveller_late_night: 'Someone travelling alone, after dark',
+    end_of_service_occupancy: 'Someone still on board at the depot',
+    terminus_occupancy: 'Someone still on board at the terminus',
+    stationary_with_occupants: 'Parked with people on board',
+    dwell_no_alighting: 'Nobody has got off for a while',
+    sensor_stale: 'Sensor has gone quiet',
+    sensor_offline: 'Sensor is offline',
+    sensor_recovered: 'Sensor is back',
+    sensor_fault: 'Counter is faulty',
+    sensor_suspect: 'Counter looks wrong',
+    data_quality_drift: 'Counts are drifting',
+    fall: 'Possible fall',
+    violence: 'Possible altercation',
+    dwell_exceeded: 'Long time on board',
   };
+
+  // What the person reading this screen should actually DO. An alert with no
+  // action is just noise on a depot wall.
+  const EVENT_ACTIONS = {
+    lone_traveller: 'Keep an eye on them until someone else boards.',
+    lone_traveller_late_night: 'Check they are alright and know their stop.',
+    end_of_service_occupancy: 'Walk the bus before it is parked up.',
+    terminus_occupancy: 'Walk the bus before it turns around.',
+    stationary_with_occupants: 'Check why the bus is held.',
+    dwell_no_alighting: 'Check nobody has been left on board.',
+    sensor_stale: 'No welfare cover on this bus until it reports again.',
+    sensor_offline: 'No welfare cover on this bus. Tell engineering.',
+    sensor_recovered: 'Nothing to do — cover is back.',
+    sensor_fault: 'Counts cannot be trusted. Tell engineering.',
+    sensor_suspect: 'Counts may be wrong. Tell engineering.',
+    fall: 'Check the passenger immediately.',
+    violence: 'Follow the incident procedure.',
+  };
+
+  const action = (t) => EVENT_ACTIONS[t] || '';
 
   let enabled = false;
   let pollTimer = null;
@@ -172,11 +192,10 @@
   // -------------------------------------------------------------------------
 
   async function renderConsole() {
-    let stats; let events; let health; let signals;
+    let events; let health;
     try {
-      [stats, events, health, signals] = await Promise.all([
-        api('/stats?days=7'), api('/events?limit=40&min_severity=2'),
-        api('/fleet-health'), api('/signals'),
+      [events, health] = await Promise.all([
+        api('/events?limit=40&min_severity=2'), api('/fleet-health'),
       ]);
     } catch (err) {
       const feed = document.getElementById('wAlertFeed');
@@ -184,21 +203,49 @@
       return;
     }
 
-    const t = stats.totals || {};
-    setText('wKpiEscalations', t.escalations ?? 0);
-    setText('wKpiAlerts', t.alerts ?? 0);
-    const live = signals.filter((s) => s.status === 'live' && s.signal !== 'Sensor integrity').length;
-    const off = signals.filter((s) => s.status === 'disabled').length;
-    setText('wKpiSignals', off ? `${live} live, ${off} off` : `${live} / 6`);
-    const trusted = health.filter((h) => h.trustworthy).length;
-    setText('wKpiIntegrity', health.length ? `${trusted} / ${health.length}` : '—');
+    // ---- headline ----
+    // Ranked worst-first so the strip always states the most serious live
+    // condition. Unwatched buses outrank open alerts: an operator who thinks
+    // a bus is covered when it is not is worse off than one with a known alert.
+    const untrusted = health.filter((h) => !h.trustworthy);
+    const recent = events.filter((e) => {
+      const age = (Date.now() - Date.parse(e.detected_at)) / 60000;
+      return Number.isFinite(age) && age <= 120 && e.severity >= 3;
+    });
+    const faulty = health.filter((h) => h.trustworthy && (h.reasons || []).length);
+
+    let tone = 'ok'; let main = 'Nothing needs attention'; let sub;
+    if (!health.length) {
+      tone = 'bad'; main = 'No buses are reporting';
+      sub = 'Nothing is being watched. Tell engineering.';
+    } else if (untrusted.length) {
+      tone = 'bad';
+      main = `${untrusted.length} of ${health.length} buses are not being watched`;
+      sub = `Welfare alerts are paused on bus ${untrusted.map((h) => h.bus_id).join(', ')}.`;
+    } else if (recent.length) {
+      tone = 'warn';
+      main = `${recent.length} thing${recent.length > 1 ? 's need' : ' needs'} attention`;
+      sub = `Most recent: ${label(recent[0].event_type)} on bus ${recent[0].bus_id}.`;
+    } else if (faulty.length) {
+      tone = 'warn';
+      main = 'Watching, with a fault';
+      sub = `Bus ${faulty.map((h) => h.bus_id).join(', ')} has a sensor fault. Alerts still running.`;
+    } else {
+      sub = `All ${health.length} buses reporting normally.`;
+    }
+    const dot = document.getElementById('wHeadlineDot');
+    if (dot) dot.className = `welfare-headline-dot ${tone}`;
+    const strip = document.getElementById('wHeadline');
+    if (strip) strip.className = `welfare-headline ${tone}`;
+    setText('wHeadlineMain', main);
+    setText('wHeadlineSub', sub);
 
     // ---- alert feed ----
     const feed = document.getElementById('wAlertFeed');
     if (feed) {
       feed.innerHTML = events.length
         ? events.map(eventCard).join('')
-        : '<div class="welfare-empty">No events in the last 7 days. That is the expected state.</div>';
+        : '<div class="welfare-empty">Nothing has happened in the last 7 days. That is what you want to see.</div>';
     }
 
     // ---- vehicle cards ----
@@ -206,77 +253,87 @@
     if (cards) {
       cards.innerHTML = health.length
         ? health.map(vehicleCard).join('')
-        : '<div class="welfare-empty">No vehicles reporting. Check the MQTT feed.</div>';
+        : '<div class="welfare-empty">No buses are reporting.</div>';
     }
 
-    renderVolumeChart(stats.by_day || []);
     icons();
   }
 
+  // Operator-facing. Leads with the bus and what to do; the rule name, use
+  // case number and internal severity code are engineering detail and live on
+  // the Rules page, not here.
   function eventCard(e) {
     const sev = SEV[e.severity] || SEV[1];
     const sim = e.source === 'simulated'
-      ? '<span class="welfare-chip sim">simulated</span>' : '';
-    const uc = e.use_case ? `<span class="welfare-chip">UC ${e.use_case}</span>` : '';
+      ? '<span class="welfare-chip sim">test event</span>' : '';
+    const act = action(e.event_type);
     return `
       <div class="welfare-card ${sev.cls}">
         <div class="welfare-card-top">
-          <span class="welfare-sev ${sev.cls}">${sev.name}</span>
+          <span class="welfare-card-bus strong">Bus ${esc(e.bus_id)}</span>
           <span class="welfare-card-title">${esc(label(e.event_type))}</span>
-          <span class="welfare-card-bus">Bus ${esc(e.bus_id)}</span>
           <span class="welfare-card-time">${timeAgo(e.detected_at)}</span>
         </div>
+        ${act ? `<div class="welfare-card-action">${esc(act)}</div>` : ''}
         <div class="welfare-card-reason">${esc(e.reason || '')}</div>
-        <div class="welfare-card-meta">
-          ${uc}${sim}
-          ${e.rule ? `<span class="welfare-chip">${esc(e.rule)}</span>` : ''}
-          ${e.onboard != null ? `<span class="welfare-chip">onboard ${e.onboard}</span>` : ''}
-          ${e.sensor_health ? `<span class="welfare-chip">feed ${esc(e.sensor_health)}</span>` : ''}
-        </div>
+        ${sim ? `<div class="welfare-card-meta">${sim}</div>` : ''}
       </div>`;
   }
 
+  // One line an operator can act on, then a small number of plain facts.
+  // Deliberately does NOT hide that occupancy is an estimate: the word
+  // "estimated" stays on screen, because the alternative is a depot reading a
+  // modelled figure as a headcount.
   function vehicleCard(h) {
     const cls = { ok: 'ok', degraded: 'warn', stale: 'warn', faulty: 'bad', offline: 'bad' }[h.health] || 'warn';
-    // Show both figures whenever occupancy is modelled. The measured counter
-    // must stay visible — the modelled one invents alightings, and nobody
-    // reading this panel should have to guess which they are looking at.
-    // Values are escaped by the renderer below. Where markup is needed, pass
-    // { html } and escape each interpolated value here instead.
-    const onboardCell = h.onboard_is_modelled
-      ? {
-        html: `${esc(h.onboard ?? '—')} <span class="welfare-chip muted">modelled</span>`
-            + (h.onboard_raw != null
-              ? `<br><span class="welfare-sub">counter reads ${esc(h.onboard_raw)}</span>`
-              : ''),
-      }
-      : (h.onboard ?? '—');
-    const rows = [
-      ['Onboard', onboardCell],
-      ['Feed', h.health],
-      ['Rules active', h.trustworthy ? 'yes' : 'suppressed'],
-      ['GPS fix', h.gps_valid ? 'live' : 'fallback'],
-      ['Last seen', h.last_seen_sec_ago != null ? `${h.last_seen_sec_ago}s ago` : '—'],
-      ['Day in / out', `${h.day_in ?? 0} / ${h.day_out ?? 0}`],
-    ];
+
+    const REASON_TEXT = {
+      no_gps_fix: 'no GPS position',
+      stuck_counter: 'counter has stopped moving',
+      feed_stale: 'sensor has gone quiet',
+      feed_offline: 'sensor is offline',
+      negative_occupancy: 'counts do not add up',
+    };
+    const faults = (h.reasons || []).map((r) => REASON_TEXT[r] || String(r).replace(/_/g, ' '));
+
+    let headline; let sub;
+    if (!h.trustworthy) {
+      headline = 'Not being watched';
+      sub = faults.length ? `Welfare alerts are paused \u2014 ${faults.join(', ')}.`
+        : 'Welfare alerts are paused for this bus.';
+    } else if (faults.length) {
+      headline = 'Watching, with a fault';
+      sub = `${faults.join(', ')}.`;
+    } else {
+      headline = 'All normal';
+      sub = 'Nothing needs attention on this bus.';
+    }
+
+    const seen = h.last_seen_sec_ago == null ? 'unknown'
+      : h.last_seen_sec_ago < 90 ? 'just now'
+        : `${Math.round(h.last_seen_sec_ago / 60)} min ago`;
+
+    const onboard = h.onboard == null ? '\u2014'
+      : h.onboard_is_modelled
+        ? { html: `about ${esc(h.onboard)} <span class="welfare-sub">estimated</span>` }
+        : `${h.onboard}`;
+
+    const rows = [['On board', onboard], ['Last update', seen]];
     if (h.lone_for_sec != null) rows.push(['Alone for', `${Math.round(h.lone_for_sec / 60)} min`]);
-    if (h.stationary_for_sec != null) rows.push(['Stationary', `${Math.round(h.stationary_for_sec / 60)} min`]);
 
     return `
       <div class="welfare-vcard ${cls}">
         <div class="welfare-vcard-head">
           <span class="welfare-vcard-bus">Bus ${esc(h.bus_id)}</span>
-          <span class="welfare-health-pill ${cls}">${esc(h.health)}</span>
+          <span class="welfare-health-pill ${cls}">${esc(headline)}</span>
         </div>
+        <div class="welfare-vcard-sub">${esc(sub)}</div>
         <dl class="welfare-kv">
           ${rows.map(([k, v]) => {
       const cell = (v && typeof v === 'object' && typeof v.html === 'string') ? v.html : esc(v);
       return `<div><dt>${esc(k)}</dt><dd>${cell}</dd></div>`;
     }).join('')}
         </dl>
-        ${h.reasons?.length
-      ? `<div class="welfare-card-meta">${h.reasons.map((r) => `<span class="welfare-chip bad">${esc(r)}</span>`).join('')}</div>`
-      : ''}
       </div>`;
   }
 
@@ -330,11 +387,11 @@
   // -------------------------------------------------------------------------
 
   const STATUS_META = {
-    live: ['Live', 'ok'],
-    blocked: ['Blocked', 'warn'],
-    camera: ['Camera', 'info'],
+    live: ['Watching', 'ok'],
+    blocked: ['Not yet', 'warn'],
+    camera: ['Needs camera', 'info'],
     // Rule exists and is tested, but is switched off pending a data fix.
-    disabled: ['Off', 'muted'],
+    disabled: ['Switched off', 'muted'],
   };
 
   const USE_CASES = [
@@ -363,7 +420,8 @@
       return;
     }
     const live = signals.filter((s) => s.status === 'live').length;
-    setText('wSignalsSubtitle', `${live} of ${signals.length} rows delivering on installed hardware`);
+    setText('wSignalsSubtitle',
+      `${live} of ${signals.length} working on the buses today`);
 
     const body = document.getElementById('wSignalsBody');
     if (body) {
@@ -371,9 +429,7 @@
         const [txt, cls] = STATUS_META[s.status] || ['—', 'warn'];
         return `<tr>
           <td><strong>${esc(s.signal)}</strong></td>
-          <td>${s.use_case ? `UC ${s.use_case}` : '—'}</td>
           <td><span class="welfare-health-pill ${cls}">${txt}</span></td>
-          <td>${esc(s.source)}</td>
           <td class="welfare-dim">${esc(s.detail)}</td>
           <td>${s.events == null ? '—' : s.events}</td>
         </tr>`;
@@ -425,29 +481,47 @@
     const trusted = health.filter((h) => h.trustworthy).length;
     setText('wHealthSubtitle',
       health.length
-        ? `${trusted} of ${health.length} vehicles have a trusted feed`
-        : 'No vehicles have reported since startup');
+        ? `${trusted} of ${health.length} buses are being watched`
+        : 'No buses have reported since startup');
+
+    const HEALTH_TEXT = {
+      ok: 'Working', degraded: 'Working, with a fault',
+      stale: 'Gone quiet', faulty: 'Faulty', offline: 'Offline',
+    };
+    const REASON_TEXT = {
+      no_gps_fix: 'no GPS position',
+      stuck_counter: 'counter has stopped moving',
+      feed_stale: 'sensor has gone quiet',
+      feed_offline: 'sensor is offline',
+      negative_occupancy: 'counts do not add up',
+    };
 
     const body = document.getElementById('wHealthBody');
     if (body) {
       body.innerHTML = health.length ? health.map((h) => {
         const cls = { ok: 'ok', degraded: 'warn', stale: 'warn', faulty: 'bad', offline: 'bad' }[h.health] || 'warn';
+        const seen = h.last_seen_sec_ago == null ? '—'
+          : h.last_seen_sec_ago < 90 ? 'just now'
+            : `${Math.round(h.last_seen_sec_ago / 60)} min ago`;
+        const faults = (h.reasons || []).map((r) => REASON_TEXT[r] || String(r).replace(/_/g, ' '));
+        // "estimated" stays visible: this figure is modelled, and a depot
+        // must not read it as a headcount.
+        const onboard = h.onboard == null ? '—'
+          : h.onboard_is_modelled
+            ? `about ${esc(h.onboard)} <span class="welfare-sub">estimated</span>`
+            : esc(h.onboard);
         return `<tr>
           <td><strong>${esc(h.bus_id)}</strong></td>
-          <td><span class="welfare-health-pill ${cls}">${esc(h.health)}</span></td>
+          <td><span class="welfare-health-pill ${cls}">${esc(HEALTH_TEXT[h.health] || h.health)}</span></td>
           <td>${h.trustworthy
-    ? '<span class="welfare-chip ok">rules active</span>'
-    : '<span class="welfare-chip bad">suppressed</span>'}</td>
-          <td>${h.onboard ?? '—'}</td>
-          <td>${h.gps_valid
-    ? '<span class="welfare-chip ok">live</span>'
-    : '<span class="welfare-chip warn">fallback</span>'}</td>
-          <td>${h.last_seen_sec_ago != null ? `${h.last_seen_sec_ago}s ago` : '—'}</td>
-          <td>${h.day_in ?? 0} / ${h.day_out ?? 0}</td>
-          <td class="welfare-dim">${h.reasons?.length ? esc(h.reasons.join(', ')) : '—'}</td>
+    ? '<span class="welfare-chip ok">yes</span>'
+    : '<span class="welfare-chip bad">no — alerts paused</span>'}</td>
+          <td>${onboard}</td>
+          <td>${esc(seen)}</td>
+          <td class="welfare-dim">${faults.length ? esc(faults.join(', ')) : 'none'}</td>
         </tr>`;
       }).join('')
-        : '<tr><td colspan="8" class="welfare-dim">No vehicles reporting.</td></tr>';
+        : '<tr><td colspan="6" class="welfare-dim">No buses reporting.</td></tr>';
     }
 
     const checks = [
@@ -510,8 +584,9 @@
           <td>${esc(e.bus_id)}</td>
           <td>
             <div>${esc(label(e.event_type))}${e.source === 'simulated'
-    ? ' <span class="welfare-chip sim">sim</span>' : ''}</div>
-            <div class="welfare-dim welfare-mono">${esc(e.rule || '')}</div>
+    ? ' <span class="welfare-chip sim">test</span>' : ''}</div>
+            ${action(e.event_type)
+    ? `<div class="welfare-dim">${esc(action(e.event_type))}</div>` : ''}
           </td>
           <td><span class="welfare-sev ${s.cls}">${s.name}</span></td>
           <td class="welfare-dim">${esc(e.reason || '')}</td>
@@ -548,6 +623,12 @@
   async function renderRules() {
     let cfg;
     try { cfg = (await api('/status')).config; } catch { return; }
+
+    // Volume history lives here, not on the console: it exists to check a
+    // threshold change, which is an engineering job, not an operator one.
+    api('/stats?days=14')
+      .then((st) => renderVolumeChart(st.by_day || []))
+      .catch(() => {});
 
     // Which families the server has enabled. Anything absent is switched off
     // and its threshold below is inert.

@@ -1180,46 +1180,22 @@
 
     <!-- ===== WELFARE CONSOLE ===== -->
     <div class="view" id="view-welfare-console">
-      <div class="dev-banner">
-        <i data-lucide="flask-conical"></i>
+      <!-- One answer to one question: does anything need attention right now. -->
+      <div class="welfare-headline" id="wHeadline">
+        <div class="welfare-headline-dot" id="wHeadlineDot"></div>
         <div>
-          <strong>Development interface.</strong>
-          Welfare rules run alongside the live APC feed and write only to the
-          <code>welfare_events</code> table. Nothing here affects passenger counting,
-          reporting, or the Mayo Clinic views.
+          <div class="welfare-headline-main" id="wHeadlineMain">Checking…</div>
+          <div class="welfare-headline-sub" id="wHeadlineSub">&nbsp;</div>
         </div>
         <span class="dev-tag" id="welfareModeTag">checking…</span>
-      </div>
-
-      <div class="kpi-grid" style="margin-bottom:var(--space-4)">
-        <div class="kpi-card pink">
-          <div class="kpi-label">Open Escalations</div>
-          <div class="kpi-value" id="wKpiEscalations">—</div>
-          <div class="kpi-sub">Severity 4, unacknowledged</div>
-        </div>
-        <div class="kpi-card amber">
-          <div class="kpi-label">Alerts (7 days)</div>
-          <div class="kpi-value" id="wKpiAlerts">—</div>
-          <div class="kpi-sub">Severity 3 and above</div>
-        </div>
-        <div class="kpi-card green">
-          <div class="kpi-label">Signals Live</div>
-          <div class="kpi-value" id="wKpiSignals">—</div>
-          <div class="kpi-sub">Of six SUS welfare signals</div>
-        </div>
-        <div class="kpi-card blue">
-          <div class="kpi-label">Feed Integrity</div>
-          <div class="kpi-value" id="wKpiIntegrity">—</div>
-          <div class="kpi-sub">Vehicles with a trusted feed</div>
-        </div>
       </div>
 
       <div class="chart-grid cols-2">
         <div class="chart-panel">
           <div class="chart-header">
             <div>
-              <div class="chart-title">Live Alert Feed</div>
-              <div class="chart-subtitle">Newest first, refreshed every 15 seconds</div>
+              <div class="chart-title">What has happened</div>
+              <div class="chart-subtitle">Newest first, updates every 15 seconds</div>
             </div>
             <div class="chart-actions">
               <button class="btn btn-sm" id="wRefreshBtn">
@@ -1235,8 +1211,8 @@
         <div class="chart-panel">
           <div class="chart-header">
             <div>
-              <div class="chart-title">Vehicle Welfare State</div>
-              <div class="chart-subtitle">Live rule state per vehicle</div>
+              <div class="chart-title">Buses right now</div>
+              <div class="chart-subtitle">One line per vehicle</div>
             </div>
           </div>
           <div class="chart-body welfare-feed" id="wVehicleCards">
@@ -1245,17 +1221,6 @@
         </div>
       </div>
 
-      <div class="chart-panel" style="margin-top:var(--space-4)">
-        <div class="chart-header">
-          <div>
-            <div class="chart-title">Event Volume by Day</div>
-            <div class="chart-subtitle">Use this to calibrate thresholds — alerts should be rare</div>
-          </div>
-        </div>
-        <div class="chart-body" style="height:240px">
-          <canvas id="wVolumeChart"></canvas>
-        </div>
-      </div>
     </div>
 
     <!-- ===== SIGNAL DELIVERY ===== -->
@@ -1263,17 +1228,16 @@
       <div class="dev-banner">
         <i data-lucide="info"></i>
         <div>
-          Delivery status of the six SUS welfare signals against the seven grant use cases.
-          <strong>Live</strong> means running on installed hardware today.
-          <strong>Blocked</strong> means waiting on a vendor answer.
-          <strong>Camera</strong> means dependent on the AI Pro Dome.
+          What the system is watching for, and what it cannot see yet.
+          <strong>Watching</strong> means working on the buses today.
+          <strong>Not yet</strong> means waiting on equipment or a supplier answer.
         </div>
       </div>
 
       <div class="chart-panel">
         <div class="chart-header">
           <div>
-            <div class="chart-title">Signal Delivery Matrix</div>
+            <div class="chart-title">What we are watching for</div>
             <div class="chart-subtitle" id="wSignalsSubtitle">Loading…</div>
           </div>
         </div>
@@ -1281,12 +1245,10 @@
           <table class="data-table">
             <thead>
               <tr>
-                <th>Signal</th>
-                <th>Use Case</th>
+                <th>Watching for</th>
                 <th>Status</th>
-                <th>Source</th>
-                <th>Detail</th>
-                <th>Events</th>
+                <th>What this means</th>
+                <th>Times seen</th>
               </tr>
             </thead>
             <tbody id="wSignalsBody"></tbody>
@@ -1298,8 +1260,8 @@
         <div class="chart-panel">
           <div class="chart-header">
             <div>
-              <div class="chart-title">Use Case Coverage</div>
-              <div class="chart-subtitle">Seven grant use cases by delivery route</div>
+              <div class="chart-title">Coverage</div>
+              <div class="chart-subtitle">Which welfare situations are covered today</div>
             </div>
           </div>
           <div class="chart-body" id="wUseCases"></div>
@@ -1307,8 +1269,8 @@
         <div class="chart-panel">
           <div class="chart-header">
             <div>
-              <div class="chart-title">Blocking Dependencies</div>
-              <div class="chart-subtitle">What has to happen next, and who owns it</div>
+              <div class="chart-title">What is holding us up</div>
+              <div class="chart-subtitle">And who needs to act</div>
             </div>
           </div>
           <div class="chart-body" id="wBlockers"></div>
@@ -1321,17 +1283,16 @@
       <div class="dev-banner">
         <i data-lucide="shield-check"></i>
         <div>
-          <strong>Rule 12 gates every other welfare rule.</strong>
-          A stuck counter reporting a permanent occupancy of 1 would fire
-          “passenger left on the bus” every night. When a feed is untrusted,
-          the welfare rules go silent rather than guess.
+          <strong>If a sensor cannot be trusted, that bus stops being watched.</strong>
+          The system goes quiet rather than send alerts it cannot stand behind —
+          so a bus listed here as untrusted has no welfare cover until it is fixed.
         </div>
       </div>
 
       <div class="chart-panel">
         <div class="chart-header">
           <div>
-            <div class="chart-title">Feed Integrity by Vehicle</div>
+            <div class="chart-title">Are the sensors working?</div>
             <div class="chart-subtitle" id="wHealthSubtitle">Loading…</div>
           </div>
         </div>
@@ -1340,13 +1301,11 @@
             <thead>
               <tr>
                 <th>Bus</th>
-                <th>Health</th>
-                <th>Trusted</th>
-                <th>Onboard</th>
-                <th>GPS Fix</th>
-                <th>Last Seen</th>
-                <th>Day In / Out</th>
-                <th>Reasons</th>
+                <th>Status</th>
+                <th>Being watched</th>
+                <th>On board</th>
+                <th>Last update</th>
+                <th>Problem</th>
               </tr>
             </thead>
             <tbody id="wHealthBody"></tbody>
@@ -1357,8 +1316,8 @@
       <div class="chart-panel" style="margin-top:var(--space-4)">
         <div class="chart-header">
           <div>
-            <div class="chart-title">Integrity Checks</div>
-            <div class="chart-subtitle">What Rule 12 watches for, and the current threshold</div>
+            <div class="chart-title">What we check</div>
+            <div class="chart-subtitle">Every check that can take a bus out of cover</div>
           </div>
         </div>
         <div class="chart-body" id="wChecks"></div>
@@ -1370,15 +1329,15 @@
       <div class="chart-panel">
         <div class="chart-header">
           <div>
-            <div class="chart-title">Welfare Event Log</div>
-            <div class="chart-subtitle" id="wLogSubtitle">Full audit trail from welfare_events</div>
+            <div class="chart-title">History</div>
+            <div class="chart-subtitle" id="wLogSubtitle">Everything the system has recorded</div>
           </div>
           <div class="chart-actions">
             <select class="filter-input" id="wLogSeverity" style="width:150px">
-              <option value="">All severities</option>
-              <option value="2">Notify and above</option>
-              <option value="3" selected>Alerts and above</option>
-              <option value="4">Escalations only</option>
+              <option value="">Everything</option>
+              <option value="2" selected>Worth knowing</option>
+              <option value="3">Needs attention</option>
+              <option value="4">Urgent only</option>
             </select>
             <select class="filter-input" id="wLogBus" style="width:130px">
               <option value="">All buses</option>
@@ -1392,12 +1351,12 @@
           <table class="data-table">
             <thead>
               <tr>
-                <th>Detected</th>
+                <th>When</th>
                 <th>Bus</th>
-                <th>Event</th>
-                <th>Severity</th>
-                <th>Reason</th>
-                <th>Onboard</th>
+                <th>What happened</th>
+                <th>How urgent</th>
+                <th>Detail</th>
+                <th>On board</th>
                 <th></th>
               </tr>
             </thead>
@@ -1428,6 +1387,18 @@
           as it requires a live fix and both buses report a fallback position. Occupancy is a
           <strong>modelled</strong> tally with a p90 error of 55 passengers, so treat these two
           rules as leads rather than observations.
+        </div>
+      </div>
+
+      <div class="chart-panel" style="margin-bottom:var(--space-4)">
+        <div class="chart-header">
+          <div>
+            <div class="chart-title">Event Volume by Day</div>
+            <div class="chart-subtitle">Alerts should be rare — use this to check a threshold change</div>
+          </div>
+        </div>
+        <div class="chart-body" style="height:220px">
+          <canvas id="wVolumeChart"></canvas>
         </div>
       </div>
 
