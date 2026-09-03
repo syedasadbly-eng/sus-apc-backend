@@ -1,0 +1,21 @@
+{
+  "root": true,
+  "env": { "node": true, "es2022": true },
+  "parserOptions": { "ecmaVersion": 2022, "sourceType": "script" },
+  "rules": {
+    "no-undef": "error",
+    "no-unused-vars": ["warn", { "args": "none" }]
+  },
+  "ignorePatterns": ["node_modules/", "public/vendor/"],
+  "overrides": [
+    {
+      "files": ["public/**/*.js"],
+      "env": { "browser": true, "node": false },
+      "globals": {
+        "Chart": "readonly",
+        "ChartDataLabels": "readonly",
+        "L": "readonly"
+      }
+    }
+  ]
+}

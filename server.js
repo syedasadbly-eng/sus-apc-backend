@@ -736,18 +736,24 @@ function handleMessage(topic, rawPayload) {
     recordMqttFlow(busId, topic, brokerNow, totalDataStartTime, deviceClockSkewSec, 'gps_only', 'No counting fields in payload', 0, 0);
     // Welfare hook: position and liveness still matter even with no counts.
     // End-of-service and stale-feed rules depend on seeing these messages.
-    welfare.observe({
-      busId,
-      onboard: busRunningOnboard[busId] != null ? busRunningOnboard[busId] : null,
-      dayIn: busDayTotals[busId] ? busDayTotals[busId].dayIn : undefined,
-      dayOut: busDayTotals[busId] ? busDayTotals[busId].dayOut : undefined,
-      lat: dev.gpsValid ? dev.lat : null,
-      lng: dev.gpsValid ? dev.lng : null,
-      speed: dev.speed,
-      gpsValid: !!dev.gpsValid,
-      route: (GATEWAYS.find(g => g.label === busId) || {}).route || null,
-      ts: brokerNow.getTime(),
-    });
+    // Wrapped: building the argument object happens OUTSIDE observe()'s own
+    // try/catch, so a fault here would otherwise escape into the MQTT handler.
+    try {
+      welfare.observe({
+        busId,
+        onboard: busRunningOnboard[busId] != null ? busRunningOnboard[busId] : null,
+        dayIn: busDayTotals[busId] ? busDayTotals[busId].dayIn : undefined,
+        dayOut: busDayTotals[busId] ? busDayTotals[busId].dayOut : undefined,
+        lat: dev.gpsValid ? dev.lat : null,
+        lng: dev.gpsValid ? dev.lng : null,
+        speed: dev.speed,
+        gpsValid: !!dev.gpsValid,
+        route: (GATEWAYS.find(g => g.label === busId) || {}).route || null,
+        ts: brokerNow.getTime(),
+      });
+    } catch (err) {
+      console.error('[welfare] observe hook failed (APC unaffected):', err.message);
+    }
     console.log(`[MQTT] ${busId} (${topic}) GPS/status only - no counting data`);
     return;
   }
@@ -913,6 +919,13 @@ function flushBusDelta(busId) {
   const gwMatch = GATEWAYS.find(g => g.label === busId);
   const route = gwMatch ? gwMatch.route || '' : '';
 
+  // Route as finally resolved inside the insert block below (GPS match, then
+  // schedule, then gateway default). Hoisted to function scope because the
+  // welfare hook runs AFTER that block has closed and cannot see block-scoped
+  // `let` bindings. Referencing recordRoute from the hook threw a ReferenceError
+  // on every flush, which tore down the MQTT client repeatedly.
+  let resolvedRoute = route;
+
   // ---- Insert merged record into database ----
   try {
     // Stop attribution priority:
@@ -949,6 +962,8 @@ function flushBusDelta(busId) {
         recordRoute = recordRoute || schedStop.routeKey;
       }
     }
+
+    resolvedRoute = recordRoute;
 
     insertRecord.run({
       timestamp: isoTs,
@@ -1001,7 +1016,10 @@ function flushBusDelta(busId) {
   // ---- Welfare hook ----
   // Runs after the record is safely committed so a welfare fault can never
   // affect APC ingest. observe() never throws and is a no-op when disabled.
-  {
+  // Wrapped: building the argument object happens OUTSIDE observe()'s own
+  // try/catch, so a fault here would otherwise escape into the MQTT handler
+  // and tear down the broker connection on every flush.
+  try {
     const wDev = liveDevices[busId] || {};
     welfare.observe({
       busId,
@@ -1012,9 +1030,11 @@ function flushBusDelta(busId) {
       lng: wDev.gpsValid ? pending.lng : null,
       speed: pending.speed || 0,
       gpsValid: !!wDev.gpsValid,
-      route: recordRoute || null,
+      route: resolvedRoute || null,
       ts: now.getTime(),
     });
+  } catch (err) {
+    console.error('[welfare] observe hook failed (APC unaffected):', err.message);
   }
 
   console.log(`[FLUSH] ${busId} merged: Δin=${deltaIn} Δout=${deltaOut} onboard=${onboard} dayTotal: in=${dayState.dayIn} out=${dayState.dayOut}`);
