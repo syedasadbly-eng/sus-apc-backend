@@ -66,14 +66,25 @@ const CONFIG = {
   imbalanceToleranceFloor: 5,
 
   // ---- R3 / R4 lone traveller -------------------------------------------
-  loneSustainSec: Number(process.env.WELFARE_LONE_SUSTAIN_SEC ?? 300),
+  // 1800s, not the original 300s. Replaying 68 service days through the
+  // modelled occupancy: 300s gave 11.50 lone_traveller/day, 900s gave 1.26,
+  // 1800s gives 0.60. The modelled tally has a p90 error of 55 passengers, so
+  // a short sustain window mostly catches the model passing through 1 on its
+  // way somewhere else. Thirty minutes of sustained single occupancy is also
+  // the case that actually matters for welfare.
+  loneSustainSec: Number(process.env.WELFARE_LONE_SUSTAIN_SEC ?? 1800),
   lateNightFrom: Number(process.env.WELFARE_LATE_FROM ?? 20),
   lateNightTo: Number(process.env.WELFARE_LATE_TO ?? 6),
 
   // ---- R6 end of service -------------------------------------------------
   depots: envJson('WELFARE_DEPOTS', DEFAULT_DEPOTS),
   termini: envJson('WELFARE_TERMINI', []),
-  eosStationarySec: Number(process.env.WELFARE_EOS_SEC ?? 300),
+  // 3600s, not the original 300s. Same replay: 300s gave 12.21
+  // end_of_service_occupancy/day at ESCALATE, 1800s gave 0.49, 3600s gives
+  // 0.40. The volume is driven by bus 515 sitting inside the Gonda depot
+  // radius with a reportedly valid fix and a non-zero tally for most of the
+  // service day, not by real end-of-service events.
+  eosStationarySec: Number(process.env.WELFARE_EOS_SEC ?? 3600),
   stationarySpeedKph: Number(process.env.WELFARE_STATIONARY_KPH ?? 3),
 
   // ---- rule enablement ---------------------------------------------------
@@ -84,17 +95,39 @@ const CONFIG = {
   //   stationary      R9 stationary with occupants
   //   all             enable everything
   //
-  // Default is sensor_health ONLY. Replaying 68 service days of real Mayo
-  // history (54,704 records) showed the movement- and occupancy-based rules
-  // fire on data artefacts rather than welfare events:
+  // Default: sensor_health, lone_traveller, end_of_service.
+  //
+  // Replaying 68 service days of real Mayo history (54,704 records) on the RAW
+  // counters produced 60.96 events/service day, 53.34 of them ESCALATE, because
+  // the rules were firing on data artefacts:
   //   - `speed` is 0.0 in every record, so "stationary" is always true
   //   - bus 515 logs 1.48 boardings per alighting, so its onboard tally never
   //     returns to zero and "occupants still aboard" is always true
   //   - bus 515 reports only 18 distinct positions across 68 days
-  // Defaults produced 60.96 events/service day, 53.34 of them ESCALATE.
-  // Re-enable these once speed, counting balance and GNSS are fixed, then
-  // re-run welfare/replay.js to set evidence-based thresholds.
-  enabledRules: String(process.env.WELFARE_RULES ?? 'sensor_health')
+  //
+  // The derived occupancy in welfare/occupancy.js fixes the second of those by
+  // rebalancing alightings, which makes the occupancy rules viable. Re-measured
+  // against the same 68 days using modelled occupancy:
+  //   lone_traveller  bus 515  1.2/day   bus 419  0.4/day  (raw: 0.2 and 0.6)
+  //   onboard != 0 at last reading of the day: 515 28/68, 419 24/56
+  //     (raw was 68/68 on 515 — permanently true, hence the old flood)
+  // Before the 5-minute sustain and 10-minute cooldown, so actual volume is
+  // lower. That is a workable signal rather than noise.
+  //
+  // `stationary` stays OFF and must not be enabled while `speed` is 0.0 in
+  // every record: that rule's own movement test is then permanently satisfied
+  // and it fires on every stopped reading. It produced 9 false events on
+  // 3 September alone.
+  //
+  // Note `end_of_service` is gated on gpsValid inside ruleEndOfService, and
+  // both buses currently report a fallback position rather than a live fix, so
+  // it will raise nothing until GNSS push is enabled on the UR35s. It is
+  // switched on deliberately so it starts working the moment GPS does.
+  //
+  // Occupancy rules read a MODELLED tally that invents alightings — see the
+  // accuracy figures in welfare/occupancy.js. p90 error is still 55 passengers.
+  // Treat anything they raise as a lead, not as an observation.
+  enabledRules: String(process.env.WELFARE_RULES ?? 'sensor_health,lone_traveller,end_of_service')
     .split(',')
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean),
@@ -618,10 +651,15 @@ class WelfareEngine extends EventEmitter {
   signals() {
     const c = this.counters;
     const anyLone = (c.lone_traveller ?? 0) + (c.lone_traveller_late_night ?? 0);
+    const anyGpsFix = [...this.vehicles.values()].some((v) => v.gpsValid);
+    const anyModelled = [...this.vehicles.values()].some((v) => v.occupancyModel);
     return [
       {
         signal: 'Occupancy', use_case: 5, status: 'live', source: 'VS125',
-        detail: 'Live onboard count and occupancy percentage', events: null,
+        detail: anyModelled
+          ? 'Onboard count and occupancy % — MODELLED, alightings rebalanced'
+          : 'Live onboard count and occupancy percentage',
+        events: null,
       },
       {
         signal: 'Sensor integrity', use_case: null, status: 'live', source: 'VS125 + UR35',
@@ -634,16 +672,23 @@ class WelfareEngine extends EventEmitter {
         status: this.ruleEnabled('lone_traveller') ? 'live' : 'disabled',
         source: 'VS125 (derived)',
         detail: this.ruleEnabled('lone_traveller')
-          ? 'Occupancy = 1 sustained, escalated at night'
+          ? 'Occupancy = 1 sustained, escalated at night — reads the MODELLED tally'
           : 'Disabled — needs a passenger count that returns to zero',
         events: anyLone,
       },
       {
+        // Enabled is not the same as working. The rule is gated on a live GPS
+        // fix, and server.js substitutes the depot anchor when there is none,
+        // so report it as blocked rather than live until a fix appears.
+        status: this.ruleEnabled('end_of_service')
+          ? (anyGpsFix ? 'live' : 'blocked')
+          : 'disabled',
         signal: 'End of service', use_case: 6,
-        status: this.ruleEnabled('end_of_service') ? 'live' : 'disabled',
         source: 'VS125 + GPS',
         detail: this.ruleEnabled('end_of_service')
-          ? 'Occupants aboard at a depot or terminus'
+          ? (anyGpsFix
+            ? 'Occupants aboard at a depot or terminus'
+            : 'Enabled, but waiting on a live GPS fix — no vehicle is reporting one')
           : 'Disabled — speed is 0 in every record and bus 515 never empties',
         events: (c.end_of_service_occupancy ?? 0) + (c.terminus_occupancy ?? 0),
       },

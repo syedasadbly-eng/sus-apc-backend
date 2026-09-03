@@ -5,11 +5,25 @@ const { WelfareEngine } = require('./engine.js');
 let pass = 0; let fail = 0;
 const ok = (cond, msg) => { if (cond) { pass++; console.log('  PASS  ' + msg); } else { fail++; console.log('  FAIL  ' + msg); } };
 
-function makeEngine(startTs) {
+function makeEngine(startTs, configOverrides = {}) {
   let clock = startTs;
   // Rule logic is tested in isolation, so every family is enabled here even
-  // though production ships with sensor_health only. See CONFIG.enabledRules.
-  const e = new WelfareEngine({ now: () => clock, config: { enabledRules: ['all'] } });
+  // though production ships a narrower set. See CONFIG.enabledRules.
+  //
+  // The sustain windows are pinned to the short values these cases were
+  // written against. Shipped defaults are deliberately much longer (1800s
+  // lone, 3600s end-of-service, calibrated on real history) and test 10
+  // covers those. Pinning here keeps these tests about rule LOGIC, so
+  // retuning a threshold does not silently break unrelated assertions.
+  const e = new WelfareEngine({
+    now: () => clock,
+    config: {
+      enabledRules: ['all'],
+      loneSustainSec: 300,
+      eosStationarySec: 300,
+      ...configOverrides,
+    },
+  });
   return { e, tick: (sec) => { clock += sec * 1000; }, at: () => clock };
 }
 
@@ -154,7 +168,7 @@ console.log('\n9. No GPS fix does not fake a depot arrival');
 // ---------------------------------------------------------------------------
 // 10. Shipped defaults: sensor health only
 // ---------------------------------------------------------------------------
-console.log('\n10. Shipped default config enables sensor health only');
+console.log('\n10. Shipped default config: sensor health + the two occupancy rules');
 {
   // No `config` override, so this engine uses CONFIG.enabledRules as shipped.
   let clock = NIGHT;
@@ -162,24 +176,28 @@ console.log('\n10. Shipped default config enables sensor health only');
   const tick = (sec) => { clock += sec * 1000; };
 
   ok(e.ruleEnabled('sensor_health'), 'sensor_health is enabled by default');
-  ok(!e.ruleEnabled('end_of_service'), 'end_of_service is disabled by default');
-  ok(!e.ruleEnabled('stationary'), 'stationary is disabled by default');
-  ok(!e.ruleEnabled('lone_traveller'), 'lone_traveller is disabled by default');
+  ok(e.ruleEnabled('lone_traveller'), 'lone_traveller is enabled by default');
+  ok(e.ruleEnabled('end_of_service'), 'end_of_service is enabled by default');
+  // The one that must stay off: `speed` is 0.0 in every record, so this rule's
+  // movement test is permanently satisfied and it fires on every stopped
+  // reading. Do not flip this without fixing speed first.
+  ok(!e.ruleEnabled('stationary'), 'stationary is STILL disabled by default');
 
   // The exact scenario that fired 53 times a service day on real history:
-  // occupants aboard, speed 0, parked on the depot anchor.
+  // occupants aboard, speed 0, parked on the depot anchor. Runs 80 minutes
+  // because the shipped end-of-service window is 3600s.
   const fired = [];
-  for (let i = 0; i <= 20; i++) {
+  for (let i = 0; i <= 80; i++) {
     fired.push(...e.ingest({
       busId: '515', onboard: 16, dayIn: 40, dayOut: 24,
       lat: 44.02302, lng: -92.46657, speed: 0, gpsValid: true, route: 'A', ts: clock,
     }));
     tick(60);
   }
-  ok(!fired.some((r) => r.event_type === 'end_of_service_occupancy'),
-    'no end_of_service_occupancy under shipped defaults');
+  ok(fired.some((r) => r.event_type === 'end_of_service_occupancy'),
+    'end_of_service_occupancy now fires on a real fix at the depot');
   ok(!fired.some((r) => r.event_type === 'stationary_with_occupants'),
-    'no stationary_with_occupants under shipped defaults');
+    'stationary_with_occupants still suppressed under shipped defaults');
 
   // Sensor health must still work: go quiet past the shipped 2700s threshold.
   tick(2800);
@@ -205,7 +223,7 @@ console.log('\n11. WELFARE_RULES can re-enable a family');
   ok(!e.ruleEnabled('stationary'), 'stationary still disabled');
 
   const fired = [];
-  for (let i = 0; i <= 10; i++) {
+  for (let i = 0; i <= 80; i++) { // past the shipped 3600s window
     fired.push(...e.ingest({
       busId: '515', onboard: 1, dayIn: 40, dayOut: 39,
       lat: 44.02302, lng: -92.46657, speed: 0, gpsValid: true, route: 'A', ts: clock,
@@ -214,6 +232,59 @@ console.log('\n11. WELFARE_RULES can re-enable a family');
   }
   ok(fired.some((r) => r.event_type === 'end_of_service_occupancy'),
     'end_of_service_occupancy fires once re-enabled');
+}
+
+console.log('\n12. Live conditions: what the enabled occupancy rules actually do today');
+{
+  // Condition as it stands on both buses: no live GPS fix, speed 0.
+  let clock = DAY;
+  const e = new WelfareEngine({ now: () => clock });
+  const tick = (sec) => { clock += sec * 1000; };
+
+  const fired = [];
+  for (let i = 0; i <= 20; i++) {
+    fired.push(...e.ingest({
+      busId: '515', onboard: 4, dayIn: 200, dayOut: 135,
+      lat: 44.02302, lng: -92.46657, speed: 0, gpsValid: false, route: 'A', ts: clock,
+    }));
+    tick(60);
+  }
+  // end_of_service is gated on gpsValid, and the no-fix branch falls through to
+  // `stationary`, which is off. So enabling it changes nothing until GNSS works.
+  ok(!fired.some((r) => r.event_type === 'end_of_service_occupancy'),
+    'end_of_service raises nothing without a live GPS fix');
+  ok(!fired.some((r) => r.event_type === 'stationary_with_occupants'),
+    'and does not leak out through the stationary branch either');
+
+  // lone_traveller has no GPS or speed dependency, so it works now. Uses the
+  // modelled tally, which is the only reason onboard can reach 1 on bus 515.
+  let clock2 = DAY;
+  const e2 = new WelfareEngine({ now: () => clock2 });
+  const fired2 = [];
+  for (let i = 0; i <= 45; i++) { // past the shipped 1800s sustain window
+    fired2.push(...e2.ingest({
+      busId: '515', onboard: 1, onboardRaw: 14, dayIn: 200, dayOut: 134,
+      lat: null, lng: null, speed: 0, gpsValid: false, route: 'A', ts: clock2,
+    }));
+    clock2 += 60 * 1000;
+  }
+  const lone = fired2.filter((r) => String(r.event_type).startsWith('lone_traveller'));
+  ok(lone.length >= 1, `lone_traveller fires on a modelled single occupant (${lone.length})`);
+  ok(lone.length <= 3, `and the cooldown holds the repeats down (${lone.length})`);
+
+  // A single occupant is NOT reported when the tally is the raw counter's 14.
+  let clock3 = DAY;
+  const e3 = new WelfareEngine({ now: () => clock3 });
+  const fired3 = [];
+  for (let i = 0; i <= 45; i++) {
+    fired3.push(...e3.ingest({
+      busId: '515', onboard: 14, dayIn: 200, dayOut: 135,
+      lat: null, lng: null, speed: 0, gpsValid: false, route: 'A', ts: clock3,
+    }));
+    clock3 += 60 * 1000;
+  }
+  ok(!fired3.some((r) => String(r.event_type).startsWith('lone_traveller')),
+    'no lone_traveller when 14 are aboard');
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

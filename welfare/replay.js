@@ -28,6 +28,7 @@
 const path = require('path');
 const fs = require('fs');
 const Database = require('better-sqlite3');
+const occupancy = require('./occupancy');
 const { WelfareEngine, SEVERITY_NAME } = require('./engine');
 
 // ---- args -----------------------------------------------------------------
@@ -117,14 +118,34 @@ if (rows.length === 0) {
 const t0 = Date.now();
 let skipped = 0;
 
+// Apply the same derived occupancy the live service uses, otherwise the replay
+// measures a configuration that is not the one shipped: welfare/index.js
+// substitutes the modelled tally before the engine ever sees a reading, and the
+// occupancy rules are tuned against that, not against the raw counter.
+// --raw-occupancy replays the unmodelled counters for comparison.
+const useModel = !process.argv.includes('--raw-occupancy');
+if (useModel) {
+  occupancy.initOccupancy(db, { capacity: Number(process.env.BUS_CAPACITY) || 16 });
+}
+
 for (const r of rows) {
   const ms = Date.parse(r.timestamp);
   if (Number.isNaN(ms)) { skipped += 1; continue; }
   clock = ms;
 
+  let onboard = r.onboard;
+  let onboardRaw = null;
+  if (useModel) {
+    const m = occupancy.derive({
+      busId: r.bus_id, dayIn: r.boardings, dayOut: r.alightings, onboardRaw: r.onboard,
+    });
+    if (m.derived) { onboard = m.onboard; onboardRaw = r.onboard; }
+  }
+
   engine.ingest({
     busId: String(r.bus_id || '').trim() || 'unknown',
-    onboard: r.onboard,
+    onboard,
+    onboardRaw,
     dayIn: r.boardings,
     dayOut: r.alightings,
     lat: r.lat,
