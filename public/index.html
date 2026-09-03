@@ -1415,8 +1415,11 @@
       <div class="dev-banner">
         <i data-lucide="triangle-alert"></i>
         <div>
-          These thresholds are <strong>reasoned, not evidenced</strong>. Calibrate them by
-          replaying stored history before treating any alert volume as meaningful.
+          Calibrated against <strong>68 service days of real history</strong> (54,704 records).
+          Only the sensor-health family is enabled: with every rule on, the defaults produced
+          <strong>60.96 events per service day</strong>, because <code>speed</code> is 0 in every
+          record and bus 515 logs 1.48 boardings per alighting, so its count never returns to
+          zero. The occupancy rules stay off until those two are fixed.
         </div>
       </div>
 

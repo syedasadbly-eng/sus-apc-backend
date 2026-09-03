@@ -2558,6 +2558,9 @@ html, body {
 .welfare-chip.ok   { border-color: transparent; background: var(--color-success-light); color: var(--color-success); }
 .welfare-chip.warn { border-color: transparent; background: var(--color-warning-light); color: var(--color-warning); }
 .welfare-chip.muted { border-color: transparent; background: var(--color-bg-muted, rgba(148,163,184,0.18)); color: var(--color-text-secondary, #64748b); }
+/* A rule row whose family is switched off: dimmed, but still readable. */
+.welfare-row-off { opacity: 0.55; }
+.welfare-row-off .welfare-row-title { font-weight: 500; }
 .welfare-chip.bad  { border-color: transparent; background: var(--color-error-light);   color: var(--color-error); }
 .welfare-chip.sim  { border-color: transparent; background: rgba(139, 92, 246, 0.14);   color: var(--chart-4); }
 

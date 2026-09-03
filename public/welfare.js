@@ -532,30 +532,40 @@
     let cfg;
     try { cfg = (await api('/status')).config; } catch { return; }
 
+    // Which families the server has enabled. Anything absent is switched off
+    // and its threshold below is inert.
+    const on = (cfg.enabled_rules || []);
+    const isOn = (f) => on.includes('all') || on.includes(f);
+
     const rules = [
       ['R12 — Sensor health', 'Gates every rule below',
-        `stale ${Math.round(cfg.stale_after_sec / 60)} min · offline ${Math.round(cfg.offline_after_sec / 60)} min · stuck ${cfg.stuck_counter_minutes} min`],
+        `stale ${Math.round(cfg.stale_after_sec / 60)} min · offline ${Math.round(cfg.offline_after_sec / 60)} min · stuck ${cfg.stuck_counter_minutes} min`,
+        isOn('sensor_health'), null],
       ['R3 — Lone traveller', 'Occupancy = 1 sustained',
-        `${Math.round(cfg.lone_sustain_sec / 60)} min sustain · Notify`],
+        `${Math.round(cfg.lone_sustain_sec / 60)} min sustain · Notify`,
+        isOn('lone_traveller'), 'needs a count that returns to zero'],
       ['R4 — Lone traveller, night', 'Same, inside the night window',
-        `${cfg.late_night_from}:00–${String(cfg.late_night_to).padStart(2, '0')}:00 ${esc(cfg.timezone)} · Alert`],
+        `${cfg.late_night_from}:00–${String(cfg.late_night_to).padStart(2, '0')}:00 ${esc(cfg.timezone)} · Alert`,
+        isOn('lone_traveller'), 'needs a count that returns to zero'],
       ['R6 — End of service', 'Occupants aboard at a depot or terminus',
-        `${Math.round(cfg.eos_stationary_sec / 60)} min stationary under ${cfg.stationary_speed_kph} km/h · Escalate at depot`],
+        `${Math.round(cfg.eos_stationary_sec / 60)} min stationary under ${cfg.stationary_speed_kph} km/h · Escalate at depot`,
+        isOn('end_of_service'), 'speed is 0 in every record; bus 515 never empties'],
       ['R9 — Stationary with occupants', 'Same trigger, no geofence match',
-        'Notify — lower confidence by design'],
+        'Notify — lower confidence by design',
+        isOn('stationary'), 'cannot separate stationary from missing speed'],
       ['Alert cooldown', 'Repeat suppression per rule per vehicle',
-        `${Math.round(cfg.alert_cooldown_sec / 60)} min`],
+        `${Math.round(cfg.alert_cooldown_sec / 60)} min`, true, null],
     ];
 
     const el = document.getElementById('wRulesList');
     if (el) {
-      el.innerHTML = rules.map(([name, what, thresh]) => `
-        <div class="welfare-row">
+      el.innerHTML = rules.map(([name, what, thresh, enabled, why]) => `
+        <div class="welfare-row${enabled ? '' : ' welfare-row-off'}">
           <div class="welfare-row-main">
-            <div class="welfare-row-title">${esc(name)}</div>
-            <div class="welfare-dim">${esc(what)}</div>
+            <div class="welfare-row-title">${esc(name)}${enabled ? '' : ' <span class="welfare-chip muted">OFF</span>'}</div>
+            <div class="welfare-dim">${esc(what)}${enabled || !why ? '' : ` — ${esc(why)}`}</div>
           </div>
-          <span class="welfare-chip">${thresh}</span>
+          <span class="welfare-chip${enabled ? '' : ' muted'}">${thresh}</span>
         </div>`).join('');
     }
 
