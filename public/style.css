@@ -2571,7 +2571,9 @@ html, body {
   border-radius: var(--radius-full);
   font-size: 11px;
   font-weight: 600;
-  text-transform: capitalize;
+  /* No text-transform: these labels are now written sentences ("Watching,
+     with a fault"), and capitalize turned them into "Watching, With A
+     Fault". The text arrives correctly cased from the renderer. */
   white-space: nowrap;
 }
 .welfare-health-pill.ok   { background: var(--color-success-light); color: var(--color-success); }

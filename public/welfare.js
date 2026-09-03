@@ -208,9 +208,18 @@
     // condition. Unwatched buses outrank open alerts: an operator who thinks
     // a bus is covered when it is not is worse off than one with a known alert.
     const untrusted = health.filter((h) => !h.trustworthy);
+    // Injected test events must never be counted here. They are indistinguishable
+    // from real ones in the feed apart from this flag, and a headline reading
+    // "5 things need attention" off the back of somebody exercising the test
+    // buttons is exactly the sort of thing that gets a welfare screen ignored.
+    const isReal = (e) => e.source !== 'simulated';
     const recent = events.filter((e) => {
       const age = (Date.now() - Date.parse(e.detected_at)) / 60000;
-      return Number.isFinite(age) && age <= 120 && e.severity >= 3;
+      return isReal(e) && Number.isFinite(age) && age <= 120 && e.severity >= 3;
+    });
+    const recentTests = events.filter((e) => {
+      const age = (Date.now() - Date.parse(e.detected_at)) / 60000;
+      return !isReal(e) && Number.isFinite(age) && age <= 120;
     });
     const faulty = health.filter((h) => h.trustworthy && (h.reasons || []).length);
 
@@ -232,6 +241,9 @@
       sub = `Bus ${faulty.map((h) => h.bus_id).join(', ')} has a sensor fault. Alerts still running.`;
     } else {
       sub = `All ${health.length} buses reporting normally.`;
+    }
+    if (recentTests.length && tone === 'ok') {
+      sub += ` ${recentTests.length} test event${recentTests.length > 1 ? 's' : ''} in the feed, ignored here.`;
     }
     const dot = document.getElementById('wHeadlineDot');
     if (dot) dot.className = `welfare-headline-dot ${tone}`;
