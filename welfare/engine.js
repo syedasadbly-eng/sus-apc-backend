@@ -271,6 +271,16 @@ class WelfareEngine extends EventEmitter {
     this.recent = [];              // in-memory ring for the dev console
     this.recentLimit = 200;
     this.counters = Object.create(null);
+
+    // Seed the known fleet from the depot config so a bus that has not
+    // reported since startup shows as "never reported" instead of silently
+    // vanishing from the list. Bus 419 disappeared from fleet-health entirely
+    // after a restart, which made the interface read "1 of 1 buses are being
+    // watched" - full coverage - when real coverage was 1 of 2. A welfare
+    // screen must never shrink its own denominator.
+    for (const d of this.cfg.depots || []) {
+      for (const id of d.buses || []) this.vehicle(String(id));
+    }
   }
 
   vehicle(id) {
@@ -479,6 +489,10 @@ class WelfareEngine extends EventEmitter {
   }
 
   isTrustworthy(v) {
+    // A seeded bus that has never sent a message has no health reasons, so
+    // without this guard it would report as trustworthy purely because
+    // nothing has gone wrong yet. Nothing has gone right either.
+    if (v.lastSeen == null) return false;
     return !['offline', 'stale', 'negative_occupancy', 'stuck_counter']
       .some((r) => v.healthReasons.has(r));
   }
@@ -737,6 +751,8 @@ class WelfareEngine extends EventEmitter {
       gps_valid: v.gpsValid,
       speed: v.speed,
       last_seen_sec_ago: v.lastSeen ? Math.round((nowTs - v.lastSeen) / 1000) : null,
+      // A seeded bus that has never sent anything is not healthy-by-default.
+      never_reported: !v.lastSeen,
       reports: v.reportCount,
       service_day: v.serviceDay,
       day_in: v.dayIn,
@@ -747,8 +763,10 @@ class WelfareEngine extends EventEmitter {
   }
 
   /** Signal delivery matrix for the dev console. */
-  signals() {
-    const c = this.counters;
+  signals(counts) {
+    // Prefer durable per-type counts from the store; fall back to the
+    // in-process counters when none are supplied (tests, offline callers).
+    const c = counts || this.counters;
     const anyLone = (c.lone_traveller ?? 0) + (c.lone_traveller_late_night ?? 0);
     const anyGpsFix = [...this.vehicles.values()].some((v) => v.gpsValid);
     const anyModelled = [...this.vehicles.values()].some((v) => v.occupancyModel);

@@ -307,7 +307,10 @@
     const faults = (h.reasons || []).map((r) => REASON_TEXT[r] || String(r).replace(/_/g, ' '));
 
     let headline; let sub;
-    if (!h.trustworthy) {
+    if (h.never_reported) {
+      headline = 'No contact';
+      sub = 'This bus has not reported since the system started. Not being watched.';
+    } else if (!h.trustworthy) {
       headline = 'Not being watched';
       sub = faults.length ? `Welfare alerts are paused \u2014 ${faults.join(', ')}.`
         : 'Welfare alerts are paused for this bus.';
@@ -497,6 +500,7 @@
     const HEALTH_TEXT = {
       ok: 'Working', degraded: 'Working, with a fault',
       stale: 'Gone quiet', faulty: 'Faulty', offline: 'Offline',
+      unknown: 'No contact',
     };
     const REASON_TEXT = {
       no_gps_fix: 'no GPS position',
@@ -513,7 +517,8 @@
         const seen = h.last_seen_sec_ago == null ? '—'
           : h.last_seen_sec_ago < 90 ? 'just now'
             : `${Math.round(h.last_seen_sec_ago / 60)} min ago`;
-        const faults = (h.reasons || []).map((r) => REASON_TEXT[r] || String(r).replace(/_/g, ' '));
+        const faults = h.never_reported ? ['has not reported at all']
+          : (h.reasons || []).map((r) => REASON_TEXT[r] || String(r).replace(/_/g, ' '));
         // "estimated" stays visible: this figure is modelled, and a depot
         // must not read it as a headcount.
         const onboard = h.onboard == null ? '—'
@@ -636,8 +641,16 @@
 
     // Volume history lives here, not on the console: it exists to check a
     // threshold change, which is an engineering job, not an operator one.
+    // Real events only: this chart is used to tune thresholds, and the test
+    // buttons on this very page would otherwise inflate it.
     api('/stats?days=14')
-      .then((st) => renderVolumeChart(st.by_day || []))
+      .then((st) => {
+        renderVolumeChart(st.by_day || []);
+        const n = st.simulated_excluded || 0;
+        setText('wVolumeNote', n
+          ? `Real events only — ${n} test event${n > 1 ? 's' : ''} excluded.`
+          : 'Real events only.');
+      })
       .catch(() => {});
 
     // Which families the server has enabled. Anything absent is switched off

@@ -109,29 +109,50 @@ function createStore(db) {
       return db.prepare(sql).all(params).map(hydrate);
     },
 
-    stats(days = 7) {
+    /**
+     * Aggregates for the dev interface.
+     *
+     * Defaults to REAL events only. Simulated rows are written by the test
+     * buttons with hardcoded severities and are indistinguishable from real
+     * ones in a GROUP BY, so counting them corrupts exactly the numbers used
+     * to tune thresholds: on 3 Sep the volume chart read 20 events when 14
+     * were real. Callers that genuinely want the test rows (Rules & Testing)
+     * pass includeSimulated.
+     */
+    stats(days = 7, includeSimulated = false) {
       const since = new Date(Date.now() - days * 86400000).toISOString();
+      const simClause = includeSimulated ? '' : " AND source != 'simulated'";
+      const w = `WHERE detected_at >= ?${simClause}`;
+      const sevCols = `SUM(CASE WHEN severity >= 3 THEN 1 ELSE 0 END) AS alerts`;
       return {
         by_type: db.prepare(`SELECT event_type, COUNT(*) AS n, MAX(detected_at) AS last_seen
-          FROM welfare_events WHERE detected_at >= ? GROUP BY event_type ORDER BY n DESC`).all(since),
-        by_day: db.prepare(`SELECT date, COUNT(*) AS n,
-            SUM(CASE WHEN severity >= 3 THEN 1 ELSE 0 END) AS alerts
-          FROM welfare_events WHERE detected_at >= ? GROUP BY date ORDER BY date`).all(since),
-        by_bus: db.prepare(`SELECT bus_id, COUNT(*) AS n,
-            SUM(CASE WHEN severity >= 3 THEN 1 ELSE 0 END) AS alerts
-          FROM welfare_events WHERE detected_at >= ? GROUP BY bus_id ORDER BY n DESC`).all(since),
-        totals: db.prepare(`SELECT COUNT(*) AS total,
-            SUM(CASE WHEN severity >= 3 THEN 1 ELSE 0 END) AS alerts,
+          FROM welfare_events ${w} GROUP BY event_type ORDER BY n DESC`).all(since),
+        by_day: db.prepare(`SELECT date, COUNT(*) AS n, ${sevCols}
+          FROM welfare_events ${w} GROUP BY date ORDER BY date`).all(since),
+        by_bus: db.prepare(`SELECT bus_id, COUNT(*) AS n, ${sevCols}
+          FROM welfare_events ${w} GROUP BY bus_id ORDER BY n DESC`).all(since),
+        totals: db.prepare(`SELECT COUNT(*) AS total, ${sevCols},
             SUM(CASE WHEN severity = 4 THEN 1 ELSE 0 END) AS escalations,
-            SUM(CASE WHEN acknowledged = 0 AND severity >= 3 THEN 1 ELSE 0 END) AS unacknowledged,
-            -- Simulated rows are indistinguishable from real ones in every
-            -- aggregate above, so the nav badge reads this instead. A test
-            -- button press must never put a red count on a welfare screen.
-            SUM(CASE WHEN acknowledged = 0 AND severity >= 3
-                     AND source != 'simulated' THEN 1 ELSE 0 END) AS unacknowledged_real
-          FROM welfare_events WHERE detected_at >= ?`).get(since),
+            SUM(CASE WHEN acknowledged = 0 AND severity >= 3 THEN 1 ELSE 0 END) AS unacknowledged
+          FROM welfare_events ${w}`).get(since),
+        // Always reported, so the interface can say how many test rows were
+        // excluded rather than silently dropping them.
+        simulated_excluded: includeSimulated ? 0
+          : db.prepare(`SELECT COUNT(*) AS n FROM welfare_events
+              WHERE detected_at >= ? AND source = 'simulated'`).get(since).n,
+        includes_simulated: includeSimulated,
         window_days: days,
       };
+    },
+
+    /** Per-event-type totals from the DB, real events only. Survives restart. */
+    countsByType(days = 7) {
+      const since = new Date(Date.now() - days * 86400000).toISOString();
+      const rows = db.prepare(`SELECT event_type, COUNT(*) AS n FROM welfare_events
+        WHERE detected_at >= ? AND source != 'simulated' GROUP BY event_type`).all(since);
+      const out = Object.create(null);
+      for (const r of rows) out[r.event_type] = r.n;
+      return out;
     },
 
     acknowledge(eventId, by) {
@@ -172,7 +193,14 @@ function createRouter(engine, store, meta) {
     });
   });
 
-  router.get('/signals', (req, res) => res.json(engine.signals()));
+  router.get('/signals', (req, res) => {
+    // Counts come from the database, not engine.counters. The in-memory
+    // counters reset to {} on every restart, so this column read 0 for every
+    // signal after each deploy while 15 real events sat in the table.
+    let counts;
+    try { counts = store.countsByType(7); } catch { counts = null; }
+    res.json(engine.signals(counts));
+  });
 
   router.get('/fleet-health', (req, res) => res.json(engine.fleetHealth()));
 
@@ -196,7 +224,7 @@ function createRouter(engine, store, meta) {
 
   router.get('/stats', (req, res) => {
     try {
-      res.json(store.stats(Number(req.query.days) || 7));
+      res.json(store.stats(Number(req.query.days) || 7, req.query.include_simulated === 'true'));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

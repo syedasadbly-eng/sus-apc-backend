@@ -386,5 +386,46 @@ console.log('\n16. A silent feed is not counted as dwell');
     `held time excludes the gap (${ev.detail.held_minutes} min, not 40+)`);
 }
 
+console.log('\n17. A bus that has never reported is visible and untrusted');
+{
+  // Regression: fleet-health only listed vehicles heard from since process
+  // start, so after a restart bus 419 vanished and the interface read
+  // "1 of 1 buses are being watched" - apparent full coverage on half a fleet.
+  const { e, at } = makeEngine(DAY, {
+    depots: [
+      { name: 'A', lat: 44.02302, lng: -92.46657, radiusM: 180, buses: ['515'] },
+      { name: 'B', lat: 44.0777, lng: -92.5058, radiusM: 180, buses: ['419'] },
+    ],
+  });
+  const before = e.fleetHealth();
+  ok(before.length === 2, `both configured buses listed before any data (${before.length})`);
+  ok(before.every((h) => h.never_reported), 'both flagged as never reported');
+  ok(before.every((h) => !h.trustworthy),
+    'a bus with no data is NOT trustworthy just because nothing has failed');
+
+  e.ingest({
+    busId: '515', onboard: 4, dayIn: 10, dayOut: 6,
+    lat: null, lng: null, speed: 0, gpsValid: false, route: 'A', ts: at(),
+  });
+  const after = e.fleetHealth();
+  ok(after.length === 2, 'still lists both after one reports');
+  const b515 = after.find((h) => h.bus_id === '515');
+  const b419 = after.find((h) => h.bus_id === '419');
+  ok(b515.never_reported === false && b515.trustworthy, '515 becomes trusted once it reports');
+  ok(b419.never_reported === true && !b419.trustworthy, '419 stays untrusted and visible');
+}
+
+console.log('\n18. Signal counts come from the supplied store, not memory');
+{
+  const { e } = makeEngine(DAY);
+  // engine.counters resets on restart; signals() must prefer durable counts.
+  const rows = e.signals({ lone_traveller_late_night: 3, sensor_stale: 4 });
+  const lone = rows.find((r) => r.signal === 'Lone Traveller');
+  ok(lone.events === 3, `lone traveller count read from the store (${lone.events})`);
+  const memOnly = e.signals();
+  ok(memOnly.find((r) => r.signal === 'Lone Traveller').events === 0,
+    'falls back to in-memory counters when no store counts are supplied');
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);
