@@ -76,6 +76,26 @@ const CONFIG = {
   lateNightFrom: Number(process.env.WELFARE_LATE_FROM ?? 20),
   lateNightTo: Number(process.env.WELFARE_LATE_TO ?? 6),
 
+  // ---- R1 dwell ----------------------------------------------------------
+  // This is NOT the VS125 device dwell field, which Milesight has not yet
+  // given us the name or interval for. The VS125 reports counts, not
+  // identities, so per-passenger dwell is not derivable from this feed at all.
+  //
+  // What IS derivable: how long the vehicle has held occupants with nobody
+  // alighting. That is the welfare case that matters (someone aboard who has
+  // not got off), and it needs only the cumulative alighting counter.
+  //
+  // 1200s from 68 service days, feed gaps over 20 min excluded because a
+  // silent feed is sensor health's problem, not dwell:
+  //   bus 515  p90 4 min, p99 13 min, max 39 min
+  //   bus 419  p90 1 min, p99 13 min, max 20 min
+  // At 1200s: 0.28/day on 515, 0.00/day on 419. At 1800s: 0.03/day and 0.
+  // 1200s sits just above p99 on both vehicles.
+  dwellNoAlightSec: Number(process.env.WELFARE_DWELL_SEC ?? 1200),
+  // Any reporting gap longer than this restarts the dwell window rather than
+  // counting the silence as time held. See ruleDwell for why.
+  dwellMaxGapSec: Number(process.env.WELFARE_DWELL_MAX_GAP_SEC ?? 1200),
+
   // ---- R6 end of service -------------------------------------------------
   depots: envJson('WELFARE_DEPOTS', DEFAULT_DEPOTS),
   termini: envJson('WELFARE_TERMINI', []),
@@ -127,7 +147,8 @@ const CONFIG = {
   // Occupancy rules read a MODELLED tally that invents alightings — see the
   // accuracy figures in welfare/occupancy.js. p90 error is still 55 passengers.
   // Treat anything they raise as a lead, not as an observation.
-  enabledRules: String(process.env.WELFARE_RULES ?? 'sensor_health,lone_traveller,end_of_service')
+  enabledRules: String(process.env.WELFARE_RULES
+    ?? 'sensor_health,lone_traveller,end_of_service,dwell')
     .split(',')
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean),
@@ -225,6 +246,9 @@ class VehicleState {
 
     this.loneSinceTs = null;
     this.stationarySinceTs = null;
+    this.noAlightSinceTs = null;
+    this.lastDayOut = null;
+    this.prevSeen = null;
     this.lastAlertTs = {};
   }
 }
@@ -331,6 +355,7 @@ class WelfareEngine extends EventEmitter {
     v.gpsValid = Boolean(o.gpsValid);
     if (o.route) v.route = o.route;
     if (v.firstSeen == null) v.firstSeen = nowTs;
+    v.prevSeen = v.lastSeen;
     v.lastSeen = nowTs;
     v.reportCount += 1;
 
@@ -343,13 +368,16 @@ class WelfareEngine extends EventEmitter {
     // Gated twice: the family must be enabled AND the feed trustworthy.
     const loneOn = this.ruleEnabled('lone_traveller');
     const eosOn = this.ruleEnabled('end_of_service') || this.ruleEnabled('stationary');
+    const dwellOn = this.ruleEnabled('dwell');
 
-    if ((loneOn || eosOn) && this.isTrustworthy(v)) {
+    if ((loneOn || eosOn || dwellOn) && this.isTrustworthy(v)) {
       if (loneOn) out.push(...this.ruleLoneTraveller(v, ts, nowTs));
       if (eosOn) out.push(...this.ruleEndOfService(v, ts, nowTs));
+      if (dwellOn) out.push(...this.ruleDwell(v, ts, nowTs));
     } else {
       v.loneSinceTs = null;
       v.stationarySinceTs = null;
+      v.noAlightSinceTs = null;
     }
 
     return out.filter(Boolean);
@@ -496,6 +524,77 @@ class WelfareEngine extends EventEmitter {
       detail: {
         sustained_minutes: Math.round(sustainedSec / 60),
         local_hour: localHour(ts, this.cfg.timezone),
+      },
+    }, nowTs));
+    return out;
+  }
+
+  // -------------------------------------------------------------------------
+  // R1 — dwell: occupants held with nobody alighting
+  //
+  // Deliberately a PROXY, and labelled as one everywhere it surfaces. The
+  // VS125 gives counts, not identities, so this cannot tell you that the same
+  // person stayed aboard for the whole window — only that the vehicle has had
+  // someone on it and the alighting counter has not moved.
+  //
+  // Reads the RAW counter, not the modelled occupancy. The model invents
+  // alightings to rebalance the day, which is exactly the signal this rule
+  // watches, so feeding it modelled numbers would let the model mask a real
+  // dwell. On bus 419 right now the model says 0 aboard while the counter
+  // says 2 — this rule must see the 2.
+  // -------------------------------------------------------------------------
+  ruleDwell(v, ts, nowTs) {
+    const out = [];
+
+    // A quiet feed is indistinguishable from a dwelling bus: no alighting
+    // arrives because no message arrives at all. Sensor health does not catch
+    // this either, since it only calls a feed stale after 2700s. Without this
+    // guard the rule measured 2.00 events/day on real history against the
+    // 0.28/day the same data gives when gaps are excluded — nearly all of the
+    // excess was silence, including every one of bus 419's raises.
+    const sinceLastReportSec = v.prevSeen == null ? 0 : (nowTs - v.prevSeen) / 1000;
+    if (sinceLastReportSec > this.cfg.dwellMaxGapSec) {
+      v.noAlightSinceTs = null;
+      v.lastDayOut = v.dayOut;
+      return out;
+    }
+
+    const aboard = v.onboardRaw != null ? v.onboardRaw : v.onboard;
+    if (!Number.isFinite(aboard) || aboard <= 0) {
+      v.noAlightSinceTs = null;
+      v.lastDayOut = v.dayOut;
+      return out;
+    }
+
+    // Somebody got off: the window restarts. Also restarts on a counter reset
+    // (new service day), where dayOut goes backwards.
+    if (v.lastDayOut == null || v.dayOut !== v.lastDayOut) {
+      const moved = v.lastDayOut != null && v.dayOut !== v.lastDayOut;
+      v.lastDayOut = v.dayOut;
+      if (moved) { v.noAlightSinceTs = nowTs; return out; }
+    }
+
+    if (v.noAlightSinceTs == null) { v.noAlightSinceTs = nowTs; return out; }
+
+    const heldSec = (nowTs - v.noAlightSinceTs) / 1000;
+    if (heldSec < this.cfg.dwellNoAlightSec) return out;
+
+    const late = inLateNight(ts, this.cfg);
+    const mins = Math.round(heldSec / 60);
+    out.push(this.raise(v, {
+      event_type: 'dwell_no_alighting',
+      severity: late ? SEVERITY.ALERT : SEVERITY.NOTIFY,
+      rule: 'R1_dwell_no_alighting',
+      use_case: 1,
+      reason: `${aboard} aboard for ${mins} min with nobody alighting`
+        + (late ? ' on an off-peak service' : ''),
+      detail: {
+        held_minutes: mins,
+        aboard_raw: aboard,
+        day_out: v.dayOut,
+        local_hour: localHour(ts, this.cfg.timezone),
+        proxy: true,
+        basis: 'no alighting counter movement — not per-passenger dwell',
       },
     }, nowTs));
     return out;
@@ -702,8 +801,13 @@ class WelfareEngine extends EventEmitter {
         events: c.stationary_with_occupants ?? 0,
       },
       {
-        signal: 'Dwell', use_case: 1, status: 'blocked', source: 'VS125',
-        detail: 'Awaiting dwell field name and interval from Milesight', events: 0,
+        signal: 'Dwell (proxy)', use_case: 1,
+        status: this.ruleEnabled('dwell') ? 'live' : 'disabled',
+        source: 'VS125 (derived)',
+        detail: this.ruleEnabled('dwell')
+          ? 'Occupants held with no alighting \u2014 PROXY, not per-passenger dwell'
+          : 'Awaiting dwell field name and interval from Milesight',
+        events: c.dwell_no_alighting ?? 0,
       },
       {
         signal: 'Distress', use_case: 2, status: 'camera', source: 'AI Pro Dome',
@@ -729,6 +833,8 @@ class WelfareEngine extends EventEmitter {
       stuck_counter_minutes: c.stuckCounterMinutes,
       enabled_rules: c.enabledRules,
       lone_sustain_sec: c.loneSustainSec,
+      dwell_no_alight_sec: c.dwellNoAlightSec,
+      dwell_max_gap_sec: c.dwellMaxGapSec,
       late_night_from: c.lateNightFrom,
       late_night_to: c.lateNightTo,
       eos_stationary_sec: c.eosStationarySec,

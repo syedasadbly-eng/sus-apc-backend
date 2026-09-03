@@ -287,5 +287,104 @@ console.log('\n12. Live conditions: what the enabled occupancy rules actually do
     'no lone_traveller when 14 are aboard');
 }
 
+console.log('\n13. R1 dwell proxy: occupants held with nobody alighting');
+{
+  const { e, tick, at } = makeEngine(DAY, { dwellNoAlightSec: 600 });
+  const feed = (n, dayOut) => {
+    const fired = [];
+    for (let i = 0; i < n; i++) {
+      fired.push(...e.ingest({
+        busId: '515', onboard: 6, dayIn: 200, dayOut,
+        lat: null, lng: null, speed: 0, gpsValid: false, route: 'A', ts: at(),
+      }));
+      tick(60);
+    }
+    return fired;
+  };
+  ok(feed(5, 100).length === 0, 'nothing before the window elapses');
+  const fired = feed(10, 100);
+  const ev = fired.find((r) => r.event_type === 'dwell_no_alighting');
+  ok(Boolean(ev), 'dwell_no_alighting raised once the window passes');
+  ok(ev?.severity === 2, 'daytime severity is Notify (2), got ' + ev?.severity);
+  ok(ev?.detail?.proxy === true, 'event is flagged as a proxy, not measured dwell');
+  ok(/nobody alighting/.test(ev?.reason || ''), 'reason states the basis: ' + ev?.reason);
+}
+
+console.log('\n14. Dwell window restarts when somebody gets off');
+{
+  const { e, tick, at } = makeEngine(DAY, { dwellNoAlightSec: 600 });
+  const step = (dayOut) => {
+    const f = e.ingest({
+      busId: '515', onboard: 6, dayIn: 200, dayOut,
+      lat: null, lng: null, speed: 0, gpsValid: false, route: 'A', ts: at(),
+    });
+    tick(60);
+    return f;
+  };
+  for (let i = 0; i < 9; i++) step(100);   // 9 min held
+  let fired = [];
+  fired = fired.concat(step(101));         // someone alights: window restarts
+  for (let i = 0; i < 9; i++) fired = fired.concat(step(101));
+  ok(!fired.some((r) => r.event_type === 'dwell_no_alighting'),
+    'an alighting resets the clock, so 18 total minutes does not fire');
+  for (let i = 0; i < 4; i++) fired = fired.concat(step(101));
+  ok(fired.some((r) => r.event_type === 'dwell_no_alighting'),
+    'but it fires 10 min after that alighting');
+}
+
+console.log('\n15. Dwell reads the raw counter, not the modelled occupancy');
+{
+  // Bus 419's live condition: model says 0 aboard, the counter says 2. The
+  // model must not be able to hide a real dwell.
+  const { e, tick, at } = makeEngine(DAY, { dwellNoAlightSec: 600 });
+  const fired = [];
+  for (let i = 0; i < 15; i++) {
+    fired.push(...e.ingest({
+      busId: '419', onboard: 0, onboardRaw: 2, dayIn: 30, dayOut: 42,
+      lat: null, lng: null, speed: 0, gpsValid: false, route: 'B', ts: at(),
+    }));
+    tick(60);
+  }
+  const ev = fired.find((r) => r.event_type === 'dwell_no_alighting');
+  ok(Boolean(ev), 'fires on the raw counter even when the model reports empty');
+  ok(ev?.detail?.aboard_raw === 2, 'reports the raw figure, got ' + ev?.detail?.aboard_raw);
+
+  // Genuinely empty by both measures: silent.
+  const { e: e2, tick: t2, at: a2 } = makeEngine(DAY, { dwellNoAlightSec: 600 });
+  const f2 = [];
+  for (let i = 0; i < 15; i++) {
+    f2.push(...e2.ingest({
+      busId: '419', onboard: 0, onboardRaw: 0, dayIn: 30, dayOut: 30,
+      lat: null, lng: null, speed: 0, gpsValid: false, route: 'B', ts: a2(),
+    }));
+    t2(60);
+  }
+  ok(!f2.some((r) => r.event_type === 'dwell_no_alighting'),
+    'silent when the bus is actually empty');
+}
+
+console.log('\n16. A silent feed is not counted as dwell');
+{
+  const { e, tick, at } = makeEngine(DAY, { dwellNoAlightSec: 600, dwellMaxGapSec: 600 });
+  const send = () => e.ingest({
+    busId: '515', onboard: 6, dayIn: 200, dayOut: 100,
+    lat: null, lng: null, speed: 0, gpsValid: false, route: 'A', ts: at(),
+  });
+  send(); tick(60); send();
+  tick(1800);          // 30 min of silence, still short of the 2700s stale mark
+  const fired = [];
+  for (let i = 0; i < 5; i++) { fired.push(...send()); tick(60); }
+  ok(!fired.some((r) => r.event_type === 'dwell_no_alighting'),
+    'silence restarts the window instead of accruing as time held');
+
+  // And it recovers: keep reporting and it fires on genuinely observed time.
+  for (let i = 0; i < 8; i++) { fired.push(...send()); tick(60); }
+  ok(fired.some((r) => r.event_type === 'dwell_no_alighting'),
+    'fires once the bus has actually been observed for the full window');
+  const ev = fired.find((r) => r.event_type === 'dwell_no_alighting');
+  ok(ev.detail.held_minutes <= 15,
+    `held time excludes the gap (${ev.detail.held_minutes} min, not 40+)`);
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

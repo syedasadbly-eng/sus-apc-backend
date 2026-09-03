@@ -1417,8 +1417,10 @@
         <div>
           Calibrated against <strong>68 service days of real history</strong> (54,704 records),
           replayed through the same occupancy model this service runs. Sensor health, lone
-          traveller and end of service are enabled, measuring
-          <strong>1.00 events per service day</strong>. The sustain windows were widened to get
+          traveller, end of service and the dwell proxy are enabled, measuring
+          <strong>1.34 events per service day</strong>. <strong>R1 Dwell is a proxy</strong>:
+          the VS125 reports counts, not identities, so it measures time held with nobody
+          alighting, not how long any individual has been aboard. The sustain windows were widened to get
           there &mdash; 30 min for lone traveller, 60 min at a depot &mdash; from 23.71/day at the
           original 5 min. <code>R9 Stationary</code> stays off because <code>speed</code> is 0 in
           every record, which makes its movement test permanently true.
