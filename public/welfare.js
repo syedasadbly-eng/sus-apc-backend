@@ -537,12 +537,12 @@
     }
 
     const checks = [
-      ['Stale feed', `no data for ${Math.round((cfg.stale_after_sec || 0) / 60)} min`, 'Notify', 'Feed interrupted but may recover'],
-      ['Lost feed', `no data for ${Math.round((cfg.offline_after_sec || 0) / 60)} min`, 'Alert', 'Welfare rules suppressed for this vehicle'],
-      ['Negative occupancy', 'onboard < 0', 'Alert', 'Impossible value — hard counter fault'],
-      ['Stuck counter', `no change in ${cfg.stuck_counter_minutes} min while moving`, 'Notify', 'The failure mode that would cause nightly false alerts'],
-      ['Day drift', 'boardings vs alightings differ by more than 10%', 'Notify', 'Checked at the 04:00 service-day rollover'],
-      ['No GPS fix', 'occupants aboard, no live fix', 'Degraded', 'Geofence rules fall back to a lower-confidence event'],
+      ['Sensor has gone quiet', `nothing heard for ${Math.round((cfg.stale_after_sec || 0) / 60)} min`, 'Worth knowing', 'It may come back on its own'],
+      ['Sensor is offline', `nothing heard for ${Math.round((cfg.offline_after_sec || 0) / 60)} min`, 'Needs attention', 'This bus stops being watched'],
+      ['Counts do not add up', 'more people off than ever got on', 'Needs attention', 'The counter has a fault'],
+      ['Counter has stopped moving', `no change in ${cfg.stuck_counter_minutes} min while driving`, 'Worth knowing', 'Left unchecked this causes false alerts every night'],
+      ['Boardings and alightings drift apart', 'more than 10% apart over a day', 'Worth knowing', 'Checked once a day at 04:00'],
+      ['No GPS position', 'people aboard, no live fix', 'Reduced cover', 'Anything depending on location is less certain'],
     ];
     const el = document.getElementById('wChecks');
     if (el) {
