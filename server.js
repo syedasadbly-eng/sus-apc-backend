@@ -13,6 +13,8 @@ const mqtt = require('mqtt');
 // Welfare development module — inert unless FEATURE_WELFARE=true.
 // Additive only: one new table, no change to any existing query path.
 const welfare = require('./welfare');
+// Per-door count logging. Inert unless FEATURE_WELFARE=true.
+const doorlog = require('./welfare/doorlog');
 
 // ============================================
 // CONFIGURATION
@@ -828,6 +830,18 @@ function handleMessage(topic, rawPayload) {
 
   // Skip if no actual movement (delta=0 and no onboard update)
   if (deltaIn === 0 && deltaOut === 0 && onboardFromTotal === null) return;
+
+  // ---- PER-DOOR LOGGING ----
+  // Last point at which these deltas are still attributable to a single door:
+  // the merge below folds every door of a bus into one figure. Purely
+  // observational — it does not touch deltaIn / deltaOut or the merge.
+  // Wrapped here as well as internally, because the fault on 1 September
+  // escaped through an argument object built outside the callee's own guard.
+  try {
+    doorlog.recordDoor({ topic, busId, deltaIn, deltaOut, msgType });
+  } catch (err) {
+    console.error('[doorlog] hook failed (APC unaffected):', err.message);
+  }
 
   // ---- MERGE deltas from multiple doors into one bus record ----
   if (!pendingDeltas[busId]) {

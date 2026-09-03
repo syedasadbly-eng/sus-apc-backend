@@ -18,6 +18,7 @@
 
 const express = require('express');
 const { WelfareEngine, SEVERITY } = require('./engine');
+const doorlog = require('./doorlog');
 
 const ENABLED = process.env.FEATURE_WELFARE === 'true';
 
@@ -317,6 +318,14 @@ function initWelfare(app, db, opts = {}) {
 
     const meta = { startedAt: new Date().toISOString(), topicMode: opts.topicMode ?? 'bus/#' };
     app.use('/api/welfare', createRouter(engine, store, meta));
+
+    // Per-door count logging. Separate table, separate routes, and its own
+    // try/catch so a failure here cannot stop the welfare API mounting.
+    try {
+      if (doorlog.initDoorLog(db)) app.use('/api/welfare', doorlog.createDoorRouter());
+    } catch (err) {
+      console.error('[doorlog] mount failed, continuing without it:', err.message);
+    }
 
     engine.on('alert', (row) => {
       console.log(`[welfare] ${String(row.severity_name).toUpperCase()} ${row.bus_id} ${row.event_type}: ${row.reason}`);

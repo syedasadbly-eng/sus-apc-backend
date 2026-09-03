@@ -9,7 +9,6 @@
     "lint": "eslint server.js welfare/*.js public/*.js"
   },
   "dependencies": {
-    "aedes": "^1.1.2",
     "better-sqlite3": "^11.7.0",
     "cors": "^2.8.5",
     "express": "^4.21.0",
