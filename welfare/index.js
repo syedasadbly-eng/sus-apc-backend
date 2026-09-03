@@ -123,7 +123,12 @@ function createStore(db) {
         totals: db.prepare(`SELECT COUNT(*) AS total,
             SUM(CASE WHEN severity >= 3 THEN 1 ELSE 0 END) AS alerts,
             SUM(CASE WHEN severity = 4 THEN 1 ELSE 0 END) AS escalations,
-            SUM(CASE WHEN acknowledged = 0 AND severity >= 3 THEN 1 ELSE 0 END) AS unacknowledged
+            SUM(CASE WHEN acknowledged = 0 AND severity >= 3 THEN 1 ELSE 0 END) AS unacknowledged,
+            -- Simulated rows are indistinguishable from real ones in every
+            -- aggregate above, so the nav badge reads this instead. A test
+            -- button press must never put a red count on a welfare screen.
+            SUM(CASE WHEN acknowledged = 0 AND severity >= 3
+                     AND source != 'simulated' THEN 1 ELSE 0 END) AS unacknowledged_real
           FROM welfare_events WHERE detected_at >= ?`).get(since),
         window_days: days,
       };

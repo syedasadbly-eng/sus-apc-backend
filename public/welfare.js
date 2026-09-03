@@ -170,7 +170,9 @@
   async function refreshBadge() {
     try {
       const stats = await api('/stats?days=7');
-      const n = stats.totals?.unacknowledged || 0;
+      // Real events only. See the unacknowledged_real column in welfare/index.js.
+      const t = stats.totals || {};
+      const n = t.unacknowledged_real ?? t.unacknowledged ?? 0;
       const badge = document.getElementById('welfareNavCount');
       if (badge) {
         badge.textContent = n;
@@ -192,10 +194,10 @@
   // -------------------------------------------------------------------------
 
   async function renderConsole() {
-    let events; let health;
+    let allEvents; let health;
     try {
-      [events, health] = await Promise.all([
-        api('/events?limit=40&min_severity=2'), api('/fleet-health'),
+      [allEvents, health] = await Promise.all([
+        api('/events?limit=60&min_severity=2'), api('/fleet-health'),
       ]);
     } catch (err) {
       const feed = document.getElementById('wAlertFeed');
@@ -207,19 +209,18 @@
     // Ranked worst-first so the strip always states the most serious live
     // condition. Unwatched buses outrank open alerts: an operator who thinks
     // a bus is covered when it is not is worse off than one with a known alert.
+    // Simulated events do not appear on this page at all. A card reading
+    // "Possible fall / Check the passenger immediately" is indistinguishable
+    // from a real one at a glance, and nothing detected it — there is no
+    // camera on either bus and no fall rule in the engine. Test events remain
+    // on Rules & Testing and in the Event Log, where the context is explicit.
+    const events = allEvents.filter((e) => e.source !== 'simulated');
+    const testCount = allEvents.length - events.length;
+
     const untrusted = health.filter((h) => !h.trustworthy);
-    // Injected test events must never be counted here. They are indistinguishable
-    // from real ones in the feed apart from this flag, and a headline reading
-    // "5 things need attention" off the back of somebody exercising the test
-    // buttons is exactly the sort of thing that gets a welfare screen ignored.
-    const isReal = (e) => e.source !== 'simulated';
     const recent = events.filter((e) => {
       const age = (Date.now() - Date.parse(e.detected_at)) / 60000;
-      return isReal(e) && Number.isFinite(age) && age <= 120 && e.severity >= 3;
-    });
-    const recentTests = events.filter((e) => {
-      const age = (Date.now() - Date.parse(e.detected_at)) / 60000;
-      return !isReal(e) && Number.isFinite(age) && age <= 120;
+      return Number.isFinite(age) && age <= 120 && e.severity >= 3;
     });
     const faulty = health.filter((h) => h.trustworthy && (h.reasons || []).length);
 
@@ -242,9 +243,7 @@
     } else {
       sub = `All ${health.length} buses reporting normally.`;
     }
-    if (recentTests.length && tone === 'ok') {
-      sub += ` ${recentTests.length} test event${recentTests.length > 1 ? 's' : ''} in the feed, ignored here.`;
-    }
+
     const dot = document.getElementById('wHeadlineDot');
     if (dot) dot.className = `welfare-headline-dot ${tone}`;
     const strip = document.getElementById('wHeadline');
@@ -257,7 +256,9 @@
     if (feed) {
       feed.innerHTML = events.length
         ? events.map(eventCard).join('')
-        : '<div class="welfare-empty">Nothing has happened in the last 7 days. That is what you want to see.</div>';
+        : `<div class="welfare-empty">Nothing has happened in the last 7 days. That is what you want to see.${
+  testCount ? `<div class="welfare-dim" style="margin-top:8px">${testCount} test event${testCount > 1 ? 's' : ''} hidden — see Rules &amp; Testing.</div>` : ''
+}</div>`;
     }
 
     // ---- vehicle cards ----
@@ -276,8 +277,6 @@
   // the Rules page, not here.
   function eventCard(e) {
     const sev = SEV[e.severity] || SEV[1];
-    const sim = e.source === 'simulated'
-      ? '<span class="welfare-chip sim">test event</span>' : '';
     const act = action(e.event_type);
     return `
       <div class="welfare-card ${sev.cls}">
@@ -288,7 +287,6 @@
         </div>
         ${act ? `<div class="welfare-card-action">${esc(act)}</div>` : ''}
         <div class="welfare-card-reason">${esc(e.reason || '')}</div>
-        ${sim ? `<div class="welfare-card-meta">${sim}</div>` : ''}
       </div>`;
   }
 
