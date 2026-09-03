@@ -45,8 +45,21 @@ const DEFAULT_DEPOTS = [
 
 const CONFIG = {
   // ---- R12 sensor health -------------------------------------------------
-  staleAfterSec: Number(process.env.WELFARE_STALE_SEC ?? 600),
-  offlineAfterSec: Number(process.env.WELFARE_OFFLINE_SEC ?? 1800),
+  // Calibrated against 68 service days of real Mayo history (54,704 records).
+  // The feed has genuine multi-minute gaps, so the original 600s/1800s pair
+  // produced 20.5 events/service day. Measured gap distribution:
+  //   bus 515  median 0.2 min, p90 2.5 min, p99  8.3 min  (50,538 records)
+  //   bus 419  median 0.3 min, p90 9.7 min, p99 54.1 min  ( 4,166 records)
+  // Bus 419 reports ~12x less often than 515 and causes nearly all the noise.
+  // Fleet-wide events/service day by stale threshold:
+  //   10 min 20.53 | 15 min 10.03 | 20 min 6.82
+  //   30 min  4.37 | 45 min  2.38 | 60 min 1.31
+  // 45 min / 120 min chosen for ~2.4 events/day. This is a dead-sensor check,
+  // not a welfare emergency, so a longer confirmation window is acceptable.
+  // Better long-term fix: per-vehicle thresholds derived from each bus's own
+  // reporting cadence, once 419's intermittency is understood.
+  staleAfterSec: Number(process.env.WELFARE_STALE_SEC ?? 2700),
+  offlineAfterSec: Number(process.env.WELFARE_OFFLINE_SEC ?? 7200),
   stuckCounterMinutes: Number(process.env.WELFARE_STUCK_MIN ?? 45),
   stuckCounterMinDistanceKm: Number(process.env.WELFARE_STUCK_KM ?? 2),
   imbalanceToleranceFraction: 0.10,
@@ -62,6 +75,29 @@ const CONFIG = {
   termini: envJson('WELFARE_TERMINI', []),
   eosStationarySec: Number(process.env.WELFARE_EOS_SEC ?? 300),
   stationarySpeedKph: Number(process.env.WELFARE_STATIONARY_KPH ?? 3),
+
+  // ---- rule enablement ---------------------------------------------------
+  // Comma-separated families allowed to raise events. Valid values:
+  //   sensor_health   feed liveness, stuck counter, day imbalance
+  //   lone_traveller  R3 / R4
+  //   end_of_service  R6 depot/terminus occupancy
+  //   stationary      R9 stationary with occupants
+  //   all             enable everything
+  //
+  // Default is sensor_health ONLY. Replaying 68 service days of real Mayo
+  // history (54,704 records) showed the movement- and occupancy-based rules
+  // fire on data artefacts rather than welfare events:
+  //   - `speed` is 0.0 in every record, so "stationary" is always true
+  //   - bus 515 logs 1.48 boardings per alighting, so its onboard tally never
+  //     returns to zero and "occupants still aboard" is always true
+  //   - bus 515 reports only 18 distinct positions across 68 days
+  // Defaults produced 60.96 events/service day, 53.34 of them ESCALATE.
+  // Re-enable these once speed, counting balance and GNSS are fixed, then
+  // re-run welfare/replay.js to set evidence-based thresholds.
+  enabledRules: String(process.env.WELFARE_RULES ?? 'sensor_health')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean),
 
   // ---- shared ------------------------------------------------------------
   alertCooldownSec: Number(process.env.WELFARE_COOLDOWN_SEC ?? 600),
@@ -209,14 +245,16 @@ class WelfareEngine extends EventEmitter {
     // ---- service day rollover -------------------------------------------
     const day = serviceDay(ts, this.cfg.timezone);
     if (v.serviceDay !== day) {
-      if (v.serviceDay !== null) out.push(this.checkDayImbalance(v, nowTs));
+      if (v.serviceDay !== null && this.ruleEnabled('sensor_health')) {
+        out.push(this.checkDayImbalance(v, nowTs));
+      }
       v.serviceDay = day;
       v.dayIn = 0;
       v.dayOut = 0;
     }
 
     // ---- recovery from a gap --------------------------------------------
-    if (v.health === 'offline' || v.health === 'stale') {
+    if ((v.health === 'offline' || v.health === 'stale') && this.ruleEnabled('sensor_health')) {
       const gapSec = v.lastSeen ? Math.round((nowTs - v.lastSeen) / 1000) : null;
       v.healthReasons.delete('stale');
       v.healthReasons.delete('offline');
@@ -259,12 +297,18 @@ class WelfareEngine extends EventEmitter {
     v.reportCount += 1;
 
     // ---- R12 first, it can mark the feed untrustworthy -------------------
-    out.push(...this.ruleSensorHealth(v, o, nowTs));
+    if (this.ruleEnabled('sensor_health')) {
+      out.push(...this.ruleSensorHealth(v, o, nowTs));
+    }
 
     // ---- gated rules -----------------------------------------------------
-    if (this.isTrustworthy(v)) {
-      out.push(...this.ruleLoneTraveller(v, ts, nowTs));
-      out.push(...this.ruleEndOfService(v, ts, nowTs));
+    // Gated twice: the family must be enabled AND the feed trustworthy.
+    const loneOn = this.ruleEnabled('lone_traveller');
+    const eosOn = this.ruleEnabled('end_of_service') || this.ruleEnabled('stationary');
+
+    if ((loneOn || eosOn) && this.isTrustworthy(v)) {
+      if (loneOn) out.push(...this.ruleLoneTraveller(v, ts, nowTs));
+      if (eosOn) out.push(...this.ruleEndOfService(v, ts, nowTs));
     } else {
       v.loneSinceTs = null;
       v.stationarySinceTs = null;
@@ -373,6 +417,23 @@ class WelfareEngine extends EventEmitter {
       .some((r) => v.healthReasons.has(r));
   }
 
+  /**
+   * Is a rule family allowed to raise events?
+   * See CONFIG.enabledRules for why the default is sensor health only.
+   * @param {string} family
+   * @returns {boolean}
+   */
+  ruleEnabled(family) {
+    let on = this.cfg.enabledRules;
+    // Tolerate a comma-separated string, which is what an env var or a
+    // replay.js --set override supplies.
+    if (typeof on === 'string') {
+      on = on.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+    }
+    if (!Array.isArray(on) || on.length === 0) return false;
+    return on.includes('all') || on.includes(family);
+  }
+
   // -------------------------------------------------------------------------
   // R3 / R4 — lone traveller
   // -------------------------------------------------------------------------
@@ -421,6 +482,7 @@ class WelfareEngine extends EventEmitter {
     // depot anchor when GPS is unavailable, which would make every bus look
     // parked at its depot and fire this rule permanently.
     if (!v.gpsValid) {
+      if (!this.ruleEnabled('stationary')) return out;
       out.push(this.raise(v, {
         event_type: 'stationary_with_occupants',
         severity: SEVERITY.NOTIFY,
@@ -439,6 +501,7 @@ class WelfareEngine extends EventEmitter {
     const late = inLateNight(ts, this.cfg);
 
     if (!hit) {
+      if (!this.ruleEnabled('stationary')) return out;
       out.push(this.raise(v, {
         event_type: 'stationary_with_occupants',
         severity: SEVERITY.NOTIFY,
@@ -452,6 +515,7 @@ class WelfareEngine extends EventEmitter {
     }
 
     const atDepot = Boolean(depot);
+    if (!this.ruleEnabled('end_of_service')) return out;
     out.push(this.raise(v, {
       event_type: atDepot ? 'end_of_service_occupancy' : 'terminus_occupancy',
       severity: atDepot ? SEVERITY.ESCALATE : SEVERITY.ALERT,
@@ -557,14 +621,31 @@ class WelfareEngine extends EventEmitter {
           + (c.sensor_fault ?? 0) + (c.sensor_suspect ?? 0) + (c.data_quality_drift ?? 0),
       },
       {
-        signal: 'Lone Traveller', use_case: 6, status: 'live', source: 'VS125 (derived)',
-        detail: 'Occupancy = 1 sustained, escalated at night', events: anyLone,
+        signal: 'Lone Traveller', use_case: 6,
+        status: this.ruleEnabled('lone_traveller') ? 'live' : 'disabled',
+        source: 'VS125 (derived)',
+        detail: this.ruleEnabled('lone_traveller')
+          ? 'Occupancy = 1 sustained, escalated at night'
+          : 'Disabled — needs a passenger count that returns to zero',
+        events: anyLone,
       },
       {
-        signal: 'End of service', use_case: 6, status: 'live', source: 'VS125 + GPS',
-        detail: 'Occupants aboard at a depot or terminus',
-        events: (c.end_of_service_occupancy ?? 0) + (c.terminus_occupancy ?? 0)
-          + (c.stationary_with_occupants ?? 0),
+        signal: 'End of service', use_case: 6,
+        status: this.ruleEnabled('end_of_service') ? 'live' : 'disabled',
+        source: 'VS125 + GPS',
+        detail: this.ruleEnabled('end_of_service')
+          ? 'Occupants aboard at a depot or terminus'
+          : 'Disabled — speed is 0 in every record and bus 515 never empties',
+        events: (c.end_of_service_occupancy ?? 0) + (c.terminus_occupancy ?? 0),
+      },
+      {
+        signal: 'Stationary with occupants', use_case: 1,
+        status: this.ruleEnabled('stationary') ? 'live' : 'disabled',
+        source: 'VS125 + GPS',
+        detail: this.ruleEnabled('stationary')
+          ? 'Occupants aboard while stationary away from a known stop'
+          : 'Disabled — cannot distinguish stationary from missing speed data',
+        events: c.stationary_with_occupants ?? 0,
       },
       {
         signal: 'Dwell', use_case: 1, status: 'blocked', source: 'VS125',
@@ -592,6 +673,7 @@ class WelfareEngine extends EventEmitter {
       stale_after_sec: c.staleAfterSec,
       offline_after_sec: c.offlineAfterSec,
       stuck_counter_minutes: c.stuckCounterMinutes,
+      enabled_rules: c.enabledRules,
       lone_sustain_sec: c.loneSustainSec,
       late_night_from: c.lateNightFrom,
       late_night_to: c.lateNightTo,

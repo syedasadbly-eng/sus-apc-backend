@@ -187,7 +187,8 @@
     setText('wKpiEscalations', t.escalations ?? 0);
     setText('wKpiAlerts', t.alerts ?? 0);
     const live = signals.filter((s) => s.status === 'live' && s.signal !== 'Sensor integrity').length;
-    setText('wKpiSignals', `${live} / 6`);
+    const off = signals.filter((s) => s.status === 'disabled').length;
+    setText('wKpiSignals', off ? `${live} live, ${off} off` : `${live} / 6`);
     const trusted = health.filter((h) => h.trustworthy).length;
     setText('wKpiIntegrity', health.length ? `${trusted} / ${health.length}` : '—');
 
@@ -315,6 +316,8 @@
     live: ['Live', 'ok'],
     blocked: ['Blocked', 'warn'],
     camera: ['Camera', 'info'],
+    // Rule exists and is tested, but is switched off pending a data fix.
+    disabled: ['Off', 'muted'],
   };
 
   const USE_CASES = [
@@ -323,7 +326,7 @@
     [3, 'Diabetic unconscious', 'Dwell + Distress', 'blocked'],
     [4, 'Silent stroke', 'Dwell + Distress', 'blocked'],
     [5, 'Peak standing capacity', 'Occupancy', 'live'],
-    [6, 'Passenger past their stop', 'Lone Traveller', 'live'],
+    [6, 'Passenger past their stop', 'Lone Traveller', 'disabled'],
     [7, 'Intoxicated aggression', 'Violence & Disruption', 'camera'],
   ];
 
