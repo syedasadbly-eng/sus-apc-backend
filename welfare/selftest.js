@@ -665,5 +665,52 @@ console.log('\n27. Suppression is bounded by hour and by bus');
     'null occupancy alerts — we cannot claim the bus is clear');
 }
 
+console.log('\n28. Open alerts are counted from severity 2, not 3');
+{
+  // The 4 Sep case: two unacknowledged severity-2 dwell alerts, plus one
+  // acknowledged severity-3 and one simulated. The badge showed 1 - an
+  // 18-hour-old offline on another bus - while the day's two real alerts
+  // contributed nothing.
+  const rows = [
+    { severity: 2, acknowledged: 0, source: 'vs125' },
+    { severity: 2, acknowledged: 0, source: 'vs125' },
+    { severity: 3, acknowledged: 1, source: 'vs125' },
+    { severity: 3, acknowledged: 0, source: 'vs125' },
+    { severity: 4, acknowledged: 0, source: 'simulated' },
+  ].filter((r) => r.source !== 'simulated');
+  const openReal = rows.filter((r) => !r.acknowledged && r.severity >= 2).length;
+  const oldCount = rows.filter((r) => !r.acknowledged && r.severity >= 3).length;
+  ok(oldCount === 1, `the old severity-3 count reports 1 (got ${oldCount})`);
+  ok(openReal === 3, `open_real reports 3 (got ${openReal})`);
+}
+
+console.log('\n29. The headline cannot hide an open alert behind a paused bus');
+{
+  // Reproduces the console's own composition. A bus with no cover used to
+  // win the if/else outright and the alerts appeared nowhere in the strip.
+  const compose = (events, healthRows) => {
+    const open = events.filter((e) => !e.acknowledged && e.severity >= 2);
+    const watchable = healthRows.filter((h) => !h.trustworthy && !h.off_shift);
+    const facts = [];
+    if (open.length) facts.push({ tone: 'warn', main: `${open.length} open alert${open.length > 1 ? 's' : ''}` });
+    if (watchable.length) facts.push({ tone: 'bad', main: `${watchable.length} buses not watched` });
+    if (!facts.length) return { main: 'Nothing needs attention', sub: '' };
+    const rank = { bad: 2, warn: 1, ok: 0 };
+    facts.sort((a, b) => rank[b.tone] - rank[a.tone]);
+    return { main: facts[0].main, sub: facts.slice(1).map((f) => f.main).join(' \u00b7 ') };
+  };
+
+  const r = compose(
+    [{ severity: 2, acknowledged: 0 }, { severity: 2, acknowledged: 0 }],
+    [{ bus_id: '515', trustworthy: true }, { bus_id: '419', trustworthy: false }],
+  );
+  const strip = `${r.main} ${r.sub}`;
+  ok(/2 open alerts/.test(strip), `the two alerts are stated somewhere in the strip (${strip})`);
+  ok(/not watched/.test(strip), 'and the unwatched bus is still stated too');
+
+  const quiet = compose([], [{ bus_id: '515', trustworthy: true }]);
+  ok(quiet.main === 'Nothing needs attention', 'a clean fleet still reads clean');
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

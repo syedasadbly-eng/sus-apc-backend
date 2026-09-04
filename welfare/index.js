@@ -133,7 +133,13 @@ function createStore(db) {
           FROM welfare_events ${w} GROUP BY bus_id ORDER BY n DESC`).all(since),
         totals: db.prepare(`SELECT COUNT(*) AS total, ${sevCols},
             SUM(CASE WHEN severity = 4 THEN 1 ELSE 0 END) AS escalations,
-            SUM(CASE WHEN acknowledged = 0 AND severity >= 3 THEN 1 ELSE 0 END) AS unacknowledged
+            SUM(CASE WHEN acknowledged = 0 AND severity >= 3 THEN 1 ELSE 0 END) AS unacknowledged,
+            -- The nav badge reads this one. The unacknowledged column counts
+            -- severity 3 and up, which meant two open severity-2 dwell alerts
+            -- on 4 Sep showed as a badge of 1 - and that 1 was an 18-hour-old
+            -- offline on a different bus. Anything an operator is expected to
+            -- look at has to be counted, so this starts at severity 2.
+            SUM(CASE WHEN acknowledged = 0 AND severity >= 2 THEN 1 ELSE 0 END) AS open_real
           FROM welfare_events ${w}`).get(since),
         // Always reported, so the interface can say how many test rows were
         // excluded rather than silently dropping them.

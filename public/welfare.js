@@ -174,7 +174,9 @@
       const stats = await api('/stats?days=7');
       // Real events only. See the unacknowledged_real column in welfare/index.js.
       const t = stats.totals || {};
-      const n = t.unacknowledged_real ?? t.unacknowledged ?? 0;
+      // open_real counts severity 2 and up. See the column comment in
+      // welfare/index.js for why the old severity-3 count was misleading.
+      const n = t.open_real ?? t.unacknowledged ?? 0;
       const badge = document.getElementById('welfareNavCount');
       if (badge) {
         badge.textContent = n;
@@ -220,10 +222,6 @@
     const testCount = allEvents.length - events.length;
 
     const untrusted = health.filter((h) => !h.trustworthy);
-    const recent = events.filter((e) => {
-      const age = (Date.now() - Date.parse(e.detected_at)) / 60000;
-      return Number.isFinite(age) && age <= 120 && e.severity >= 3;
-    });
     const faulty = health.filter((h) => h.trustworthy && (h.reasons || []).length);
     // A bus that has finished its day is untrusted, and correctly so, but it
     // is not a fault and must not be reported in the same breath as one.
@@ -231,30 +229,67 @@
     const inService = health.filter((h) => !h.off_shift);
     const watchable = untrusted.filter((h) => !h.off_shift);
 
-    let tone = 'ok'; let main = 'Nothing needs attention'; let sub;
+    // Anything real, unacknowledged and worth an operator's time. The old
+    // filter wanted severity >= 3 AND under two hours old, which on 4 Sep
+    // excluded both of the day's actual alerts - two severity-2 dwell events,
+    // one and five hours old. An alert does not stop mattering because
+    // nobody has got round to it.
+    const open = events
+      .filter((e) => !e.acknowledged && e.severity >= 2)
+      .sort((a, b) => Date.parse(b.detected_at) - Date.parse(a.detected_at));
+    const urgent = open.filter((e) => e.severity >= 3);
+
+    // The headline used to be an if/else chain, so it reported exactly one
+    // thing and silently dropped the rest: a paused bus outranked open
+    // alerts, and the alerts appeared nowhere in the strip at all. Facts are
+    // now collected worst-first and the leftovers go to the sub-line, so
+    // nothing can be hidden by something else being worse.
+    const facts = [];
     if (!health.length) {
-      tone = 'bad'; main = 'No buses are reporting';
-      sub = 'Nothing is being watched. Tell engineering.';
-    } else if (offShift.length === health.length) {
-      // Whole fleet finished. Calm, because nothing is wrong - but it still
-      // says cover is off, because it is.
+      facts.push({ tone: 'bad', main: 'No buses are reporting', sub: 'Nothing is being watched. Tell engineering.' });
+    }
+    if (open.length) {
+      const n = open.length;
+      const worst = urgent.length ? urgent[0] : open[0];
+      facts.push({
+        tone: urgent.length ? 'bad' : 'warn',
+        main: `${n} open alert${n > 1 ? 's' : ''}`,
+        sub: `Latest: ${label(worst.event_type)} on bus ${worst.bus_id}, ${timeAgo(worst.detected_at)}.`,
+      });
+    }
+    if (watchable.length) {
+      facts.push({
+        tone: 'bad',
+        main: `${watchable.length} of ${inService.length} buses in service are not being watched`,
+        sub: `Welfare alerts are paused on bus ${watchable.map((h) => h.bus_id).join(', ')}.`,
+      });
+    }
+    if (faulty.length) {
+      facts.push({
+        tone: 'warn',
+        main: 'Watching, with a fault',
+        sub: `Bus ${faulty.map((h) => h.bus_id).join(', ')} has a sensor fault. Alerts still running.`,
+      });
+    }
+
+    let tone; let main; let sub;
+    if (!facts.length) {
       tone = 'ok';
-      main = 'All buses have finished for the day';
-      sub = 'No welfare cover until they start again in the morning.';
-    } else if (watchable.length) {
-      tone = 'bad';
-      main = `${watchable.length} of ${inService.length} buses in service are not being watched`;
-      sub = `Welfare alerts are paused on bus ${watchable.map((h) => h.bus_id).join(', ')}.`;
-    } else if (recent.length) {
-      tone = 'warn';
-      main = `${recent.length} thing${recent.length > 1 ? 's need' : ' needs'} attention`;
-      sub = `Most recent: ${label(recent[0].event_type)} on bus ${recent[0].bus_id}.`;
-    } else if (faulty.length) {
-      tone = 'warn';
-      main = 'Watching, with a fault';
-      sub = `Bus ${faulty.map((h) => h.bus_id).join(', ')} has a sensor fault. Alerts still running.`;
+      if (offShift.length === health.length && health.length) {
+        main = 'All buses have finished for the day';
+        sub = 'No welfare cover until they start again in the morning.';
+      } else {
+        main = 'Nothing needs attention';
+        sub = `All ${health.length} buses reporting normally.`;
+      }
     } else {
-      sub = `All ${health.length} buses reporting normally.`;
+      const rank = { bad: 2, warn: 1, ok: 0 };
+      facts.sort((a, b) => rank[b.tone] - rank[a.tone]);
+      tone = facts[0].tone;
+      main = facts[0].main;
+      // Lead with the worst fact's own detail, then state every other fact
+      // in one line so none of them can vanish.
+      sub = [facts[0].sub, ...facts.slice(1).map((f) => f.main)].join(' \u00b7 ');
     }
 
     // ---- freshness ----
