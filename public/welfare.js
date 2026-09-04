@@ -171,7 +171,9 @@
 
   async function refreshBadge() {
     try {
-      const stats = await api('/stats?days=7');
+      // One day, to match the console's open-alert window. Seven days made
+      // the badge a count of everything nobody had ever acknowledged.
+      const stats = await api('/stats?days=1');
       // Real events only. See the unacknowledged_real column in welfare/index.js.
       const t = stats.totals || {};
       // open_real counts severity 2 and up. See the column comment in
@@ -229,13 +231,28 @@
     const inService = health.filter((h) => !h.off_shift);
     const watchable = untrusted.filter((h) => !h.off_shift);
 
-    // Anything real, unacknowledged and worth an operator's time. The old
-    // filter wanted severity >= 3 AND under two hours old, which on 4 Sep
-    // excluded both of the day's actual alerts - two severity-2 dwell events,
-    // one and five hours old. An alert does not stop mattering because
-    // nobody has got round to it.
+    // Anything real, unacknowledged and recent enough to still be an
+    // operator's problem.
+    //
+    // Two failures to avoid, and they pull in opposite directions. The
+    // original filter wanted severity >= 3 AND under two hours old, which on
+    // 4 Sep excluded both of the day's actual alerts - severity 2, one and
+    // five hours old - and the strip claimed nothing needed attention.
+    // Dropping the window entirely then read "18 open alerts" with the
+    // latest being a 20-hour-old offline, because nothing in dev is ever
+    // acknowledged and the feed carries a week.
+    //
+    // So: severity 2 and up, bounded to one day. A day is roughly a service
+    // day, so this answers "what has happened on shift", and anything older
+    // has stopped being live news - it belongs in the Event Log, which is
+    // unfiltered.
+    const OPEN_WINDOW_MIN = 24 * 60;
     const open = events
-      .filter((e) => !e.acknowledged && e.severity >= 2)
+      .filter((e) => {
+        if (e.acknowledged || e.severity < 2) return false;
+        const age = (Date.now() - Date.parse(e.detected_at)) / 60000;
+        return Number.isFinite(age) && age <= OPEN_WINDOW_MIN;
+      })
       .sort((a, b) => Date.parse(b.detected_at) - Date.parse(a.detected_at));
     const urgent = open.filter((e) => e.severity >= 3);
 
