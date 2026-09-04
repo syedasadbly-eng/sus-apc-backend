@@ -536,6 +536,11 @@
     measured: ['measured', 'ok'],
     modelled: ['modelled', 'warn'],
     proxy: ['proxy', 'warn'],
+    // Wired and receiving, but no detection has been observed yet. Distinct
+    // from 'not wired' on purpose: the transport being proven and the detector
+    // being proven are different claims, and at saloon height the second one
+    // is the open question.
+    unproven: ['unproven', 'warn'],
     none: ['not wired', 'muted'],
   };
 

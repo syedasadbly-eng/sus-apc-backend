@@ -132,6 +132,10 @@ so a persistent condition produces a handful of events, not one per message.
 | `WELFARE_EOS_SEC` | 300 | stationary time before R6 fires |
 | `WELFARE_STATIONARY_KPH` | 3 | speed treated as stopped |
 | `WELFARE_COOLDOWN_SEC` | 600 | repeat suppression |
+| `WELFARE_CAMERA_TOKEN` | unset | shared secret for the camera ingest route. Unset means unauthenticated writes |
+| `WELFARE_CAMERA_COOLDOWN_SEC` | 30 | camera repeat suppression, per bus per signal |
+| `WELFARE_CAMERA_BUS` | `lab-rig` | vehicle assumed when a camera callback names none |
+| `WELFARE_CAMERA_MAP` | `{}` | source IP → bus id for multi-rig setups |
 | `WELFARE_DEPOTS` | two Mayo Rochester anchors | JSON array |
 | `WELFARE_TERMINI` | `[]` | JSON array |
 
@@ -166,6 +170,14 @@ All routes are mounted at `/api/welfare` and exist only when the flag is on.
 | POST | `/simulate` | writes a canned row, `source=simulated` |
 | POST | `/simulate/observe` | pushes observations through the **real** rule path |
 | POST | `/simulate/purge` | deletes all welfare rows; touches nothing else |
+| any | `/camera/:signal` | **real** camera ingest — `fall`, `violence`, `sound`. See `CAMERA.md` |
+| GET | `/camera/last` | last 25 raw camera requests, verbatim |
+| GET | `/camera/status` | camera connectivity and counters |
+
+The three `/camera` routes are **not** behind `WELFARE_ALLOW_SIM`. They carry
+real detections, not test rows, so gating them on a simulation flag would mean
+turning simulation on in production to receive genuine alerts. They are gated on
+`WELFARE_CAMERA_TOKEN` instead.
 
 The three `POST` routes require `WELFARE_ALLOW_SIM=true` and return **403**
 otherwise. This is a second, independent gate: a service can have the welfare
@@ -255,7 +267,11 @@ where fallback coordinates must not fake a depot arrival.
 - **Fall and violence remain camera-dependent** and unproven at bus saloon
   height. Milesight specifies a 3 m minimum install height; a bus saloon is
   2.0–2.2 m. This is the project's genuine go/no-go, and no amount of dashboard
-  work substitutes for the bench test.
+  work substitutes for the bench test. The ingest path for those detections now
+  exists (`welfare/camera.js`, documented in `CAMERA.md`), which moves the
+  blocker from software to physics but does not remove it — no real detection
+  has been received yet, and Signal Delivery says `unproven` rather than
+  `measured` until one is.
 - **The rule engine holds state in memory.** A restart clears sustain timers, so
   a lone traveller is re-timed from zero. Acceptable for development; it needs
   persistence before any operational claim is made.
