@@ -548,7 +548,21 @@
       ? (s.enabled_rules || []).map((r) => `<span class="welfare-chip">${esc(r)}</span>`).join(' ')
       : '<span class="welfare-chip bad">none</span>';
 
-    strip.innerHTML = `${tiles}
+    // What the rules are being fed. Stated from the engine's declared mode,
+    // not guessed from whether a bus happens to be reporting.
+    const occ = s.occupancy;
+    const occTile = occ ? `
+      <div class="welfare-kpi-tile ${occ.modelled ? 'info' : 'muted'}">
+        <div class="welfare-kpi-title">Occupancy source</div>
+        <div class="welfare-kpi-rules"><span class="welfare-chip ${
+  occ.modelled ? 'warn' : ''}">${occ.modelled ? 'modelled' : 'raw'}</span>${
+  occ.confirmed ? '' : ' <span class="welfare-chip">unconfirmed</span>'}</div>
+        <div class="welfare-kpi-why">${esc(occ.note || (occ.modelled
+    ? 'Every rule below reads the rebalanced tally'
+    : 'Rules read the VS125 counter as sent'))}</div>
+      </div>` : '';
+
+    strip.innerHTML = `${tiles}${occTile}
       <div class="welfare-kpi-tile wide">
         <div class="welfare-kpi-title">Rule families enabled</div>
         <div class="welfare-kpi-rules">${rules}</div>
@@ -569,6 +583,7 @@
       events_7d: signals.reduce((n, s) => n + (Number.isFinite(s.events) ? s.events : 0), 0),
       blockers: [],
       enabled_rules: [],
+      occupancy: null,
     };
   }
 

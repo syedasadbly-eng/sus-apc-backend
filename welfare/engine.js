@@ -286,6 +286,22 @@ class WelfareEngine extends EventEmitter {
     this.recentLimit = 200;
     this.counters = Object.create(null);
 
+    // Which occupancy figure the rules are actually being fed.
+    //
+    //   'modelled'  welfare/index.js is swapping in occupancy.js's rebalanced
+    //               tally before ingest, so EVERY rule below reads a modelled
+    //               number whether or not a bus is reporting right now.
+    //   'raw'       the swap is off; rules read the VS125 counter as sent.
+    //   null        unknown — infer from what has been observed. Tests and
+    //               offline callers construct the engine directly.
+    //
+    // Declared rather than inferred because inference lies: with no vehicle
+    // in memory after a restart the console reported "measured / Raw VS125
+    // counters" while the model was live and calibrated. A basis column that
+    // overstates confidence when the fleet is quiet is worse than no column.
+    this.occupancyMode = opts.occupancyMode ?? null;
+    this.lastModelledTs = null;    // sticky: survives vehicle expiry
+
     // Seed the known fleet from the depot config so a bus that has not
     // reported since startup shows as "never reported" instead of silently
     // vanishing from the list. Bus 419 disappeared from fleet-health entirely
@@ -372,7 +388,10 @@ class WelfareEngine extends EventEmitter {
     if (o.onboard != null) v.onboard = o.onboard;
     // The measured counter, kept for display when occupancy is modelled.
     if (o.onboardRaw != null) v.onboardRaw = o.onboardRaw;
-    if (o.occupancyModel) v.occupancyModel = o.occupancyModel;
+    if (o.occupancyModel) {
+      v.occupancyModel = o.occupancyModel;
+      this.lastModelledTs = nowTs;
+    }
     if (Number.isFinite(o.lat)) v.lat = o.lat;
     if (Number.isFinite(o.lng)) v.lng = o.lng;
     if (o.speed != null) v.speed = o.speed;
@@ -771,6 +790,49 @@ class WelfareEngine extends EventEmitter {
     }));
   }
 
+  /** Declare what the rules are being fed. Called by welfare/index.js once
+   *  occupancy.js has initialised, since the model can fail to start (no
+   *  database, feature flag off) after the engine already exists. */
+  setOccupancyMode(mode) {
+    this.occupancyMode = (mode === 'modelled' || mode === 'raw') ? mode : null;
+    return this.occupancyMode;
+  }
+
+  /** Resolve the occupancy data basis for the reporting layer.
+   *
+   *  Three sources of truth, in descending order of reliability:
+   *    1. a declared mode from index.js  — what is actually plumbed in
+   *    2. a reading seen this process     — sticky, survives vehicle expiry
+   *    3. a vehicle currently in memory   — the old inference, last resort
+   *
+   *  `confirmed` distinguishes "the model is wired" from "the model is wired
+   *  and a bus has proved it", which is the distinction the quiet-fleet bug
+   *  collapsed.
+   */
+  occupancyBasis() {
+    const vehicles = [...this.vehicles.values()];
+    const observed = vehicles.some((v) => v.occupancyModel);
+    const everObserved = observed || this.lastModelledTs != null;
+    const reporting = vehicles.some((v) => v.lastSeen);
+
+    const modelled = this.occupancyMode
+      ? this.occupancyMode === 'modelled'
+      : everObserved;
+
+    return {
+      modelled,
+      source: modelled ? 'modelled' : 'raw',
+      declared: Boolean(this.occupancyMode),
+      confirmed: everObserved,
+      reporting,
+      // Only meaningful while modelled: says whether a bus has actually
+      // arrived on the rebalanced tally yet, or we are trusting the plumbing.
+      note: modelled && !everObserved
+        ? 'model wired, no reading through it yet since restart'
+        : (modelled && !reporting ? 'no bus reporting since restart' : null),
+    };
+  }
+
   /** Signal delivery matrix for the dev console.
    *
    * Each row carries the engineering detail the status alone hides:
@@ -794,8 +856,12 @@ class WelfareEngine extends EventEmitter {
     const cfg = this.cfg;
     const anyLone = (c.lone_traveller ?? 0) + (c.lone_traveller_late_night ?? 0);
     const anyGpsFix = [...this.vehicles.values()].some((v) => v.gpsValid);
-    const anyModelled = [...this.vehicles.values()].some((v) => v.occupancyModel);
+    const occ = this.occupancyBasis();
+    const anyModelled = occ.modelled;
     const mins = (sec) => `${Math.round(sec / 60)} min`;
+    // Appended to every modelled basis string so a quiet fleet cannot be
+    // mistaken for a confirmed one.
+    const occNote = occ.note ? ` (${occ.note})` : '';
 
     return [
       {
@@ -807,8 +873,8 @@ class WelfareEngine extends EventEmitter {
         family: null,
         enabled: true,
         basis: anyModelled
-          ? 'Modelled tally — alightings rebalanced by occupancy.js'
-          : 'Raw VS125 counters',
+          ? `Modelled tally — alightings rebalanced by occupancy.js${occNote}`
+          : 'Raw VS125 counters, as sent',
         trust: anyModelled ? 'modelled' : 'measured',
         threshold: 'No threshold — continuous measure',
         blocked_by: null,
@@ -837,8 +903,8 @@ class WelfareEngine extends EventEmitter {
         family: 'lone_traveller',
         enabled: this.ruleEnabled('lone_traveller'),
         basis: anyModelled
-          ? 'Modelled tally — invented alightings, treat raises as leads'
-          : 'Raw VS125 counter',
+          ? `Modelled tally — invented alightings, p90 error ~55 on 515, treat raises as leads${occNote}`
+          : 'Raw VS125 counter — pins at the capacity clamp on 515, so this can never fire there',
         trust: anyModelled ? 'modelled' : 'measured',
         threshold: `Occupancy = 1 sustained ${mins(cfg.loneSustainSec)}; `
           + `escalates ${String(cfg.lateNightFrom).padStart(2, '0')}:00–`
@@ -862,7 +928,9 @@ class WelfareEngine extends EventEmitter {
         events: (c.end_of_service_occupancy ?? 0) + (c.terminus_occupancy ?? 0),
         family: 'end_of_service',
         enabled: this.ruleEnabled('end_of_service'),
-        basis: 'Occupancy + geofence on a live GPS fix only',
+        basis: anyModelled
+          ? `Modelled occupancy + geofence, live GPS fix only${occNote}`
+          : 'Raw occupancy + geofence, live GPS fix only',
         trust: anyModelled ? 'modelled' : 'measured',
         threshold: `Stationary ${mins(cfg.eosStationarySec)} under `
           + `${cfg.stationarySpeedKph} kph inside a depot or terminus radius`,
@@ -975,6 +1043,9 @@ class WelfareEngine extends EventEmitter {
       events_7d: events,
       blockers,
       enabled_rules: ruleFamilies(this.cfg.enabledRules),
+      // What the rules are being fed, stated rather than inferred. Kept in the
+      // summary so the header carries it even when the table is collapsed.
+      occupancy: this.occupancyBasis(),
     };
   }
 

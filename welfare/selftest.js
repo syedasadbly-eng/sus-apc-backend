@@ -493,5 +493,75 @@ console.log('\n21. Summary counts by status, and separates trust from liveness')
     `families outside the string report disabled (${ss.by_status.disabled})`);
 }
 
+console.log('\n22. A quiet fleet must not be reported as measured');
+{
+  // The defect: basis was inferred from the in-memory vehicle map. After a
+  // restart, with the model live and calibrated but no bus yet reporting,
+  // the console claimed "measured / Raw VS125 counters" for occupancy and
+  // Lone Traveller. Overstating confidence while the fleet is quiet is the
+  // exact failure this column exists to prevent.
+  const { e } = makeEngine(DAY);
+  e.setOccupancyMode('modelled');
+
+  const b = e.occupancyBasis();
+  ok(b.modelled === true, 'declared mode wins over an empty vehicle map');
+  ok(b.declared === true, 'basis reports that the mode was declared');
+  ok(b.confirmed === false, 'nothing has come through the model yet');
+  ok(/no reading through it yet/i.test(b.note || ''),
+    `note says the model is wired but unproven, got ${JSON.stringify(b.note)}`);
+
+  for (const name of ['Occupancy', 'Lone Traveller', 'End of service']) {
+    const row = e.signals().find((r) => r.signal === name);
+    ok(row.trust === 'modelled', `${name} reads modelled, got ${row.trust}`);
+    ok(/model wired/i.test(row.basis), `${name} basis carries the caveat`);
+  }
+}
+
+console.log('\n23. A reading through the model confirms it, and the fact is sticky');
+{
+  const { e, at } = makeEngine(DAY);
+  e.setOccupancyMode('modelled');
+  e.ingest({
+    busId: '515', onboard: 4, onboardRaw: 11, dayIn: 20, dayOut: 11,
+    occupancyModel: { derived: true, factor: 1.483, onboard: 4, onboard_raw: 11 },
+    lat: 44.02302, lng: -92.46657, speed: 0, gpsValid: true, route: 'A', ts: at(),
+  });
+
+  const b = e.occupancyBasis();
+  ok(b.confirmed === true, 'a reading through the model confirms the basis');
+  ok(b.reporting === true, 'a bus is reporting');
+  ok(b.note === null, `no caveat once confirmed, got ${JSON.stringify(b.note)}`);
+
+  // Drop the fleet from memory the way a restart or expiry would. The engine
+  // must not forget that it has been running modelled all day.
+  e.vehicles.clear();
+  ok(e.occupancyBasis().confirmed === true,
+    'confirmation survives the vehicle map being emptied');
+
+  const occ = e.signalSummary().occupancy;
+  ok(occ.modelled === true && occ.source === 'modelled',
+    'the summary carries the occupancy source for the header');
+}
+
+console.log('\n24. Raw mode is stated, not inferred, and says why it matters');
+{
+  const { e } = makeEngine(DAY);
+  e.setOccupancyMode('raw');
+  const b = e.occupancyBasis();
+  ok(b.modelled === false && b.source === 'raw', 'declared raw mode is reported as raw');
+
+  const lone = e.signals().find((r) => r.signal === 'Lone Traveller');
+  ok(lone.trust === 'measured', 'raw occupancy is measured');
+  ok(/clamp/i.test(lone.basis),
+    `raw basis warns that 515 pins at the clamp, got ${JSON.stringify(lone.basis)}`);
+
+  // No declared mode at all: fall back to inference so tests and offline
+  // callers that construct the engine directly keep working.
+  const { e: undecl } = makeEngine(DAY);
+  ok(undecl.occupancyBasis().declared === false, 'an undeclared engine says so');
+  ok(undecl.occupancyBasis().modelled === false,
+    'and infers raw until something modelled arrives');
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

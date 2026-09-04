@@ -318,19 +318,29 @@ function createRouter(engine, store, meta) {
    * Fields match engine.ingest(): busId, onboard, dayIn, dayOut, lat, lng,
    * speed, gpsValid, route, ts.
    */
+  /* Simulated observations go through the SAME occupancy substitution as the
+     live MQTT path. They did not, which made every rule test on this service
+     a test of raw counts while production ran on the modelled tally — the one
+     difference most likely to change whether a rule fires at all. Pass
+     rawOccupancy:true to deliberately test the unmodelled path. */
   router.post('/simulate/observe', requireSim, (req, res) => {
     const body = req.body ?? {};
     const list = Array.isArray(body.observations) ? body.observations : [body];
+    const useRaw = body.rawOccupancy === true;
     const raised = [];
     try {
       list.forEach((o) => {
         if (!o || !o.busId) return;
-        raised.push(...(engine.ingest(o) ?? []));
+        raised.push(...(engine.ingest(useRaw ? o : applyDerivedOccupancy(o)) ?? []));
       });
     } catch (err) {
       return res.status(400).json({ error: err.message });
     }
-    return res.json({ observed: list.length, raised });
+    return res.json({
+      observed: list.length,
+      occupancy_source: useRaw ? 'raw' : engine.occupancyBasis().source,
+      raised,
+    });
   });
 
   return router;
@@ -376,6 +386,14 @@ function initWelfare(app, db, opts = {}) {
     } catch (err) {
       console.error('[occupancy] mount failed, continuing on raw counts:', err.message);
     }
+
+    // Tell the engine which figure its rules are being fed. observe() below
+    // does the substitution, so this must agree with occupancy.isEnabled() or
+    // the console will misreport its own data basis — which it did: with no
+    // bus in memory after a restart it inferred "measured" from an empty
+    // vehicle map while the model was live and calibrated.
+    engine.setOccupancyMode(occupancy.isEnabled() ? 'modelled' : 'raw');
+    console.log(`[welfare] rules read ${occupancy.isEnabled() ? 'MODELLED' : 'raw'} occupancy`);
 
     engine.on('alert', (row) => {
       console.log(`[welfare] ${String(row.severity_name).toUpperCase()} ${row.bus_id} ${row.event_type}: ${row.reason}`);
