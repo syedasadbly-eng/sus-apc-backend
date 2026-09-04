@@ -199,7 +199,13 @@ function createRouter(engine, store, meta) {
     // signal after each deploy while 15 real events sat in the table.
     let counts;
     try { counts = store.countsByType(7); } catch { counts = null; }
-    res.json(engine.signals(counts));
+    // Summary and rows are built from the SAME counts snapshot on purpose.
+    // Two requests would let the header disagree with the table beneath it.
+    // `?shape=array` preserves the original bare-array response for any
+    // caller written against it.
+    const rows = engine.signals(counts);
+    if (req.query.shape === 'array') { res.json(rows); return; }
+    res.json({ summary: engine.signalSummary(counts), signals: rows });
   });
 
   router.get('/fleet-health', (req, res) => res.json(engine.fleetHealth()));

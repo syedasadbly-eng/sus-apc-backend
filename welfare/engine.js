@@ -186,6 +186,20 @@ function insideAny(lat, lng, places, busId) {
   return null;
 }
 
+/**
+ * Normalise a rule-family list. Accepts an array or the comma-separated
+ * string an env var or a `replay.js --set` override supplies.
+ * @param {string[]|string} value
+ * @returns {string[]}
+ */
+function ruleFamilies(value) {
+  if (Array.isArray(value)) return value.map((s) => String(s).trim().toLowerCase()).filter(Boolean);
+  if (typeof value === 'string') {
+    return value.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+  }
+  return [];
+}
+
 function localHour(tsMs, timezone) {
   try {
     return Number(new Intl.DateTimeFormat('en-GB', {
@@ -504,13 +518,8 @@ class WelfareEngine extends EventEmitter {
    * @returns {boolean}
    */
   ruleEnabled(family) {
-    let on = this.cfg.enabledRules;
-    // Tolerate a comma-separated string, which is what an env var or a
-    // replay.js --set override supplies.
-    if (typeof on === 'string') {
-      on = on.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
-    }
-    if (!Array.isArray(on) || on.length === 0) return false;
+    const on = ruleFamilies(this.cfg.enabledRules);
+    if (on.length === 0) return false;
     return on.includes('all') || on.includes(family);
   }
 
@@ -762,14 +771,32 @@ class WelfareEngine extends EventEmitter {
     }));
   }
 
-  /** Signal delivery matrix for the dev console. */
+  /** Signal delivery matrix for the dev console.
+   *
+   * Each row carries the engineering detail the status alone hides:
+   *
+   *   basis / trust  what the rule actually reads. 'modelled' means the tally
+   *                  has invented alightings (occupancy.js, p90 error ~55
+   *                  passengers) and anything raised is a lead, not an
+   *                  observation. 'proxy' means the signal is a stand-in for
+   *                  the thing named. Without this column a modelled KPI and a
+   *                  measured one look identical at 'live'.
+   *   threshold      the calibrated value in force, so a reader can tell
+   *                  whether a quiet KPI is quiet or just set too wide.
+   *   blocked_by     why an ENABLED rule still raises nothing. 'live' and
+   *                  'enabled' are not the same thing and the difference has
+   *                  already caused one false all-clear.
+   */
   signals(counts) {
     // Prefer durable per-type counts from the store; fall back to the
     // in-process counters when none are supplied (tests, offline callers).
     const c = counts || this.counters;
+    const cfg = this.cfg;
     const anyLone = (c.lone_traveller ?? 0) + (c.lone_traveller_late_night ?? 0);
     const anyGpsFix = [...this.vehicles.values()].some((v) => v.gpsValid);
     const anyModelled = [...this.vehicles.values()].some((v) => v.occupancyModel);
+    const mins = (sec) => `${Math.round(sec / 60)} min`;
+
     return [
       {
         signal: 'Occupancy', use_case: 5, status: 'live', source: 'VS125',
@@ -777,12 +804,27 @@ class WelfareEngine extends EventEmitter {
           ? 'Onboard count and occupancy % — MODELLED, alightings rebalanced'
           : 'Live onboard count and occupancy percentage',
         events: null,
+        family: null,
+        enabled: true,
+        basis: anyModelled
+          ? 'Modelled tally — alightings rebalanced by occupancy.js'
+          : 'Raw VS125 counters',
+        trust: anyModelled ? 'modelled' : 'measured',
+        threshold: 'No threshold — continuous measure',
+        blocked_by: null,
       },
       {
         signal: 'Sensor integrity', use_case: null, status: 'live', source: 'VS125 + UR35',
         detail: 'Gates every welfare rule below',
         events: (c.sensor_stale ?? 0) + (c.sensor_offline ?? 0)
           + (c.sensor_fault ?? 0) + (c.sensor_suspect ?? 0) + (c.data_quality_drift ?? 0),
+        family: 'sensor_health',
+        enabled: this.ruleEnabled('sensor_health'),
+        basis: 'Feed liveness + counter integrity — measured, nothing derived',
+        trust: 'measured',
+        threshold: `Stale ${mins(cfg.staleAfterSec)} / offline ${mins(cfg.offlineAfterSec)}; `
+          + `stuck counter ${cfg.stuckCounterMinutes} min over ${cfg.stuckCounterMinDistanceKm} km`,
+        blocked_by: null,
       },
       {
         signal: 'Lone Traveller', use_case: 6,
@@ -792,6 +834,16 @@ class WelfareEngine extends EventEmitter {
           ? 'Occupancy = 1 sustained, escalated at night — reads the MODELLED tally'
           : 'Disabled — needs a passenger count that returns to zero',
         events: anyLone,
+        family: 'lone_traveller',
+        enabled: this.ruleEnabled('lone_traveller'),
+        basis: anyModelled
+          ? 'Modelled tally — invented alightings, treat raises as leads'
+          : 'Raw VS125 counter',
+        trust: anyModelled ? 'modelled' : 'measured',
+        threshold: `Occupancy = 1 sustained ${mins(cfg.loneSustainSec)}; `
+          + `escalates ${String(cfg.lateNightFrom).padStart(2, '0')}:00–`
+          + `${String(cfg.lateNightTo).padStart(2, '0')}:00`,
+        blocked_by: null,
       },
       {
         // Enabled is not the same as working. The rule is gated on a live GPS
@@ -808,6 +860,15 @@ class WelfareEngine extends EventEmitter {
             : 'Enabled, but waiting on a live GPS fix — no vehicle is reporting one')
           : 'Disabled — speed is 0 in every record and bus 515 never empties',
         events: (c.end_of_service_occupancy ?? 0) + (c.terminus_occupancy ?? 0),
+        family: 'end_of_service',
+        enabled: this.ruleEnabled('end_of_service'),
+        basis: 'Occupancy + geofence on a live GPS fix only',
+        trust: anyModelled ? 'modelled' : 'measured',
+        threshold: `Stationary ${mins(cfg.eosStationarySec)} under `
+          + `${cfg.stationarySpeedKph} kph inside a depot or terminus radius`,
+        blocked_by: this.ruleEnabled('end_of_service') && !anyGpsFix
+          ? 'No live GPS fix — enable GNSS push on the UR35s'
+          : null,
       },
       {
         signal: 'Stationary with occupants', use_case: 1,
@@ -817,6 +878,14 @@ class WelfareEngine extends EventEmitter {
           ? 'Occupants aboard while stationary away from a known stop'
           : 'Disabled — cannot distinguish stationary from missing speed data',
         events: c.stationary_with_occupants ?? 0,
+        family: 'stationary',
+        enabled: this.ruleEnabled('stationary'),
+        basis: 'Occupancy + speed field, which reads 0.0 in every record',
+        trust: 'none',
+        threshold: `Stationary ${mins(cfg.eosStationarySec)} away from a known depot or terminus`,
+        blocked_by: this.ruleEnabled('stationary')
+          ? 'speed is 0.0 in every record — the movement test is always satisfied'
+          : null,
       },
       {
         signal: 'Dwell (proxy)', use_case: 1,
@@ -826,20 +895,87 @@ class WelfareEngine extends EventEmitter {
           ? 'Occupants held with no alighting \u2014 PROXY, not per-passenger dwell'
           : 'Awaiting dwell field name and interval from Milesight',
         events: c.dwell_no_alighting ?? 0,
+        family: 'dwell',
+        enabled: this.ruleEnabled('dwell'),
+        basis: 'RAW alighting counter — deliberately not the modelled tally',
+        trust: 'proxy',
+        threshold: `${mins(cfg.dwellNoAlightSec)} with no alighting; `
+          + `feed gaps over ${mins(cfg.dwellMaxGapSec)} restart the window`,
+        blocked_by: null,
       },
       {
         signal: 'Distress', use_case: 2, status: 'camera', source: 'AI Pro Dome',
         detail: 'Fall detection — bench testing at 2.1 m', events: 0,
+        family: 'camera',
+        enabled: false,
+        basis: 'Camera analytics — no HTTP callback wired to the engine yet',
+        trust: 'none',
+        threshold: 'Set on the camera, not in this engine',
+        blocked_by: 'Lab rig — concurrent analytics, payload capture and low-ceiling geometry unproven',
       },
       {
         signal: 'Aggression', use_case: 7, status: 'camera', source: 'AI Pro Dome',
         detail: 'Violence detection — bench testing', events: 0,
+        family: 'camera',
+        enabled: false,
+        basis: 'Camera analytics — no HTTP callback wired to the engine yet',
+        trust: 'none',
+        threshold: 'Set on the camera, not in this engine',
+        blocked_by: 'Lab rig — violence detection conflicts with counting VCA functions',
       },
       {
         signal: 'Violence & Disruption', use_case: 7, status: 'camera', source: 'AI Pro Dome',
         detail: 'Violence plus sound classification compound rule', events: 0,
+        family: 'camera',
+        enabled: false,
+        basis: 'Camera analytics — compound rule not built',
+        trust: 'none',
+        threshold: 'Set on the camera, not in this engine',
+        blocked_by: 'Compound violence + sound rule not implemented',
       },
     ];
+  }
+
+  /**
+   * Roll the signal matrix into one status line.
+   *
+   * Counts by status rather than reporting "n of 9 live", because the three
+   * not-live states have completely different owners: `blocked` is waiting on
+   * a config change we control, `disabled` is a deliberate engineering
+   * decision, `camera` is waiting on hardware. Collapsing them into one
+   * "not working" number is what let "3 of 9" read as a delivery problem when
+   * five of the six gaps are unbuilt hardware paths.
+   */
+  signalSummary(counts) {
+    const rows = this.signals(counts);
+    const byStatus = { live: 0, blocked: 0, disabled: 0, camera: 0 };
+    let modelled = 0;
+    let proxy = 0;
+    const blockers = [];
+
+    for (const r of rows) {
+      if (byStatus[r.status] == null) byStatus[r.status] = 0;
+      byStatus[r.status] += 1;
+      if (r.status === 'live' || r.status === 'blocked') {
+        if (r.trust === 'modelled') modelled += 1;
+        if (r.trust === 'proxy') proxy += 1;
+      }
+      if (r.blocked_by) blockers.push({ signal: r.signal, status: r.status, blocked_by: r.blocked_by });
+    }
+
+    const events = rows.reduce((n, r) => n + (Number.isFinite(r.events) ? r.events : 0), 0);
+
+    return {
+      total: rows.length,
+      by_status: byStatus,
+      // Live signals whose numbers are derived rather than measured. Reported
+      // separately so "live" is never read as "trustworthy".
+      modelled_live: modelled,
+      proxy_live: proxy,
+      events_7d: events,
+      blockers,
+      enabled_rules: ruleFamilies(this.cfg.enabledRules),
+    };
   }
 
   config() {
@@ -866,5 +1002,5 @@ class WelfareEngine extends EventEmitter {
 
 module.exports = {
   WelfareEngine, CONFIG, SEVERITY, SEVERITY_NAME,
-  haversineM, insideAny, inLateNight, serviceDay, localHour,
+  haversineM, insideAny, inLateNight, serviceDay, localHour, ruleFamilies,
 };

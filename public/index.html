@@ -1234,6 +1234,11 @@
         </div>
       </div>
 
+      <!-- KPI status summary. Counts by status rather than "n of 9 live",
+           because blocked / switched off / needs camera have different
+           owners and different fixes. -->
+      <div class="welfare-kpi-strip" id="wSignalsSummary"></div>
+
       <div class="chart-panel">
         <div class="chart-header">
           <div>
@@ -1242,17 +1247,30 @@
           </div>
         </div>
         <div class="table-wrapper">
-          <table class="data-table">
+          <!-- welfare-signals-table opts these cells out of the global
+               .data-table nowrap: three columns now hold sentences. -->
+          <table class="data-table welfare-signals-table">
             <thead>
               <tr>
                 <th>Watching for</th>
                 <th>Status</th>
                 <th>What this means</th>
-                <th>Times seen</th>
+                <th>Reads</th>
+                <th>Threshold in force</th>
+                <th class="num">Times seen</th>
               </tr>
             </thead>
             <tbody id="wSignalsBody"></tbody>
           </table>
+        </div>
+        <div class="welfare-kpi-foot">
+          <strong>Reads</strong> is the data the rule actually consumes.
+          <span class="welfare-chip warn">modelled</span> means the passenger tally has
+          invented alightings to rebalance the day (p90 error ~55 passengers) — treat anything
+          it raises as a lead, not an observation.
+          <span class="welfare-chip warn">proxy</span> means the signal stands in for the
+          thing it is named after.
+          <span class="welfare-chip ok">measured</span> is straight off the sensor.
         </div>
       </div>
 

@@ -407,14 +407,38 @@
     disabled: ['Switched off', 'muted'],
   };
 
+  // Status is NOT hardcoded here. It is derived from the signals the engine
+  // actually reports, because this list previously said Lone Traveller was
+  // switched off and Dwell was blocked long after both went live — a coverage
+  // table that contradicts the engine is worse than no coverage table.
+  // The signal names must match engine.signals().signal exactly.
   const USE_CASES = [
-    [1, 'Unresponsive patient', 'Dwell', 'blocked'],
-    [2, 'Elderly passenger falls in aisle', 'Distress', 'camera'],
-    [3, 'Diabetic unconscious', 'Dwell + Distress', 'blocked'],
-    [4, 'Silent stroke', 'Dwell + Distress', 'blocked'],
-    [5, 'Peak standing capacity', 'Occupancy', 'live'],
-    [6, 'Passenger past their stop', 'Lone Traveller', 'disabled'],
-    [7, 'Intoxicated aggression', 'Violence & Disruption', 'camera'],
+    [1, 'Unresponsive patient', ['Dwell (proxy)']],
+    [2, 'Elderly passenger falls in aisle', ['Distress']],
+    [3, 'Diabetic unconscious', ['Dwell (proxy)', 'Distress']],
+    [4, 'Silent stroke', ['Dwell (proxy)', 'Distress']],
+    [5, 'Peak standing capacity', ['Occupancy']],
+    [6, 'Passenger past their stop', ['Lone Traveller', 'End of service']],
+    [7, 'Intoxicated aggression', ['Violence & Disruption']],
+  ];
+
+  // Worst state wins: a use case needing two signals is only covered when
+  // both are live. Ranked so the weakest contributing signal sets the status.
+  const STATUS_RANK = { live: 0, blocked: 1, disabled: 2, camera: 3 };
+
+  const TRUST_META = {
+    measured: ['measured', 'ok'],
+    modelled: ['modelled', 'warn'],
+    proxy: ['proxy', 'warn'],
+    none: ['not wired', 'muted'],
+  };
+
+  // Order the summary tiles by who has to act, not alphabetically.
+  const SUMMARY_TILES = [
+    ['live', 'Watching', 'Raising events on the buses today'],
+    ['blocked', 'Blocked', 'Rule is on but something upstream stops it firing'],
+    ['disabled', 'Switched off', 'Deliberate — the data cannot support it yet'],
+    ['camera', 'Needs camera', 'Waiting on the AI Pro Dome lab rig'],
   ];
 
   const BLOCKERS = [
@@ -427,23 +451,33 @@
   ];
 
   async function renderSignals() {
-    let signals;
-    try { signals = await api('/signals'); } catch (err) {
+    let payload;
+    try { payload = await api('/signals'); } catch (err) {
       setText('wSignalsSubtitle', `Could not load: ${err.message}`);
       return;
     }
-    const live = signals.filter((s) => s.status === 'live').length;
-    setText('wSignalsSubtitle',
-      `${live} of ${signals.length} working on the buses today`);
+    // The endpoint used to return a bare array. Tolerate both shapes so an
+    // older cached script or a stale service does not blank the page.
+    const signals = Array.isArray(payload) ? payload : (payload.signals || []);
+    const summary = Array.isArray(payload) ? null : payload.summary;
+
+    renderSignalSummary(summary, signals);
 
     const body = document.getElementById('wSignalsBody');
     if (body) {
       body.innerHTML = signals.map((s) => {
         const [txt, cls] = STATUS_META[s.status] || ['—', 'warn'];
-        return `<tr>
+        const [trustTxt, trustCls] = TRUST_META[s.trust] || [];
+        return `<tr${s.status === 'disabled' ? ' class="welfare-row-off"' : ''}>
           <td><strong>${esc(s.signal)}</strong></td>
           <td><span class="welfare-health-pill ${cls}">${txt}</span></td>
-          <td class="welfare-dim">${esc(s.detail)}</td>
+          <td class="welfare-dim">${esc(s.detail)}${
+  s.blocked_by ? `<div class="welfare-kpi-blocked">Blocked: ${esc(s.blocked_by)}</div>` : ''
+}</td>
+          <td>${trustTxt ? `<span class="welfare-chip ${trustCls}">${esc(trustTxt)}</span>` : '—'}${
+  s.basis ? `<div class="welfare-dim welfare-kpi-basis">${esc(s.basis)}</div>` : ''
+}</td>
+          <td class="welfare-dim welfare-kpi-threshold">${esc(s.threshold || '—')}</td>
           <td>${s.events == null ? '—' : s.events}</td>
         </tr>`;
       }).join('');
@@ -451,13 +485,17 @@
 
     const uc = document.getElementById('wUseCases');
     if (uc) {
-      uc.innerHTML = USE_CASES.map(([n, name, signal, status]) => {
-        const [txt, cls] = STATUS_META[status];
+      const byName = new Map(signals.map((s) => [s.signal, s]));
+      uc.innerHTML = USE_CASES.map(([n, name, needs]) => {
+        // Unknown signal names must not silently read as covered.
+        const states = needs.map((sig) => byName.get(sig)?.status ?? 'camera');
+        const worst = states.reduce((a, b) => (STATUS_RANK[b] > STATUS_RANK[a] ? b : a), 'live');
+        const [txt, cls] = STATUS_META[worst] || ['—', 'warn'];
         return `<div class="welfare-row">
           <span class="welfare-row-n">${n}</span>
           <div class="welfare-row-main">
             <div class="welfare-row-title">${esc(name)}</div>
-            <div class="welfare-dim">${esc(signal)}</div>
+            <div class="welfare-dim">${esc(needs.join(' + '))}</div>
           </div>
           <span class="welfare-health-pill ${cls}">${txt}</span>
         </div>`;
@@ -476,6 +514,62 @@
         </div>`).join('');
     }
     icons();
+  }
+
+  /**
+   * KPI status summary strip.
+   * Falls back to counting the rows when an older service returns no summary.
+   */
+  function renderSignalSummary(summary, signals) {
+    const s = summary || fallbackSummary(signals);
+
+    const caveats = [];
+    if (s.modelled_live) caveats.push(`${s.modelled_live} on a modelled tally`);
+    if (s.proxy_live) caveats.push(`${s.proxy_live} a proxy measure`);
+    setText('wSignalsSubtitle',
+      `${s.by_status.live || 0} of ${s.total} raising events on the buses today`
+      + `${caveats.length ? ` — ${caveats.join(', ')}` : ''}`
+      + ` · ${s.events_7d} event${s.events_7d === 1 ? '' : 's'} in the last 7 days`);
+
+    const strip = document.getElementById('wSignalsSummary');
+    if (!strip) return;
+
+    const tiles = SUMMARY_TILES.map(([key, title, why]) => {
+      const n = s.by_status[key] || 0;
+      const [, cls] = STATUS_META[key] || ['', 'warn'];
+      return `<div class="welfare-kpi-tile ${n ? cls : 'zero'}">
+        <div class="welfare-kpi-n">${n}</div>
+        <div class="welfare-kpi-title">${esc(title)}</div>
+        <div class="welfare-kpi-why">${esc(why)}</div>
+      </div>`;
+    }).join('');
+
+    const rules = (s.enabled_rules || []).length
+      ? (s.enabled_rules || []).map((r) => `<span class="welfare-chip">${esc(r)}</span>`).join(' ')
+      : '<span class="welfare-chip bad">none</span>';
+
+    strip.innerHTML = `${tiles}
+      <div class="welfare-kpi-tile wide">
+        <div class="welfare-kpi-title">Rule families enabled</div>
+        <div class="welfare-kpi-rules">${rules}</div>
+        ${(s.blockers || []).length ? `<div class="welfare-kpi-why">${
+  s.blockers.length} signal${s.blockers.length === 1 ? '' : 's'} with a named blocker \u2014 see the table below.</div>` : ''}
+      </div>`;
+  }
+
+  /** Older service, bare-array /signals response. */
+  function fallbackSummary(signals) {
+    const by = { live: 0, blocked: 0, disabled: 0, camera: 0 };
+    for (const s of signals) if (by[s.status] != null) by[s.status] += 1;
+    return {
+      total: signals.length,
+      by_status: by,
+      modelled_live: 0,
+      proxy_live: 0,
+      events_7d: signals.reduce((n, s) => n + (Number.isFinite(s.events) ? s.events : 0), 0),
+      blockers: [],
+      enabled_rules: [],
+    };
   }
 
   // -------------------------------------------------------------------------

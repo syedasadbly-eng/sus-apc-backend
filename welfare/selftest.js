@@ -427,5 +427,71 @@ console.log('\n18. Signal counts come from the supplied store, not memory');
     'falls back to in-memory counters when no store counts are supplied');
 }
 
+console.log('\n19. Every signal row carries the engineering detail');
+{
+  const { e } = makeEngine(DAY);
+  const rows = e.signals();
+  const missing = rows.filter((r) => r.basis == null || r.trust == null
+    || r.threshold == null || !('blocked_by' in r) || !('enabled' in r));
+  ok(missing.length === 0,
+    `all ${rows.length} rows have basis, trust, threshold, blocked_by and enabled`
+    + (missing.length ? ` — missing on ${missing.map((r) => r.signal).join(', ')}` : ''));
+  ok(rows.every((r) => ['measured', 'modelled', 'proxy', 'none'].includes(r.trust)),
+    'trust is always one of measured / modelled / proxy / none');
+
+  // Thresholds must reflect the config in force, not a hardcoded string. A
+  // stale threshold column is worse than none: it invites the reader to
+  // conclude a quiet KPI is quiet rather than set too wide.
+  const { e: wide } = makeEngine(DAY, { loneSustainSec: 5400 });
+  const lone = wide.signals().find((r) => r.signal === 'Lone Traveller');
+  ok(/90 min/.test(lone.threshold), `lone threshold tracks config, got "${lone.threshold}"`);
+
+  // Dwell reads the raw counter deliberately (see ruleDwell). If that ever
+  // silently changes to the modelled tally, the label must not still say raw.
+  const dwell = rows.find((r) => r.signal === 'Dwell (proxy)');
+  ok(dwell.trust === 'proxy' && /RAW/.test(dwell.basis),
+    'dwell is labelled a proxy on the raw counter');
+}
+
+console.log('\n20. Enabled is not the same as live');
+{
+  const { e, at } = makeEngine(DAY);
+  // End of service is enabled but gated on a live GPS fix. server.js
+  // substitutes the depot anchor when there is none, so a bus reporting
+  // gpsValid:false must leave the signal blocked with a named blocker,
+  // never live. A false all-clear here has already happened once.
+  e.ingest({
+    busId: '515', onboard: 3, dayIn: 10, dayOut: 7,
+    lat: 44.02302, lng: -92.46657, speed: 0, gpsValid: false, route: 'A', ts: at(),
+  });
+  const eos = e.signals().find((r) => r.signal === 'End of service');
+  ok(eos.enabled === true, 'rule family reports enabled');
+  ok(eos.status === 'blocked', `status is blocked, not live, got ${eos.status}`);
+  ok(/GPS/i.test(eos.blocked_by || ''), 'names the GPS fix as the blocker');
+}
+
+console.log('\n21. Summary counts by status, and separates trust from liveness');
+{
+  const { e } = makeEngine(DAY);
+  const s = e.signalSummary({ dwell_no_alighting: 2, sensor_stale: 3 });
+  const rows = e.signals();
+  ok(s.total === rows.length, `total matches the row count (${s.total})`);
+  const summed = Object.values(s.by_status).reduce((a, b) => a + b, 0);
+  ok(summed === s.total, `every row lands in exactly one status bucket (${summed})`);
+  ok(s.events_7d === 5, `event total comes from the supplied counts, got ${s.events_7d}`);
+  ok(s.proxy_live >= 1, 'a live proxy signal is reported separately from liveness');
+  ok(s.blockers.every((b) => b.signal && b.blocked_by),
+    'every blocker names both the signal and the cause');
+  ok(s.enabled_rules.includes('all'), 'enabled families are reported');
+
+  // A comma-separated string is what an env var or a replay --set supplies.
+  const { e: str } = makeEngine(DAY, { enabledRules: 'sensor_health, dwell' });
+  const ss = str.signalSummary();
+  ok(ss.enabled_rules.join(',') === 'sensor_health,dwell',
+    `string config is normalised, got ${JSON.stringify(ss.enabled_rules)}`);
+  ok(ss.by_status.disabled >= 2,
+    `families outside the string report disabled (${ss.by_status.disabled})`);
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

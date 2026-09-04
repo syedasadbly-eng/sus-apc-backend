@@ -2583,6 +2583,105 @@ html, body {
 /* A rule that is implemented and tested but switched off pending a data fix. */
 .welfare-health-pill.muted { background: var(--color-bg-muted, rgba(148,163,184,0.18)); color: var(--color-text-secondary, #64748b); }
 
+/* --- KPI status summary (Signal Delivery) --- */
+.welfare-kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+.welfare-kpi-tile {
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-left-width: 3px;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-2);
+  min-width: 0;
+}
+.welfare-kpi-tile.wide { grid-column: span 2; }
+@media (max-width: 720px) {
+  .welfare-kpi-tile.wide { grid-column: span 1; }
+}
+.welfare-kpi-tile.ok    { border-left-color: var(--color-success); }
+.welfare-kpi-tile.warn  { border-left-color: var(--color-warning); }
+.welfare-kpi-tile.bad   { border-left-color: var(--color-error); }
+.welfare-kpi-tile.info  { border-left-color: var(--color-primary); }
+.welfare-kpi-tile.muted { border-left-color: var(--color-text-muted); }
+/* A zero count is not a problem to be highlighted — keep it quiet. */
+.welfare-kpi-tile.zero { border-left-color: var(--color-border); opacity: 0.7; }
+.welfare-kpi-n {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--color-text-primary);
+}
+.welfare-kpi-title {
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+.welfare-kpi-why {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+  /* These are full sentences and must wrap, not clip. */
+  overflow-wrap: anywhere;
+}
+.welfare-kpi-rules {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.welfare-kpi-foot {
+  padding: var(--space-3);
+  border-top: 1px solid var(--color-border);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--color-text-muted);
+}
+/* The global .data-table rule sets white-space: nowrap, which is right for
+   short metric cells and wrong for these: three of the six columns hold full
+   sentences, and nowrap pushed the table 21px wider than its wrapper. Column
+   widths are fixed here so the sentence columns take the slack instead of
+   squashing the status pill or the count. */
+/* min-width keeps the six columns legible on a laptop or tablet: below this
+   the percentage widths squeeze signal names into mid-word breaks, so the
+   wrapper's existing overflow-x scroll takes over instead. */
+.welfare-signals-table { table-layout: fixed; width: 100%; min-width: 1020px; }
+/* Headers wrap too: "Threshold in force" and "Times seen" do not fit their
+   share of a fixed layout on one line at narrower widths. */
+.welfare-signals-table th { white-space: normal; }
+.welfare-signals-table td {
+  white-space: normal;
+  vertical-align: top;
+  overflow-wrap: break-word;
+}
+.welfare-signals-table th:nth-child(1), .welfare-signals-table td:nth-child(1) { width: 15%; }
+.welfare-signals-table th:nth-child(2), .welfare-signals-table td:nth-child(2) { width: 11%; }
+.welfare-signals-table th:nth-child(3), .welfare-signals-table td:nth-child(3) { width: 25%; }
+.welfare-signals-table th:nth-child(4), .welfare-signals-table td:nth-child(4) { width: 20%; }
+.welfare-signals-table th:nth-child(5), .welfare-signals-table td:nth-child(5) { width: 19%; }
+.welfare-signals-table th:nth-child(6), .welfare-signals-table td:nth-child(6) { width: 10%; }
+
+.welfare-kpi-basis,
+.welfare-kpi-threshold {
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+.welfare-kpi-basis { margin-top: 4px; }
+.welfare-kpi-blocked {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--color-warning);
+  overflow-wrap: anywhere;
+}
+
 /* --- vehicle card --- */
 .welfare-vcard {
   padding: var(--space-3);
