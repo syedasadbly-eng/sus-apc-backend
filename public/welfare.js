@@ -267,11 +267,15 @@
     }
     if (open.length) {
       const n = open.length;
+      // The named one is the most serious, not the newest, so the label has
+      // to say so - it read "Latest: Sensor is offline ... 20h ago" while two
+      // newer alerts sat underneath it.
       const worst = urgent.length ? urgent[0] : open[0];
+      const lead = urgent.length && urgent[0] !== open[0] ? 'Most serious' : 'Latest';
       facts.push({
         tone: urgent.length ? 'bad' : 'warn',
         main: `${n} open alert${n > 1 ? 's' : ''}`,
-        sub: `Latest: ${label(worst.event_type)} on bus ${worst.bus_id}, ${timeAgo(worst.detected_at)}.`,
+        sub: `${lead}: ${label(worst.event_type)} on bus ${worst.bus_id}, ${timeAgo(worst.detected_at)}.`,
       });
     }
     if (watchable.length) {
