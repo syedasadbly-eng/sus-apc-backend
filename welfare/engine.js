@@ -157,6 +157,28 @@ const CONFIG = {
   alertCooldownSec: Number(process.env.WELFARE_COOLDOWN_SEC ?? 600),
   // Matches DISPLAY_TZ in server.js — Mayo Clinic Rochester is US Central
   timezone: process.env.DISPLAY_TZ || 'America/Chicago',
+
+  // Per-bus local time after which a feed going quiet is end of shift, not a
+  // fault. Derived from 68 service days of real history (America/Chicago):
+  //
+  //   515  first 06:26 median, last 17:45 median (p10 17:30, p90 18:19,
+  //        max 18:26). 64 of 68 days finish between 17:00 and 18:59.
+  //   419  first 08:06 median, last 13:53 median (p10 12:34, p90 14:57,
+  //        max 15:38). 54 of 56 days finish between 12:00 and 15:59.
+  //
+  // Set an hour BEFORE the earliest normal finish so a genuine mid-service
+  // dropout is still caught: 419 has finished as early as 11:xx once, so 12
+  // is not conservative enough on its own — the zero-occupancy condition in
+  // isEndOfShift does the real work.
+  shiftEndsAfter: envJson('WELFARE_SHIFT_ENDS_AFTER', { 515: 17, 419: 12 }),
+  // Buses with no entry above never suppress. Silence from an unknown bus is
+  // a fault until somebody tells us its timetable.
+  shiftEndDefault: process.env.WELFARE_SHIFT_END_DEFAULT
+    ? Number(process.env.WELFARE_SHIFT_END_DEFAULT) : null,
+  // Require a zero occupancy reading before treating silence as end of shift.
+  // Off until bus/001/door2 is repaired — see isEndOfShift for the measured
+  // reason. Turning it on today would suppress nothing.
+  shiftEndOccupancyGate: process.env.WELFARE_SHIFT_END_REQUIRE_EMPTY === 'true',
 };
 
 const SEVERITY = { LOG: 1, NOTIFY: 2, ALERT: 3, ESCALATE: 4 };
@@ -216,6 +238,58 @@ function inLateNight(tsMs, cfg) {
   return f > t ? (h >= f || h < t) : (h >= f && h < t);
 }
 
+/**
+ * Is this vehicle's silence the normal end of its working day?
+ *
+ * Every bus goes quiet once a night when it is switched off. Across 124
+ * service days of real history that produced 128 offline ALERTs — almost
+ * exactly one per bus per day, and the single most common thing on the
+ * welfare console. That is how a safety screen gets ignored.
+ *
+ * This deliberately tests the CLOCK ONLY, and the reason matters.
+ *
+ * The obvious condition is "quiet AND empty", so a bus that goes dark with
+ * somebody still aboard keeps alerting. It was written that way first and
+ * then measured against the history, where it fell over:
+ *
+ *   - modelled occupancy at shutdown is 0 on 0 of 68 days for 515
+ *     (median 14) and 6 of 56 for 419 (median 2);
+ *   - the last door event lands in the same minute as the last message on
+ *     66 of 68 days for 515, so "doors quiet before shutdown" fails too.
+ *
+ * Both are the SAME underlying fault: bus/001/door2 counts 202 boardings
+ * against 93 alightings (2.17), so the tally never returns to zero. The
+ * occupancy estimate is least trustworthy exactly at end of day, which is
+ * where an emptiness test would have to do its work. Gating on it would
+ * either suppress nothing, or — if believed — raise "14 passengers left on
+ * a parked bus" every single night. That is the same noise in a better
+ * costume, and it dresses a counting fault up as a welfare emergency.
+ *
+ * So the clock decides, and shiftEndOccupancyGate stays off until the door
+ * fault is fixed. This is a real reduction in cover and is stated as such:
+ * between the cutoff and the next morning, a feed that dies with a
+ * passenger aboard is recorded, not alerted. See countersNotCleared(),
+ * which reports the underlying fault instead of hiding it.
+ *
+ * @returns {boolean}
+ */
+function isEndOfShift(v, tsMs, cfg) {
+  const cutoff = cfg.shiftEndsAfter?.[v.id] ?? cfg.shiftEndDefault;
+  if (cutoff == null) return false;   // unknown bus — silence stays a fault
+
+  // Off by default, and honest about why. Flip it on once the door counters
+  // balance and this becomes a genuine safety gate rather than a formality.
+  if (cfg.shiftEndOccupancyGate) {
+    const aboard = v.onboard ?? v.onboardRaw;
+    if (aboard == null || aboard > 0) return false;
+  }
+
+  const h = localHour(tsMs, cfg.timezone);
+  // Runs from the cutoff to the 04:00 service-day rollover, so a bus still
+  // silent at 02:00 is the same shutdown, not a fresh fault.
+  return h >= cutoff || h < 4;
+}
+
 function serviceDay(tsMs, timezone) {
   // Service day rolls at 04:00 local so a 01:30 night run belongs to the
   // previous day's service, which is how operators think about it.
@@ -256,6 +330,7 @@ class VehicleState {
     this.kmSinceCounterChange = 0;
 
     this.health = 'unknown';
+    this.offShift = false;
     this.healthReasons = new Set();
 
     this.loneSinceTs = null;
@@ -355,13 +430,19 @@ class WelfareEngine extends EventEmitter {
     // ---- recovery from a gap --------------------------------------------
     if ((v.health === 'offline' || v.health === 'stale') && this.ruleEnabled('sensor_health')) {
       const gapSec = v.lastSeen ? Math.round((nowTs - v.lastSeen) / 1000) : null;
+      const wasOffShift = v.offShift;
       v.healthReasons.delete('stale');
       v.healthReasons.delete('offline');
+      v.offShift = false;
+      const mins = gapSec != null ? Math.round(gapSec / 60) : null;
       out.push(this.raise(v, {
         event_type: 'sensor_recovered',
         severity: SEVERITY.LOG,
         rule: 'R12_sensor_health',
-        reason: `Feed restored after a ${gapSec != null ? Math.round(gapSec / 60) : '?'} min gap`,
+        reason: wasOffShift
+          ? `Back in service after ${mins != null ? `${Math.round(mins / 60)} h` : 'the night'} off`
+          : `Feed restored after a ${mins ?? '?'} min gap`,
+        detail: { was_off_shift: wasOffShift, gap_min: mins },
       }, nowTs, { force: true }));
     }
 
@@ -482,10 +563,34 @@ class WelfareEngine extends EventEmitter {
       if (v.lastSeen == null) continue;
       const silentSec = (nowTs - v.lastSeen) / 1000;
 
+      // End of shift is recorded, not alerted. The vehicle is still marked
+      // offline so every downstream rule stays suppressed - an off-shift bus
+      // is not being watched, and the interface must keep saying so.
+      const endOfShift = isEndOfShift(v, nowTs, this.cfg);
+
       if (silentSec >= this.cfg.offlineAfterSec && !v.healthReasons.has('offline')) {
         v.healthReasons.add('offline');
         v.health = 'offline';
-        out.push(this.raise(v, {
+        v.offShift = endOfShift;
+        // Carry the unresolved tally on the record. The bus is not claimed to
+        // be empty - it is claimed to have stopped reporting at its normal
+        // finishing time - and the gap between those two statements is the
+        // door fault, stated on every record rather than quietly dropped.
+        const unresolved = v.onboard ?? v.onboardRaw;
+        out.push(this.raise(v, endOfShift ? {
+          event_type: 'shift_ended',
+          severity: SEVERITY.LOG,
+          rule: 'R12_sensor_health',
+          reason: unresolved > 0
+            ? `Finished for the day — counter left ${unresolved} unresolved, not confirmed empty`
+            : 'Finished for the day',
+          detail: {
+            off_shift: true,
+            silent_min: Math.round(silentSec / 60),
+            unresolved_onboard: unresolved ?? null,
+            confirmed_empty: unresolved === 0,
+          },
+        } : {
           event_type: 'sensor_offline',
           severity: SEVERITY.ALERT,
           rule: 'R12_sensor_health',
@@ -495,12 +600,18 @@ class WelfareEngine extends EventEmitter {
         && !v.healthReasons.has('offline') && !v.healthReasons.has('stale')) {
         v.healthReasons.add('stale');
         v.health = 'stale';
-        out.push(this.raise(v, {
-          event_type: 'sensor_stale',
-          severity: SEVERITY.NOTIFY,
-          rule: 'R12_sensor_health',
-          reason: `No data for ${Math.round(silentSec / 60)} min`,
-        }, nowTs, { force: true }));
+        v.offShift = endOfShift;
+        // Nothing is raised for a stale empty bus at the end of its day. The
+        // shift_ended record above covers it once it crosses offline, and
+        // emitting both would just move the noise rather than remove it.
+        if (!endOfShift) {
+          out.push(this.raise(v, {
+            event_type: 'sensor_stale',
+            severity: SEVERITY.NOTIFY,
+            rule: 'R12_sensor_health',
+            reason: `No data for ${Math.round(silentSec / 60)} min`,
+          }, nowTs, { force: true }));
+        }
       }
     }
     return out.filter(Boolean);
@@ -781,6 +892,7 @@ class WelfareEngine extends EventEmitter {
       last_seen_sec_ago: v.lastSeen ? Math.round((nowTs - v.lastSeen) / 1000) : null,
       // A seeded bus that has never sent anything is not healthy-by-default.
       never_reported: !v.lastSeen,
+      off_shift: Boolean(v.offShift),
       reports: v.reportCount,
       service_day: v.serviceDay,
       day_in: v.dayIn,

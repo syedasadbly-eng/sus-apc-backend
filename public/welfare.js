@@ -32,6 +32,7 @@
     sensor_stale: 'Sensor has gone quiet',
     sensor_offline: 'Sensor is offline',
     sensor_recovered: 'Sensor is back',
+    shift_ended: 'Finished for the day',
     sensor_fault: 'Counter is faulty',
     sensor_suspect: 'Counter looks wrong',
     data_quality_drift: 'Counts are drifting',
@@ -52,6 +53,7 @@
     sensor_stale: 'No welfare cover on this bus until it reports again.',
     sensor_offline: 'No welfare cover on this bus. Tell engineering.',
     sensor_recovered: 'Nothing to do — cover is back.',
+    shift_ended: 'Nothing to do — the bus has stopped for the night.',
     sensor_fault: 'Counts cannot be trusted. Tell engineering.',
     sensor_suspect: 'Counts may be wrong. Tell engineering.',
     fall: 'Check the passenger immediately.',
@@ -223,15 +225,26 @@
       return Number.isFinite(age) && age <= 120 && e.severity >= 3;
     });
     const faulty = health.filter((h) => h.trustworthy && (h.reasons || []).length);
+    // A bus that has finished its day is untrusted, and correctly so, but it
+    // is not a fault and must not be reported in the same breath as one.
+    const offShift = health.filter((h) => h.off_shift);
+    const inService = health.filter((h) => !h.off_shift);
+    const watchable = untrusted.filter((h) => !h.off_shift);
 
     let tone = 'ok'; let main = 'Nothing needs attention'; let sub;
     if (!health.length) {
       tone = 'bad'; main = 'No buses are reporting';
       sub = 'Nothing is being watched. Tell engineering.';
-    } else if (untrusted.length) {
+    } else if (offShift.length === health.length) {
+      // Whole fleet finished. Calm, because nothing is wrong - but it still
+      // says cover is off, because it is.
+      tone = 'ok';
+      main = 'All buses have finished for the day';
+      sub = 'No welfare cover until they start again in the morning.';
+    } else if (watchable.length) {
       tone = 'bad';
-      main = `${untrusted.length} of ${health.length} buses are not being watched`;
-      sub = `Welfare alerts are paused on bus ${untrusted.map((h) => h.bus_id).join(', ')}.`;
+      main = `${watchable.length} of ${inService.length} buses in service are not being watched`;
+      sub = `Welfare alerts are paused on bus ${watchable.map((h) => h.bus_id).join(', ')}.`;
     } else if (recent.length) {
       tone = 'warn';
       main = `${recent.length} thing${recent.length > 1 ? 's need' : ' needs'} attention`;
@@ -340,7 +353,11 @@
     const faults = (h.reasons || []).map((r) => REASON_TEXT[r] || String(r).replace(/_/g, ' '));
 
     let headline; let sub;
-    if (h.never_reported) {
+    if (h.off_shift) {
+      headline = 'Finished for the day';
+      sub = 'Stopped reporting at its normal finishing time. '
+        + 'No welfare cover until it starts again.';
+    } else if (h.never_reported) {
       headline = 'No contact';
       sub = 'This bus has not reported since the system started. Not being watched.';
     } else if (!h.trustworthy) {
@@ -642,6 +659,7 @@
     const HEALTH_TEXT = {
       ok: 'Working', degraded: 'Working, with a fault',
       stale: 'Gone quiet', faulty: 'Faulty', offline: 'Offline',
+      off_shift: 'Finished for the day',
       unknown: 'No contact',
     };
     const REASON_TEXT = {
@@ -655,12 +673,17 @@
     const body = document.getElementById('wHealthBody');
     if (body) {
       body.innerHTML = health.length ? health.map((h) => {
-        const cls = { ok: 'ok', degraded: 'warn', stale: 'warn', faulty: 'bad', offline: 'bad' }[h.health] || 'warn';
+        // Off shift reads as neutral, not bad. The row still says alerts are
+        // paused - that stays honest - but a bus parked for the night is not
+        // the same class of thing as one that has failed mid-service.
+        const cls = h.off_shift ? 'ok'
+          : ({ ok: 'ok', degraded: 'warn', stale: 'warn', faulty: 'bad', offline: 'bad' }[h.health] || 'warn');
         const seen = h.last_seen_sec_ago == null ? '—'
           : h.last_seen_sec_ago < 90 ? 'just now'
             : `${Math.round(h.last_seen_sec_ago / 60)} min ago`;
-        const faults = h.never_reported ? ['has not reported at all']
-          : (h.reasons || []).map((r) => REASON_TEXT[r] || String(r).replace(/_/g, ' '));
+        const faults = h.off_shift ? ['finished for the day']
+          : h.never_reported ? ['has not reported at all']
+            : (h.reasons || []).map((r) => REASON_TEXT[r] || String(r).replace(/_/g, ' '));
         // "estimated" stays visible: this figure is modelled, and a depot
         // must not read it as a headcount.
         const onboard = h.onboard == null ? '—'
@@ -669,10 +692,10 @@
             : esc(h.onboard);
         return `<tr>
           <td><strong>${esc(h.bus_id)}</strong></td>
-          <td><span class="welfare-health-pill ${cls}">${esc(HEALTH_TEXT[h.health] || h.health)}</span></td>
+          <td><span class="welfare-health-pill ${cls}">${esc(h.off_shift ? HEALTH_TEXT.off_shift : (HEALTH_TEXT[h.health] || h.health))}</span></td>
           <td>${h.trustworthy
     ? '<span class="welfare-chip ok">yes</span>'
-    : '<span class="welfare-chip bad">no — alerts paused</span>'}</td>
+    : `<span class="welfare-chip ${h.off_shift ? 'warn' : 'bad'}">no — alerts paused</span>`}</td>
           <td>${onboard}</td>
           <td>${esc(seen)}</td>
           <td class="welfare-dim">${faults.length ? esc(faults.join(', ')) : 'none'}</td>

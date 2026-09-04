@@ -200,10 +200,24 @@ console.log('\n10. Shipped default config: sensor health + the two occupancy rul
     'stationary_with_occupants still suppressed under shipped defaults');
 
   // Sensor health must still work: go quiet past the shipped 2700s threshold.
+  // NIGHT is inside 515's shutdown window, so under shipped defaults this is
+  // now recorded as end of shift rather than alerted. Both halves are pinned
+  // here because this is the exact trade the change makes.
   tick(2800);
   const swept = e.sweep();
-  ok(swept.some((r) => r.event_type === 'sensor_stale'),
-    'sensor_stale still fires under shipped defaults');
+  ok(!swept.some((r) => r.event_type === 'sensor_stale'),
+    'at night, going quiet is end of shift, not a stale-sensor NOTIFY');
+
+  // Same silence, same shipped config, mid-service instead: must still alert.
+  let day = Date.parse('2026-06-02T17:00:00Z');   // 12:00 CDT, 515 in service
+  const e2 = new WelfareEngine({ now: () => day });
+  e2.ingest({
+    busId: '515', onboard: 16, dayIn: 40, dayOut: 24,
+    lat: 44.02302, lng: -92.46657, speed: 0, gpsValid: true, route: 'A', ts: day,
+  });
+  day += 2800 * 1000;
+  ok(e2.sweep().some((r) => r.event_type === 'sensor_stale'),
+    'sensor_stale still fires mid-service under shipped defaults');
 }
 
 // ---------------------------------------------------------------------------
@@ -561,6 +575,94 @@ console.log('\n24. Raw mode is stated, not inferred, and says why it matters');
   ok(undecl.occupancyBasis().declared === false, 'an undeclared engine says so');
   ok(undecl.occupancyBasis().modelled === false,
     'and infers raw until something modelled arrives');
+}
+
+console.log('\n25. End of shift is recorded, not alerted');
+{
+  // 18:00 America/Chicago on a normal weekday. 515 finishes at 17:45 median.
+  const EVENING = Date.parse('2026-06-02T23:00:00Z');   // 18:00 CDT
+  const { e, tick, at } = makeEngine(EVENING, {
+    shiftEndsAfter: { 515: 17, 419: 12 },
+    staleAfterSec: 2700, offlineAfterSec: 7200,
+  });
+  const send = (onboard) => e.ingest({
+    busId: '515', onboard, dayIn: 400, dayOut: 400,
+    lat: null, lng: null, speed: 0, gpsValid: false, route: 'A', ts: at(),
+  });
+  send(0);                       // last message of the day, bus empty
+  tick(3000); e.sweep();         // past stale
+  tick(4500);
+  const fired = e.sweep();       // past offline
+  const types = fired.map((r) => r.event_type);
+  ok(!types.includes('sensor_offline'), 'no offline ALERT for a bus that has finished');
+  ok(!types.includes('sensor_stale'), 'no stale NOTIFY either — the noise is removed, not moved');
+  ok(types.includes('shift_ended'), `a shift_ended record is written instead (${types.join(',')})`);
+  const ev = fired.find((r) => r.event_type === 'shift_ended');
+  ok(ev.severity === 1, `recorded at LOG severity (got ${ev.severity})`);
+
+  const h = e.fleetHealth().find((x) => x.bus_id === '515');
+  ok(h.off_shift === true, 'fleet health reports off_shift');
+  ok(h.trustworthy === false,
+    'still untrustworthy — an off-shift bus is not being watched, and rules stay suppressed');
+}
+
+console.log('\n26. A feed that dies WITH passengers aboard still alerts');
+{
+  // Same hour, same bus, one difference: somebody is still on it. This is the
+  // case the whole system exists for and must never be suppressed.
+  const EVENING = Date.parse('2026-06-02T23:00:00Z');
+  // The gate is OFF by default because the door counters never clear. With it
+  // on - which is the intended end state once bus/001/door2 is repaired - a
+  // bus that goes dark with people aboard must still alert.
+  const { e, tick, at } = makeEngine(EVENING, {
+    shiftEndsAfter: { 515: 17 }, staleAfterSec: 2700, offlineAfterSec: 7200,
+    shiftEndOccupancyGate: true,
+  });
+  e.ingest({
+    busId: '515', onboard: 3, dayIn: 400, dayOut: 397,
+    lat: null, lng: null, speed: 0, gpsValid: false, route: 'A', ts: at(),
+  });
+  tick(7500);
+  const types = e.sweep().map((r) => r.event_type);
+  ok(types.includes('sensor_offline'),
+    `offline ALERT still raised with 3 aboard (${types.join(',')})`);
+  ok(!types.includes('shift_ended'), 'not treated as end of shift');
+}
+
+console.log('\n27. Suppression is bounded by hour and by bus');
+{
+  const MIDDAY = Date.parse('2026-06-02T17:00:00Z');    // 12:00 CDT
+  // 515 finishes at 17:00, so midday silence is a genuine mid-service dropout.
+  const a = makeEngine(MIDDAY, { shiftEndsAfter: { 515: 17 }, offlineAfterSec: 7200 });
+  a.e.ingest({
+    busId: '515', onboard: 0, dayIn: 100, dayOut: 100,
+    lat: null, lng: null, speed: 0, gpsValid: false, route: 'A', ts: a.at(),
+  });
+  a.tick(7500);
+  ok(a.e.sweep().map((r) => r.event_type).includes('sensor_offline'),
+    'midday silence on 515 still alerts');
+
+  // A bus with no configured shift never suppresses.
+  const b = makeEngine(Date.parse('2026-06-02T23:00:00Z'), {
+    shiftEndsAfter: { 515: 17 }, offlineAfterSec: 7200,
+  });
+  b.e.ingest({
+    busId: '999', onboard: 0, dayIn: 10, dayOut: 10,
+    lat: null, lng: null, speed: 0, gpsValid: false, route: 'Z', ts: b.at(),
+  });
+  b.tick(7500);
+  ok(b.e.sweep().map((r) => r.event_type).includes('sensor_offline'),
+    'an unknown bus alerts — silence is a fault until we know its timetable');
+
+  // Unknown occupancy is not empty.
+  const c = makeEngine(Date.parse('2026-06-02T23:00:00Z'), {
+    shiftEndsAfter: { 515: 17 }, offlineAfterSec: 7200, shiftEndOccupancyGate: true,
+  });
+  const vc = c.e.vehicle('515');
+  vc.lastSeen = c.at(); vc.onboard = null; vc.onboardRaw = null;
+  c.tick(7500);
+  ok(c.e.sweep().map((r) => r.event_type).includes('sensor_offline'),
+    'null occupancy alerts — we cannot claim the bus is clear');
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
