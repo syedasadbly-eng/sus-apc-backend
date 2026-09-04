@@ -1186,6 +1186,10 @@
         <div>
           <div class="welfare-headline-main" id="wHeadlineMain">Checking…</div>
           <div class="welfare-headline-sub" id="wHeadlineSub">&nbsp;</div>
+          <!-- Without this, "quiet because all is well" and "the pipeline is
+               dead" look identical on a screen whose event feed can legitimately
+               sit still for hours. -->
+          <div class="welfare-freshness" id="wFreshness">&nbsp;</div>
         </div>
         <span class="dev-tag" id="welfareModeTag">checking…</span>
       </div>

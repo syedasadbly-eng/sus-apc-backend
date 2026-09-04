@@ -244,6 +244,39 @@
       sub = `All ${health.length} buses reporting normally.`;
     }
 
+    // ---- freshness ----
+    // The event feed can sit still for hours and be perfectly healthy, so it
+    // cannot double as a liveness signal. This reports two separate things:
+    // when the browser last asked, and how old the newest message from any
+    // bus is. Only the second one can go red.
+    const ages = health
+      .map((h) => h.last_seen_sec_ago)
+      .filter((n) => typeof n === 'number' && Number.isFinite(n));
+    const newest = ages.length ? Math.min(...ages) : null;
+    const checkedAt = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    let fTone = 'ok'; let fText;
+    if (newest == null) {
+      fTone = 'bad';
+      fText = `Checked ${checkedAt} \u2014 no bus has reported since the system started`;
+    } else {
+      // Buses report every few seconds in service. Minutes of silence is
+      // normal off shift; the sensor-health rules own the real fault case,
+      // so this only nudges rather than duplicating their alerting.
+      if (newest >= 900) fTone = 'bad';
+      else if (newest >= 300) fTone = 'warn';
+      const age = newest < 90 ? 'seconds ago'
+        : `${Math.round(newest / 60)} min ago`;
+      const quiet = health.length - ages.filter((n) => n < 300).length;
+      fText = `Checked ${checkedAt} \u2014 newest data ${age}`
+        + (quiet > 0 ? ` \u00b7 ${quiet} of ${health.length} buses quiet` : '');
+    }
+    const fresh = document.getElementById('wFreshness');
+    if (fresh) {
+      fresh.className = `welfare-freshness ${fTone}`;
+      fresh.innerHTML = `<span class="pulse"></span><span>${esc(fText)}</span>`;
+    }
+
     const dot = document.getElementById('wHeadlineDot');
     if (dot) dot.className = `welfare-headline-dot ${tone}`;
     const strip = document.getElementById('wHeadline');

@@ -2867,3 +2867,20 @@ html, body {
   font-size: var(--text-sm); color: var(--color-text-muted);
   margin: 2px 0 var(--space-3);
 }
+
+/* Freshness line under the console headline. Reads as calm grey when data is
+   flowing; only colours up when the feed itself is late. */
+.welfare-freshness {
+  font-size: var(--text-xs);
+  color: var(--color-text-faint);
+  margin-top: 4px;
+  display: flex; align-items: center; gap: 6px;
+}
+.welfare-freshness.warn { color: var(--color-warning); }
+.welfare-freshness.bad  { color: var(--color-error); font-weight: 600; }
+.welfare-freshness .pulse {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--color-success); flex: 0 0 auto;
+}
+.welfare-freshness.warn .pulse { background: var(--color-warning); }
+.welfare-freshness.bad  .pulse { background: var(--color-error); }
