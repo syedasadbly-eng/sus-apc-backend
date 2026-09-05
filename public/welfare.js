@@ -38,6 +38,10 @@
     data_quality_drift: 'Counts are drifting',
     fall: 'Possible fall',
     violence: 'Possible altercation',
+    // Deliberately vague. The camera reports that a sound matched one of its
+    // classes, and until a real payload has been captured we do not know which
+    // class or how it is named, so naming it here would be an invention.
+    sound_classification: 'Unusual sound on board',
     dwell_exceeded: 'Long time on board',
   };
 
@@ -58,6 +62,9 @@
     sensor_suspect: 'Counts may be wrong. Tell engineering.',
     fall: 'Check the passenger immediately.',
     violence: 'Follow the incident procedure.',
+    // A Notify, not an Alert: a sound on its own is weak evidence. It is worth
+    // a look, and it is corroboration if a violence event lands beside it.
+    sound_classification: 'Check the live view before treating it as an incident.',
   };
 
   const action = (t) => EVENT_ACTIONS[t] || '';
