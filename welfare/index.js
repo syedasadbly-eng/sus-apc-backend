@@ -20,6 +20,7 @@ const express = require('express');
 const { WelfareEngine, SEVERITY } = require('./engine');
 const doorlog = require('./doorlog');
 const occupancy = require('./occupancy');
+const camera = require('./camera');
 
 const ENABLED = process.env.FEATURE_WELFARE === 'true';
 
@@ -192,7 +193,11 @@ function createRouter(engine, store, meta) {
       enabled: true,
       allow_sim: ALLOW_SIM,
       topic_mode: meta.topicMode,
-      camera_connected: false,
+      // Was hardcoded false. Now reports whether the AI Pro Dome has actually
+      // reached this service, which is the only honest answer once an ingest
+      // route exists for it to reach.
+      camera_connected: camera.cameraState().connected,
+      camera: camera.cameraState(),
       started_at: meta.startedAt,
       config: engine.config(),
       counters: engine.counters,
@@ -381,6 +386,18 @@ function initWelfare(app, db, opts = {}) {
       if (doorlog.initDoorLog(db)) app.use('/api/welfare', doorlog.createDoorRouter());
     } catch (err) {
       console.error('[doorlog] mount failed, continuing without it:', err.message);
+    }
+
+    // Camera ingest. Terminates the AI Pro Dome's HTTP Notification callbacks.
+    // Mounted in its own try/catch: a camera-side fault must never stop the
+    // VS125-derived rules, which are the signals that currently work.
+    try {
+      if (camera.initCamera()) {
+        app.use('/api/welfare', camera.createCameraRouter(engine, store));
+        engine.setCameraStatusProvider(camera.cameraState);
+      }
+    } catch (err) {
+      console.error('[camera] mount failed, continuing without camera ingest:', err.message);
     }
 
     // Derived occupancy. Welfare console only — see the header of

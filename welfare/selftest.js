@@ -450,8 +450,8 @@ console.log('\n19. Every signal row carries the engineering detail');
   ok(missing.length === 0,
     `all ${rows.length} rows have basis, trust, threshold, blocked_by and enabled`
     + (missing.length ? ` — missing on ${missing.map((r) => r.signal).join(', ')}` : ''));
-  ok(rows.every((r) => ['measured', 'modelled', 'proxy', 'none'].includes(r.trust)),
-    'trust is always one of measured / modelled / proxy / none');
+  ok(rows.every((r) => ['measured', 'modelled', 'proxy', 'unproven', 'none'].includes(r.trust)),
+    'trust is always one of measured / modelled / proxy / unproven / none');
 
   // Thresholds must reflect the config in force, not a hardcoded string. A
   // stale threshold column is worse than none: it invites the reader to

@@ -902,6 +902,31 @@ class WelfareEngine extends EventEmitter {
     }));
   }
 
+  /** Injected by welfare/index.js once the camera router is mounted. Kept as a
+   *  callback so the signal matrix reads the live figure at request time. */
+  setCameraStatusProvider(fn) {
+    this._cameraStatusProvider = typeof fn === 'function' ? fn : null;
+    return Boolean(this._cameraStatusProvider);
+  }
+
+  cameraStatus() {
+    if (!this._cameraStatusProvider) {
+      return { wired: false, connected: false, basis: 'Camera analytics — no HTTP callback wired to this service' };
+    }
+    try {
+      const s = this._cameraStatusProvider() ?? {};
+      return {
+        wired: true,
+        connected: Boolean(s.connected),
+        basis: s.connected
+          ? `AI Pro Dome HTTP callback — last seen ${s.last_seen_at}`
+          : 'AI Pro Dome HTTP callback mounted — no request received yet',
+      };
+    } catch {
+      return { wired: false, connected: false, basis: 'Camera ingest status unavailable' };
+    }
+  }
+
   /** Declare what the rules are being fed. Called by welfare/index.js once
    *  occupancy.js has initialised, since the model can fail to start (no
    *  database, feature flag off) after the engine already exists. */
@@ -974,6 +999,10 @@ class WelfareEngine extends EventEmitter {
     // Appended to every modelled basis string so a quiet fleet cannot be
     // mistaken for a confirmed one.
     const occNote = occ.note ? ` (${occ.note})` : '';
+    // Camera ingest state comes from a provider rather than a require, so the
+    // engine stays free of a dependency on the module that already depends on
+    // it. No provider (tests, offline callers) means not wired.
+    const cam = this.cameraStatus();
 
     return [
       {
@@ -1084,31 +1113,43 @@ class WelfareEngine extends EventEmitter {
         blocked_by: null,
       },
       {
-        signal: 'Distress', use_case: 2, status: 'camera', source: 'AI Pro Dome',
-        detail: 'Fall detection — bench testing at 2.1 m', events: 0,
+        signal: 'Distress', use_case: 2, status: cam.wired ? 'live' : 'camera', source: 'AI Pro Dome',
+        detail: 'Fall detection — HTTP callback to /api/welfare/camera/fall',
+        events: c.fall ?? 0,
         family: 'camera',
-        enabled: false,
-        basis: 'Camera analytics — no HTTP callback wired to the engine yet',
-        trust: 'none',
-        threshold: 'Set on the camera, not in this engine',
-        blocked_by: 'Lab rig — concurrent analytics, payload capture and low-ceiling geometry unproven',
+        enabled: cam.wired,
+        basis: cam.basis,
+        // 'measured' is not claimable until a staged fall has actually been
+        // detected at saloon height. An arrived callback proves the transport
+        // works, not that the detector works at 2.1 m.
+        trust: (c.fall ?? 0) > 0 ? 'measured' : 'unproven',
+        threshold: 'Min. duration 5 s, sensitivity 5 — set on the camera, not in this engine',
+        blocked_by: cam.wired
+          ? (cam.connected ? null : 'No callback received yet — camera egress to this service unconfirmed')
+          : 'Camera ingest route not mounted',
       },
       {
-        signal: 'Aggression', use_case: 7, status: 'camera', source: 'AI Pro Dome',
-        detail: 'Violence detection — bench testing', events: 0,
+        signal: 'Aggression', use_case: 7, status: cam.wired ? 'live' : 'camera', source: 'AI Pro Dome',
+        detail: 'Violence detection — HTTP callback to /api/welfare/camera/violence',
+        events: c.violence ?? 0,
         family: 'camera',
-        enabled: false,
-        basis: 'Camera analytics — no HTTP callback wired to the engine yet',
-        trust: 'none',
-        threshold: 'Set on the camera, not in this engine',
-        blocked_by: 'Lab rig — violence detection conflicts with counting VCA functions',
+        enabled: cam.wired,
+        basis: cam.basis,
+        trust: (c.violence ?? 0) > 0 ? 'measured' : 'unproven',
+        threshold: 'Min. duration 12 s, sensitivity 5 — set on the camera, not in this engine',
+        blocked_by: cam.wired
+          ? (cam.connected ? null : 'No callback received yet — camera egress to this service unconfirmed')
+          : 'Camera ingest route not mounted',
       },
       {
         signal: 'Violence & Disruption', use_case: 7, status: 'camera', source: 'AI Pro Dome',
-        detail: 'Violence plus sound classification compound rule', events: 0,
+        detail: 'Violence plus sound classification compound rule',
+        events: c.sound_classification ?? 0,
         family: 'camera',
         enabled: false,
-        basis: 'Camera analytics — compound rule not built',
+        // Both feeds now arrive independently; what does not exist is the rule
+        // that correlates them. Saying 'ingest wired' here would overstate it.
+        basis: 'Sound and violence ingest separately — compound rule not built',
         trust: 'none',
         threshold: 'Set on the camera, not in this engine',
         blocked_by: 'Compound violence + sound rule not implemented',
