@@ -2564,6 +2564,11 @@ html, body {
 .welfare-chip.bad  { border-color: transparent; background: var(--color-error-light);   color: var(--color-error); }
 .welfare-chip.sim  { border-color: transparent; background: rgba(139, 92, 246, 0.14);   color: var(--chart-4); }
 
+/* A test card on the operator console. Dimmed and left-marked so it cannot be
+   mistaken for a detection at a glance, while still being visible enough to
+   prove the page is alive when someone injects one. */
+.welfare-card-test { opacity: 0.72; border-left: 3px solid var(--chart-4); }
+
 /* --- health pill --- */
 .welfare-health-pill {
   display: inline-block;

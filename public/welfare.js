@@ -226,13 +226,20 @@
     // Ranked worst-first so the strip always states the most serious live
     // condition. Unwatched buses outrank open alerts: an operator who thinks
     // a bus is covered when it is not is worse off than one with a known alert.
-    // Simulated events do not appear on this page at all. A card reading
-    // "Possible fall / Check the passenger immediately" is indistinguishable
-    // from a real one at a glance, and nothing detected it — there is no
-    // camera on either bus and no fall rule in the engine. Test events remain
-    // on Rules & Testing and in the Event Log, where the context is explicit.
-    const events = allEvents.filter((e) => e.source !== 'simulated');
-    const testCount = allEvents.length - events.length;
+    // Simulated events used to be dropped from this page entirely, on the
+    // grounds that a card reading "Possible fall / Check the passenger
+    // immediately" is indistinguishable from a real one. The reasoning held;
+    // the behaviour did not. Injecting a test event and watching the console
+    // stay empty reads as a broken page, not as a deliberate omission, and it
+    // cost an afternoon of debugging a refresh button that was working.
+    //
+    // They are shown here only where the simulator itself is exposed
+    // (WELFARE_ALLOW_SIM), and every one carries a TEST marker. On a
+    // client-facing service allow_sim is false and the old behaviour stands.
+    const showTests = Boolean(lastStatus && lastStatus.allow_sim);
+    const realEvents = allEvents.filter((e) => e.source !== 'simulated');
+    const events = showTests ? allEvents : realEvents;
+    const testCount = allEvents.length - realEvents.length;
 
     const untrusted = health.filter((h) => !h.trustworthy);
     const faulty = health.filter((h) => h.trustworthy && (h.reasons || []).length);
@@ -258,7 +265,10 @@
     // has stopped being live news - it belongs in the Event Log, which is
     // unfiltered.
     const OPEN_WINDOW_MIN = 24 * 60;
-    const open = events
+    // Headline and open-alert counts stay on real events whatever the feed
+    // shows. A test injection must never make the strip claim something needs
+    // attention.
+    const open = realEvents
       .filter((e) => {
         if (e.acknowledged || e.severity < 2) return false;
         const age = (Date.now() - Date.parse(e.detected_at)) / 60000;
@@ -333,7 +343,10 @@
       .map((h) => h.last_seen_sec_ago)
       .filter((n) => typeof n === 'number' && Number.isFinite(n));
     const newest = ages.length ? Math.min(...ages) : null;
-    const checkedAt = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    // Seconds, not minutes. Without them two refreshes inside the same minute
+    // leave the screen byte-identical, which is exactly how a working button
+    // gets reported as broken.
+    const checkedAt = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
     let fTone = 'ok'; let fText;
     if (newest == null) {
@@ -370,7 +383,7 @@
       feed.innerHTML = events.length
         ? events.map(eventCard).join('')
         : `<div class="welfare-empty">Nothing has happened in the last 7 days. That is what you want to see.${
-  testCount ? `<div class="welfare-dim" style="margin-top:8px">${testCount} test event${testCount > 1 ? 's' : ''} hidden — see Rules &amp; Testing.</div>` : ''
+  testCount && !showTests ? `<div class="welfare-dim" style="margin-top:8px">${testCount} test event${testCount > 1 ? 's' : ''} hidden — see Rules &amp; Testing.</div>` : ''
 }</div>`;
     }
 
@@ -391,10 +404,17 @@
   function eventCard(e) {
     const sev = SEV[e.severity] || SEV[1];
     const act = action(e.event_type);
+    // Nothing on this card may let a test read as a detection, so the marker
+    // goes first, before the bus and the wording.
+    // Same purple chip the Event Log already uses for a test row, so the two
+    // screens do not teach two different vocabularies for one thing.
+    const test = e.source === 'simulated'
+      ? '<span class="welfare-chip sim">test</span> '
+      : '';
     return `
-      <div class="welfare-card ${sev.cls}">
+      <div class="welfare-card ${sev.cls}${e.source === 'simulated' ? ' welfare-card-test' : ''}">
         <div class="welfare-card-top">
-          <span class="welfare-card-bus strong">Bus ${esc(e.bus_id)}</span>
+          ${test}<span class="welfare-card-bus strong">Bus ${esc(e.bus_id)}</span>
           <span class="welfare-card-title">${esc(label(e.event_type))}</span>
           <span class="welfare-card-time">${timeAgo(e.detected_at)}</span>
         </div>
@@ -1076,8 +1096,39 @@
   // Controls
   // -------------------------------------------------------------------------
 
+  /** Manual refresh with visible feedback.
+   *
+   * The button previously called renderConsole directly. It worked, and it
+   * looked broken: no pressed state, no spinner, and on a quiet feed the
+   * resulting DOM was identical, so the only evidence anything had happened
+   * was a timestamp that did not show seconds. Feedback is the fix, not the
+   * fetch. */
+  async function refreshNow() {
+    const btn = document.getElementById('wRefreshBtn');
+    const original = btn ? btn.innerHTML : null;
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<i data-lucide="loader"></i> Updating…';
+      icons();
+    }
+    try {
+      await renderConsole();
+      await refreshBadge();
+    } finally {
+      // Held briefly on purpose. A refresh that completes in 40ms flickers
+      // and reads as nothing having happened.
+      setTimeout(() => {
+        if (btn && original != null) {
+          btn.disabled = false;
+          btn.innerHTML = original;
+          icons();
+        }
+      }, 350);
+    }
+  }
+
   function wireControls() {
-    document.getElementById('wRefreshBtn')?.addEventListener('click', renderConsole);
+    document.getElementById('wRefreshBtn')?.addEventListener('click', refreshNow);
     document.getElementById('wLogSeverity')?.addEventListener('change', renderLog);
     document.getElementById('wLogBus')?.addEventListener('change', renderLog);
 
