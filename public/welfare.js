@@ -949,7 +949,109 @@
              Set WELFARE_DEPOTS to enable it.
            </div>`;
     }
+
+    renderCameraIngest();
     icons();
+  }
+
+  // ---------------------------------------------------------------------------
+  // AI camera ingest panel.
+  //
+  // Everything here is read from the server, never assumed. The detector
+  // thresholds themselves (5s fall, 12s violence, sensitivity 5) are configured
+  // on the camera and cannot be read back over this API, so they are described
+  // as camera-side settings rather than presented as live values this console
+  // has verified. Stating a threshold we cannot confirm would be worse than
+  // omitting it.
+  // ---------------------------------------------------------------------------
+  const CAMERA_SIGNALS = [
+    ['fall', 'Fall', 'Alert', 'Distress',
+     'Camera-side: 5s minimum duration, sensitivity 5, 24/7.'],
+    ['violence', 'Violence', 'Escalate', 'Aggression',
+     'Camera-side: 12s minimum duration, sensitivity 5, 24/7.'],
+    ['sound', 'Sound', 'Notify', 'Violence & Disruption',
+     'Camera-side: gunshot, glassbreak and screaming, sensitivity 5, 24/7.'],
+  ];
+
+  async function renderCameraIngest() {
+    const el = document.getElementById('wCameraIngest');
+    if (!el) return;
+
+    let c;
+    try {
+      c = await api('/camera/status');
+    } catch (err) {
+      el.innerHTML = `<div class="welfare-empty">Could not read camera status: ${esc(err.message)}</div>`;
+      return;
+    }
+
+    const seen = c.last_seen_at ? timeAgo(c.last_seen_at) : null;
+    const by = c.by_signal || {};
+
+    // A camera that has never called is not a fault to report as one — it is
+    // simply unfitted. The two states read very differently to an engineer.
+    const head = c.connected
+      ? `<div class="welfare-row">
+           <div class="welfare-row-main">
+             <div class="welfare-row-title">Receiving callbacks</div>
+             <div class="welfare-dim">Last contact ${esc(seen)}</div>
+           </div>
+           <span class="welfare-chip ok">live</span>
+         </div>`
+      : `<div class="welfare-row welfare-row-off">
+           <div class="welfare-row-main">
+             <div class="welfare-row-title">No callback received yet</div>
+             <div class="welfare-dim">
+               The endpoint is up and waiting. Nothing has posted to it, so the
+               camera route out is still unproven.
+             </div>
+           </div>
+           <span class="welfare-chip muted">waiting</span>
+         </div>`;
+
+    const counters = [
+      ['Accepted', c.accepted || 0, 'Stored as events'],
+      ['Suppressed', c.suppressed || 0, `Repeat within ${c.cooldown_sec}s`],
+      ['Rejected', c.rejected || 0, 'Wrong or missing token'],
+    ].map(([k, v, why]) => `
+      <div class="welfare-row">
+        <div class="welfare-row-main">
+          <div class="welfare-row-title">${esc(k)}</div>
+          <div class="welfare-dim">${esc(why)}</div>
+        </div>
+        <span class="welfare-chip${v ? '' : ' muted'}">${v}</span>
+      </div>`).join('');
+
+    const signals = CAMERA_SIGNALS.map(([key, name, sev, kpi, note]) => {
+      const n = by[key] || 0;
+      return `
+        <div class="welfare-row${n ? '' : ' welfare-row-off'}">
+          <div class="welfare-row-main">
+            <div class="welfare-row-title">${esc(name)} → ${esc(kpi)} · ${esc(sev)}</div>
+            <div class="welfare-dim">${esc(note)}</div>
+            <div class="welfare-dim welfare-mono">/api/welfare/camera/${esc(key)}</div>
+          </div>
+          <span class="welfare-chip${n ? '' : ' muted'}">${n} received</span>
+        </div>`;
+    }).join('');
+
+    const cfg = `
+      <div class="welfare-row">
+        <div class="welfare-row-main">
+          <div class="welfare-row-title">Ingest settings</div>
+          <div class="welfare-dim">
+            Default bus <strong>${esc(c.default_bus)}</strong> ·
+            repeat suppression ${c.cooldown_sec}s ·
+            token ${c.token_required ? 'required' : '<strong>not required</strong> — anyone who finds the URL can write events'} ·
+            ${Object.keys(c.map || {}).length
+              ? `${Object.keys(c.map).length} camera IP${Object.keys(c.map).length > 1 ? 's' : ''} mapped to buses`
+              : 'no IP-to-bus map, so every camera reports as the default bus'}
+          </div>
+        </div>
+        <span class="welfare-chip${c.token_required ? ' ok' : ' warn'}">${c.token_required ? 'secured' : 'open'}</span>
+      </div>`;
+
+    el.innerHTML = head + signals + counters + cfg;
   }
 
   // -------------------------------------------------------------------------
