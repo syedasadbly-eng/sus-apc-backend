@@ -42,6 +42,7 @@
     // classes, and until a real payload has been captured we do not know which
     // class or how it is named, so naming it here would be an invention.
     sound_classification: 'Unusual sound on board',
+    violence_disruption: 'Altercation, and it was heard too',
     dwell_exceeded: 'Long time on board',
   };
 
@@ -65,6 +66,9 @@
     // A Notify, not an Alert: a sound on its own is weak evidence. It is worth
     // a look, and it is corroboration if a violence event lands beside it.
     sound_classification: 'Check the live view before treating it as an incident.',
+    // Two detectors agreeing. This is the strongest evidence the camera can
+    // offer, so the instruction is unhedged.
+    violence_disruption: 'Follow the incident procedure. Two detectors agree.',
   };
 
   const action = (t) => EVENT_ACTIONS[t] || '';
@@ -969,7 +973,7 @@
      'Camera-side: 5s minimum duration, sensitivity 5, 24/7.'],
     ['violence', 'Violence', 'Escalate', 'Aggression',
      'Camera-side: 12s minimum duration, sensitivity 5, 24/7.'],
-    ['sound', 'Sound', 'Notify', 'Violence & Disruption',
+    ['sound', 'Sound', 'Notify', 'Sound (input to the compound rule)',
      'Camera-side: gunshot, glassbreak and screaming, sensitivity 5, 24/7.'],
   ];
 
@@ -1051,7 +1055,21 @@
         <span class="welfare-chip${c.token_required ? ' ok' : ' warn'}">${c.token_required ? 'secured' : 'open'}</span>
       </div>`;
 
-    el.innerHTML = head + signals + counters + cfg;
+    // The compound rule is not a camera signal — it is this console's own
+    // reading of two of them — so it is reported apart from the three.
+    const compound = `
+      <div class="welfare-row${c.compound_raised ? '' : ' welfare-row-off'}">
+        <div class="welfare-row-main">
+          <div class="welfare-row-title">Violence + Sound → Violence &amp; Disruption · Escalate</div>
+          <div class="welfare-dim">
+            Raised by this console when both detectors fire on the same bus
+            within ${c.compound_window_sec}s. One per incident, not one per callback.
+          </div>
+        </div>
+        <span class="welfare-chip${c.compound_raised ? '' : ' muted'}">${c.compound_raised || 0} raised</span>
+      </div>`;
+
+    el.innerHTML = head + signals + compound + counters + cfg;
   }
 
   // -------------------------------------------------------------------------

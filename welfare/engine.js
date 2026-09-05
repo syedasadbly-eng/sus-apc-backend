@@ -921,6 +921,7 @@ class WelfareEngine extends EventEmitter {
         basis: s.connected
           ? `AI Pro Dome HTTP callback — last seen ${s.last_seen_at}`
           : 'AI Pro Dome HTTP callback mounted — no request received yet',
+        compoundWindowSec: s.compound_window_sec ?? null,
       };
     } catch {
       return { wired: false, connected: false, basis: 'Camera ingest status unavailable' };
@@ -1142,17 +1143,24 @@ class WelfareEngine extends EventEmitter {
           : 'Camera ingest route not mounted',
       },
       {
-        signal: 'Violence & Disruption', use_case: 7, status: 'camera', source: 'AI Pro Dome',
-        detail: 'Violence plus sound classification compound rule',
-        events: c.sound_classification ?? 0,
+        signal: 'Violence & Disruption', use_case: 7,
+        status: cam.wired ? 'live' : 'camera', source: 'AI Pro Dome',
+        detail: `Violence corroborated by sound within ${cam.compoundWindowSec ?? 90} s`,
+        // The compound events themselves, not the sound callbacks that feed
+        // them. A row that counted its own inputs would read as delivering
+        // while never having raised anything.
+        events: c.violence_disruption ?? 0,
         family: 'camera',
-        enabled: false,
-        // Both feeds now arrive independently; what does not exist is the rule
-        // that correlates them. Saying 'ingest wired' here would overstate it.
-        basis: 'Sound and violence ingest separately — compound rule not built',
-        trust: 'none',
-        threshold: 'Set on the camera, not in this engine',
-        blocked_by: 'Compound violence + sound rule not implemented',
+        enabled: cam.wired,
+        basis: 'Two independent detectors agreeing on one bus inside a window',
+        // The only camera row that can earn 'measured' on its own evidence:
+        // one detector agreeing with another is a stronger claim than either
+        // alone. Until that has happened it has proven nothing.
+        trust: (c.violence_disruption ?? 0) > 0 ? 'measured' : 'unproven',
+        threshold: `Violence and sound on the same bus within ${cam.compoundWindowSec ?? 90} s`,
+        blocked_by: cam.wired
+          ? (cam.connected ? null : 'No callback received yet — camera egress to this service unconfirmed')
+          : 'Camera ingest route not mounted',
       },
     ];
   }

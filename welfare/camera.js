@@ -61,6 +61,17 @@ function cameraMap() {
 
 const DEFAULT_BUS = process.env.WELFARE_CAMERA_BUS || 'lab-rig';
 
+/** Corroboration window for the compound rule. A fight and the noise it makes
+ *  do not land at the same instant: violence needs 12s of sustained action
+ *  before the camera calls it, while a scream fires almost immediately, so the
+ *  two callbacks can be a minute apart on the same incident. */
+const COMPOUND_SEC = Number(process.env.WELFARE_CAMERA_COMPOUND_SEC || 90);
+
+/** Which signals corroborate each other. Deliberately narrow: sound alone is
+ *  weak evidence and violence alone is already an Escalate, so the only pair
+ *  worth compounding is the one where each raises the other's confidence. */
+const CORROBORATES = { violence: 'sound', sound: 'violence' };
+
 /* Signal definitions. severity and use_case match the six-KPI model:
    use case 2 = Distress, use case 7 = Aggression / Violence & Disruption. */
 const SIGNALS = {
@@ -100,6 +111,8 @@ const state = {
   rejected: 0,
   bySignal: Object.create(null),
   lastAlertTs: Object.create(null), // `${busId}:${signal}` → ms
+  compoundRaised: 0,
+  lastCompoundTs: Object.create(null), // `${busId}` → ms
 };
 
 function cameraState() {
@@ -115,6 +128,8 @@ function cameraState() {
     suppressed: state.suppressed,
     rejected: state.rejected,
     by_signal: { ...state.bySignal },
+    compound_window_sec: COMPOUND_SEC,
+    compound_raised: state.compoundRaised,
     signals: Object.keys(SIGNALS),
     captures_held: state.captures.length,
   };
@@ -240,6 +255,90 @@ function vehicleContext(engine, busId) {
   }
 }
 
+/** Store the row, then tell the engine about it. Split out because the
+ *  compound rule writes a second event by exactly the same path, and a
+ *  corroborated incident that never reached the database would be the worst
+ *  possible thing to lose. Neither failure is allowed to reach the camera as
+ *  a non-2xx. */
+function writeEvent(engine, store, row) {
+  let stored = true;
+  try {
+    if (store) store.insert(row);
+  } catch (err) {
+    stored = false;
+    console.error('[camera] store insert failed:', err.message);
+  }
+
+  try {
+    if (engine) {
+      engine.counters[row.event_type] = (engine.counters[row.event_type] ?? 0) + 1;
+      engine.recent.unshift(row);
+      if (engine.recent.length > engine.recentLimit) engine.recent.length = engine.recentLimit;
+      engine.emit(row.severity >= SEVERITY.ALERT ? 'alert' : 'log', row);
+    }
+  } catch (err) {
+    console.error('[camera] engine notify failed:', err.message);
+  }
+
+  return stored;
+}
+
+/**
+ * Compound rule: violence corroborated by sound.
+ *
+ * Two independent detectors agreeing on the same bus inside a short window is
+ * a materially stronger claim than either alone, and it is the only camera
+ * signal on this rig that earns an Escalate on its own evidence rather than on
+ * severity assigned up front. It is raised as its own event rather than by
+ * mutating the two that triggered it: the originals are what the detectors
+ * actually reported and must stay readable as such when the false-alarm rate
+ * is being measured.
+ *
+ * Returns the compound row, or null when there is nothing to corroborate.
+ */
+function compoundEvent(signal, bus, nowTs, primary, ctx) {
+  const partner = CORROBORATES[signal];
+  if (!partner) return null;
+
+  const partnerTs = state.lastAlertTs[`${bus}:${partner}`] ?? 0;
+  if (!partnerTs) return null;
+
+  const gapSec = (nowTs - partnerTs) / 1000;
+  if (gapSec > COMPOUND_SEC) return null;
+
+  // One corroborated incident, not one per callback. A sustained fight fires
+  // both detectors repeatedly, and without this the compound event would be
+  // noisier than the two signals it is meant to summarise.
+  const sinceCompound = (nowTs - (state.lastCompoundTs[bus] ?? 0)) / 1000;
+  if (sinceCompound < COMPOUND_SEC) return null;
+  state.lastCompoundTs[bus] = nowTs;
+
+  // Named in the order they were observed, because "sound then violence" and
+  // "violence then sound" describe different incidents to anyone reviewing it.
+  const order = signal === 'violence' ? 'sound then violence' : 'violence then sound';
+
+  return {
+    ...primary,
+    event_id: `cam-${bus}-compound-${nowTs}`,
+    event_type: 'violence_disruption',
+    severity: SEVERITY.ESCALATE,
+    severity_name: 'escalate',
+    rule: 'camera_violence_sound',
+    reason: `Violence and sound agree within ${Math.round(gapSec)}s \u2014 ${order}`,
+    use_case: 7,
+    detail: {
+      signal: 'violence_disruption',
+      device: 'MS-C2972-RFPG1',
+      corroborated_by: [signal, partner],
+      order,
+      gap_sec: Math.round(gapSec),
+      window_sec: COMPOUND_SEC,
+      triggered_by_event: primary.event_id,
+      vehicle_context: Object.keys(ctx).length ? ctx : 'no counting data for this vehicle',
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
@@ -342,23 +441,16 @@ function createCameraRouter(engine, store) {
     // The write is the event. If the database is unavailable the detection is
     // still worth surfacing in the live feed and the capture ring, so the
     // insert failure is contained rather than 500ing back at the camera.
-    let stored = true;
-    try {
-      if (store) store.insert(row);
-    } catch (err) {
-      stored = false;
-      console.error('[camera] store insert failed:', err.message);
-    }
+    const stored = writeEvent(engine, store, row);
 
-    try {
-      if (engine) {
-        engine.counters[spec.event_type] = (engine.counters[spec.event_type] ?? 0) + 1;
-        engine.recent.unshift(row);
-        if (engine.recent.length > engine.recentLimit) engine.recent.length = engine.recentLimit;
-        engine.emit(spec.severity >= SEVERITY.ALERT ? 'alert' : 'log', row);
-      }
-    } catch (err) {
-      console.error('[camera] engine notify failed:', err.message);
+    // Corroboration is checked after the detection has been written, never
+    // instead of it. The compound rule is an addition to the record, not a
+    // filter on it.
+    const compound = compoundEvent(signal, bus, nowTs, row, ctx);
+    if (compound) {
+      writeEvent(engine, store, compound);
+      state.compoundRaised += 1;
+      console.log(`[camera] ESCALATE ${bus} violence_disruption \u2014 ${compound.reason}`);
     }
 
     state.accepted += 1;
@@ -368,7 +460,13 @@ function createCameraRouter(engine, store) {
 
     console.log(`[camera] ${row.severity_name.toUpperCase()} ${bus} ${spec.event_type} from ${clientIp(req)}`);
 
-    return res.json({ accepted: true, stored, event_id: row.event_id, bus_id: bus });
+    return res.json({
+      accepted: true,
+      stored,
+      event_id: row.event_id,
+      bus_id: bus,
+      ...compound ? { compound_event_id: compound.event_id } : {},
+    });
   });
 
   return router;
@@ -378,7 +476,7 @@ function initCamera() {
   if (!TOKEN) {
     console.warn('[camera] WELFARE_CAMERA_TOKEN is not set — /api/welfare/camera/* accepts unauthenticated writes');
   }
-  console.log(`[camera] ingest ready: /api/welfare/camera/{${Object.keys(SIGNALS).join(',')}} · default bus ${DEFAULT_BUS} · cooldown ${COOLDOWN_SEC}s`);
+  console.log(`[camera] ingest ready: /api/welfare/camera/{${Object.keys(SIGNALS).join(',')}} · default bus ${DEFAULT_BUS} · cooldown ${COOLDOWN_SEC}s · violence+sound window ${COMPOUND_SEC}s`);
   return true;
 }
 
@@ -388,5 +486,6 @@ module.exports = {
   cameraState,
   SIGNALS,
   // exported for the self-test
-  _internal: { tokenOk, resolveBus, readBody, state },
+  COMPOUND_SEC,
+  _internal: { tokenOk, resolveBus, readBody, state, compoundEvent },
 };

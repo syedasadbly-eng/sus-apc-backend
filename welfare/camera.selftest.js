@@ -18,6 +18,7 @@ process.env.WELFARE_CAMERA_TOKEN = 'test-token';
 process.env.WELFARE_CAMERA_COOLDOWN_SEC = '2';
 process.env.WELFARE_CAMERA_BUS = 'lab-rig';
 process.env.WELFARE_CAMERA_MAP = '{"127.0.0.1":"515"}';
+process.env.WELFARE_CAMERA_COMPOUND_SEC = '60';
 
 const express = require('express');
 const camera = require('./camera');
@@ -179,6 +180,76 @@ async function main() {
   const other = await call('/camera/sound?bus=515&token=test-token');
   check('a different signal is not blocked by another signal cooldown',
     other.body.accepted === true, JSON.stringify(other.body));
+
+  // --- compound rule --------------------------------------------------------
+  // Violence and sound on one bus inside the window is the only camera claim
+  // this console makes on its own evidence rather than on assigned severity,
+  // so it is tested end to end rather than as a unit.
+  console.log('\nCompound rule: violence corroborated by sound');
+
+  const before = store.rows.length;
+  await call('/camera/sound?bus=compound-rig&token=test-token');
+  const pair = await call('/camera/violence?bus=compound-rig&token=test-token');
+  const compoundRows = store.rows.slice(before).filter((x) => x.event_type === 'violence_disruption');
+
+  check('violence after sound raises a compound event',
+    compoundRows.length === 1, `${compoundRows.length} raised`);
+  check('the compound event id is returned to the camera',
+    typeof pair.body.compound_event_id === 'string', JSON.stringify(pair.body));
+  check('compound event escalates',
+    compoundRows[0]?.severity === 4 && compoundRows[0]?.severity_name === 'escalate');
+  check('compound event is use case 7', compoundRows[0]?.use_case === 7);
+  check('compound event names both detectors',
+    JSON.stringify(compoundRows[0]?.detail?.corroborated_by ?? []) === '["violence","sound"]');
+  check('compound event records the observed order',
+    compoundRows[0]?.detail?.order === 'sound then violence', compoundRows[0]?.detail?.order);
+  check('compound event points back at what triggered it',
+    compoundRows[0]?.detail?.triggered_by_event === pair.body.event_id);
+
+  // The originals must survive untouched: they are what the detectors actually
+  // reported, and the false-alarm rate is measured from them.
+  const originals = store.rows.slice(before).filter((x) => x.source === 'camera' && x.event_type !== 'violence_disruption');
+  check('the two source events are still recorded separately',
+    originals.length === 2 && originals.some((x) => x.event_type === 'violence')
+      && originals.some((x) => x.event_type === 'sound_classification'),
+    originals.map((x) => x.event_type).join(','));
+
+  // A sustained fight re-fires both detectors. One incident, one compound row.
+  const mid = store.rows.length;
+  await new Promise((res) => setTimeout(res, 2100));
+  await call('/camera/sound?bus=compound-rig&token=test-token');
+  await call('/camera/violence?bus=compound-rig&token=test-token');
+  check('a second pair inside the window does not raise a second compound event',
+    store.rows.slice(mid).filter((x) => x.event_type === 'violence_disruption').length === 0);
+
+  // Fall is deliberately not corroborated by sound: a fall is already an Alert
+  // and a nearby noise says nothing useful about it.
+  const fallMark = store.rows.length;
+  await call('/camera/sound?bus=fall-rig&token=test-token');
+  await call('/camera/fall?bus=fall-rig&token=test-token');
+  check('fall plus sound does not compound',
+    store.rows.slice(fallMark).filter((x) => x.event_type === 'violence_disruption').length === 0);
+
+  // Unit-level, because proving expiry over HTTP would mean sleeping out the
+  // whole window in a test that already runs long.
+  const st = camera._internal.state;
+  st.lastAlertTs['expiry-rig:sound'] = Date.now() - (camera.COMPOUND_SEC + 5) * 1000;
+  check('a sound outside the window does not corroborate',
+    camera._internal.compoundEvent('violence', 'expiry-rig', Date.now(), { event_id: 'x' }, {}) === null);
+
+  check('a signal with no partner never compounds',
+    camera._internal.compoundEvent('fall', 'nobody-rig', Date.now(), { event_id: 'x' }, {}) === null);
+
+  r = await call('/camera/status');
+  check('status reports the compound window', r.body.compound_window_sec === 60, String(r.body.compound_window_sec));
+  // Not a fixed number: the bus-resolution block earlier in this file posts a
+  // violence and then a sound on 515, which is a genuine corroboration and is
+  // correctly counted. The invariant that matters is that the counter agrees
+  // with what actually reached the store.
+  const storedCompounds = store.rows.filter((x) => x.event_type === 'violence_disruption').length;
+  check('status counter agrees with the compound events written',
+    r.body.compound_raised === storedCompounds,
+    `counter ${r.body.compound_raised} vs stored ${storedCompounds}`);
 
   // --- capture and status ---------------------------------------------------
   console.log('\nDiagnostics');
