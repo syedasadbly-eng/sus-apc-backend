@@ -109,9 +109,28 @@ const RAW_LIMIT_CHARS = 4000;
 // Signal classification
 // ---------------------------------------------------------------------------
 
-/* Built-in keyword matching, used until the camera's real topic strings are
-   known. Ordered: violence is checked before sound so a topic naming both
-   lands on the stronger signal. */
+/* Vendor-confirmed topic strings.
+
+   Supplied by Milesight technical support on 2026-09-08 for MS-C2972-RFPG1 on
+   firmware 63.8.0.6-r1, in answer to a direct question about whether the
+   MSense events surface as ONVIF PullPoint topics despite being absent from
+   the Push Event Type list. They do — that list governs pushing to Milesight's
+   own app and NVR, not third-party subscribers.
+
+   Matched as a prefix rather than an exact string: ONVIF topic expressions are
+   commonly suffixed per source or rule instance, and a trailing token must not
+   stop a fall being recognised. */
+const VENDOR_TOPICS = [
+  ['fall', 'tns1:RuleEngine/FallDetector/Fall'],
+  ['violence', 'tns1:RuleEngine/ViolenceDetector/Violence'],
+  ['sound', 'tns1:RuleEngine/AudioDetector/Class'],
+];
+
+/* Keyword matching, the fallback beneath the vendor strings above. Kept
+   because the vendor list is one firmware build's answer and topic names have
+   already been shown to shift between builds and VMS profiles. Ordered:
+   violence is checked before sound so a topic naming both lands on the
+   stronger signal. */
 const KEYWORDS = [
   ['fall', /fall|tumble|lying|collapse/i],
   ['violence', /violen|fight|brawl|assault|aggress/i],
@@ -155,8 +174,19 @@ function classify(msg, bindings = topicBindings()) {
   let signal = null;
   let matchedBy = null;
 
+  // Operator configuration wins over everything: it is the only source that
+  // knows what this particular camera on this particular build actually emits.
   for (const b of bindings) {
     if (b.re.test(haystack)) { signal = b.signal; matchedBy = `binding:${b.pattern}`; break; }
+  }
+  // Then the strings Milesight confirmed, matched against the topic only. The
+  // topic is authoritative; the payload is not, and matching these against a
+  // whole payload would let a data item mentioning a topic name misclassify.
+  if (!signal) {
+    const topic = String(msg.topic || '');
+    for (const [name, vendorTopic] of VENDOR_TOPICS) {
+      if (topic.startsWith(vendorTopic)) { signal = name; matchedBy = `vendor:${vendorTopic}`; break; }
+    }
   }
   if (!signal) {
     for (const [name, re] of KEYWORDS) {
@@ -407,6 +437,7 @@ function onvifState() {
     },
     distinct_topics: Object.keys(state.seen_topics).length,
     bindings: topicBindings().map((b) => ({ pattern: b.pattern, signal: b.signal })),
+    vendor_topics: Object.fromEntries(VENDOR_TOPICS.map(([s, t]) => [t, s])),
   };
 }
 
@@ -771,5 +802,6 @@ module.exports = {
     state,
     start,
     topicBindings,
+    VENDOR_TOPICS,
   },
 };

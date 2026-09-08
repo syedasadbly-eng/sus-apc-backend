@@ -48,11 +48,33 @@ No relay URL set. Detections are written straight into the local SQLite
 database and appear in the local console. Use this on the bench, or on a
 vehicle that runs its own console.
 
-## Find out what the camera calls its events
+## The topic strings, confirmed by the vendor
 
-Milesight does not publish the ONVIF topic strings for the MSense events, and
-they differ between builds. **Do this before configuring anything.** From a
-machine that can reach the camera:
+Milesight technical support supplied these on 2026-09-08 for MS-C2972-RFPG1 on
+firmware 63.8.0.6-r1, confirming that the MSense events **do** publish as ONVIF
+PullPoint topics:
+
+| Signal | Topic |
+|---|---|
+| Fall Detection | `tns1:RuleEngine/FallDetector/Fall` |
+| Violence Detection | `tns1:RuleEngine/ViolenceDetector/Violence` |
+| Sound Classification | `tns1:RuleEngine/AudioDetector/Class` |
+
+These are built into `welfare/onvif.js` as `VENDOR_TOPICS` and matched as
+prefixes, so a per-rule instance suffix does not break recognition. They are
+matched against the topic only, never the payload. `WELFARE_ONVIF_TOPICS` still
+outranks them, because an operator who has probed their own camera knows better
+than a support email.
+
+Note also that the **Push Event Type** list under Network → More is *not*
+relevant here. Milesight confirmed it governs pushing to their own app and NVR;
+its omission of the MSense events says nothing about third-party subscribers.
+
+## Confirm what your camera actually emits
+
+Topic names have already been shown to shift between firmware builds and VMS
+profiles, so verify rather than assume. From a machine that can reach the
+camera:
 
 ```bash
 node scripts/onvif-probe.js --host 192.168.1.200 --user admin --pass 'yourpass'
@@ -183,7 +205,7 @@ from a listener that is already running.
 node welfare/onvif.selftest.js
 ```
 
-52 assertions against a fake ONVIF camera on localhost: the full SOAP
+58 assertions against a fake ONVIF camera on localhost: the full SOAP
 conversation, ONVIF-spec digest computation, clock-skew compensation,
 notification parsing with mixed namespace prefixes, classification of all three
 signals plus the negative cases, clear-versus-alarm handling, baseline
@@ -195,13 +217,13 @@ posting to the HTTP ingest route.
 Everything below needs the camera in front of it, and none of it is claimed
 until then:
 
-- **The real topic strings.** Keyword matching is a starting position, not a
-  specification. Run the probe and bind them.
-- **Whether these events reach ONVIF at all.** Milesight documents Fall,
-  Violence and Sound Classification as camera events; it does not document them
-  as ONVIF topics. If the probe shows nothing when a fall is staged, the events
-  are camera-internal on this build and the fallback is the FTP/email transport
-  or a Milesight firmware fix.
+- **The vendor strings against this camera.** They came from support, not from
+  a document, and have not yet been observed on our own device. Run the probe
+  and confirm.
+- **The payload shape.** Which data items carry the on/off state of a fall, and
+  what Sound Classification puts in its items (`Type`? a class name?), is
+  unknown until a real detection is captured. The clear-versus-alarm logic
+  depends on it.
 - **Detection quality from a bus ceiling.** Mounting geometry, lens angle and
   motion are all unvalidated. Camera-derived distress and aggression evidence
   stays marked `unproven` until live detections exist.

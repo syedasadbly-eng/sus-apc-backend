@@ -197,11 +197,33 @@ async function main() {
     const counting = classify({ topic: 'tns1:RuleEngine/CountAggregation/Counter', data: { Count: '42' } }, []);
     check('people counting is not a welfare signal', counting.signal === null, JSON.stringify(counting));
 
+    // Vendor-confirmed strings, supplied by Milesight support 2026-09-08.
+    const vf = classify({ topic: 'tns1:RuleEngine/FallDetector/Fall', data: { State: 'true' } }, []);
+    check('vendor fall topic recognised', vf.signal === 'fall' && vf.matchedBy === 'vendor:tns1:RuleEngine/FallDetector/Fall', JSON.stringify(vf));
+    const vv = classify({ topic: 'tns1:RuleEngine/ViolenceDetector/Violence', data: { State: 'true' } }, []);
+    check('vendor violence topic recognised', vv.signal === 'violence' && vv.matchedBy.startsWith('vendor:'), JSON.stringify(vv));
+    const vs = classify({ topic: 'tns1:RuleEngine/AudioDetector/Class', data: { Type: 'Scream' } }, []);
+    check('vendor sound topic recognised', vs.signal === 'sound' && vs.matchedBy.startsWith('vendor:'), JSON.stringify(vs));
+    // Instance suffixes must not break the match.
+    const vsuffix = classify({ topic: 'tns1:RuleEngine/FallDetector/Fall/Rule1', data: { State: 'true' } }, []);
+    check('vendor topic with an instance suffix still matches', vsuffix.signal === 'fall', JSON.stringify(vsuffix));
+    // The topic is authoritative; a payload merely mentioning it is not.
+    const payloadOnly = classify({ topic: 'tns1:Device/HardwareFailure/StorageFailure', data: { Note: 'tns1:RuleEngine/FallDetector/Fall' } }, []);
+    check('vendor string in a payload does not classify on its own',
+      payloadOnly.matchedBy === null || !payloadOnly.matchedBy.startsWith('vendor:'), JSON.stringify(payloadOnly));
+
     const bound = classify(
       { topic: 'tns1:RuleEngine/CellMotionDetector/Xyz', data: { State: 'true' } },
       [{ pattern: 'CellMotionDetector/Xyz', signal: 'violence', re: /CellMotionDetector\/Xyz/i }],
     );
     check('explicit binding overrides keywords', bound.signal === 'violence' && bound.matchedBy.startsWith('binding:'), JSON.stringify(bound));
+
+    const override = classify(
+      { topic: 'tns1:RuleEngine/FallDetector/Fall', data: { State: 'true' } },
+      [{ pattern: 'FallDetector', signal: 'violence', re: /FallDetector/i }],
+    );
+    check('operator binding outranks the vendor list',
+      override.signal === 'violence' && override.matchedBy.startsWith('binding:'), JSON.stringify(override));
 
     // Ordering: violence must win over sound when a topic names both, because
     // the stronger signal is the one worth acting on.
