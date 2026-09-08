@@ -124,6 +124,10 @@ const VENDOR_TOPICS = [
   ['fall', 'tns1:RuleEngine/FallDetector/Fall'],
   ['violence', 'tns1:RuleEngine/ViolenceDetector/Violence'],
   ['sound', 'tns1:RuleEngine/AudioDetector/Class'],
+  // Sits outside RuleEngine on this firmware. Observed alongside the
+  // classifier above, so it is listed explicitly rather than left to the
+  // keyword fallback.
+  ['sound', 'tns1:AudioAnalytics/Audio/DetectedSound'],
 ];
 
 /* Keyword matching, the fallback beneath the vendor strings above. Kept
@@ -159,8 +163,13 @@ function topicBindings() {
 /** Values a camera uses to mean "this is happening". */
 const TRUTHY = new Set(['true', '1', 'on', 'yes', 'active', 'start', 'started']);
 
-/** Data item names that carry the on/off state of a property event. */
-const STATE_KEY = /state|isfall|isviolen|active|logical|alarm|trigger/i;
+/** Data item names that carry the on/off state of a property event.
+ *  Confirmed against MS-C2972-RFPG1 fw 63.8.0.6-r1 on 2026-09-08: the audio
+ *  classifier reports IsAudioAed=true then IsAudioAed=false a few seconds
+ *  later, and AudioAnalytics/Audio/DetectedSound uses isSoundDetected. Without
+ *  those names here the clear message reads as a second alarm and every shout
+ *  raises two alerts. */
+const STATE_KEY = /state|isfall|isviolen|isaudio|issound|active|logical|alarm|trigger/i;
 
 /**
  * Decide whether a notification is one of our three signals, and whether it is
