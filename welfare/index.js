@@ -21,6 +21,7 @@ const { WelfareEngine, SEVERITY } = require('./engine');
 const doorlog = require('./doorlog');
 const occupancy = require('./occupancy');
 const camera = require('./camera');
+const onvif = require('./onvif');
 
 const ENABLED = process.env.FEATURE_WELFARE === 'true';
 
@@ -198,6 +199,7 @@ function createRouter(engine, store, meta) {
       // route exists for it to reach.
       camera_connected: camera.cameraState().connected,
       camera: camera.cameraState(),
+      onvif: onvif.onvifState(),
       started_at: meta.startedAt,
       config: engine.config(),
       counters: engine.counters,
@@ -398,6 +400,19 @@ function initWelfare(app, db, opts = {}) {
       }
     } catch (err) {
       console.error('[camera] mount failed, continuing without camera ingest:', err.message);
+    }
+
+    // ONVIF PullPoint listener. The camera will not offer HTTP Notification
+    // for Fall, Violence or Sound Classification on firmware 63.8.0.6-r1, so
+    // this subscribes and pulls instead. Off unless FEATURE_WELFARE_ONVIF is
+    // set, and in its own try/catch for the same reason as the camera router:
+    // an unreachable camera must not take the working rules down with it.
+    try {
+      if (onvif.initOnvif(engine, store)) {
+        app.use('/api/welfare', onvif.createOnvifRouter());
+      }
+    } catch (err) {
+      console.error('[onvif] mount failed, continuing without ONVIF ingest:', err.message);
     }
 
     // Derived occupancy. Welfare console only — see the header of

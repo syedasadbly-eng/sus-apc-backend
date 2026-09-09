@@ -340,6 +340,100 @@ function compoundEvent(signal, bus, nowTs, primary, ctx) {
 }
 
 // ---------------------------------------------------------------------------
+// Record path
+// ---------------------------------------------------------------------------
+
+/**
+ * Turn one detection into welfare events.
+ *
+ * Lifted out of the HTTP route so the ONVIF PullPoint listener records by
+ * exactly the same path: same cooldown, same compound rule, same vehicle
+ * context, same counters, same live feed. The transport a detection arrived
+ * over belongs in detail, not in a parallel implementation — two code paths
+ * for "the camera saw something" is how one of them quietly stops working.
+ *
+ * Returns { accepted, reason?, event_id?, stored?, compound_event_id?, row? }.
+ * Never throws: a storage or engine fault is contained by writeEvent().
+ */
+function recordDetection({ engine, store, signal, bus, via = 'default', detail = {}, at = Date.now() }) {
+  const spec = SIGNALS[signal];
+  if (!spec) return { accepted: false, reason: 'unknown_signal' };
+
+  const busId = String(bus || DEFAULT_BUS);
+  const nowTs = at;
+  const key = `${busId}:${signal}`;
+  const sinceLast = (nowTs - (state.lastAlertTs[key] ?? 0)) / 1000;
+
+  if (sinceLast < COOLDOWN_SEC) {
+    state.suppressed += 1;
+    return {
+      accepted: false,
+      reason: 'cooldown',
+      cooldown_sec: COOLDOWN_SEC,
+      since_last_sec: Math.round(sinceLast),
+    };
+  }
+
+  state.lastAlertTs[key] = nowTs;
+
+  const ctx = vehicleContext(engine, busId);
+  const detectedAt = new Date(nowTs).toISOString();
+  const row = {
+    event_id: `cam-${busId}-${signal}-${nowTs}`,
+    detected_at: detectedAt,
+    bus_id: busId,
+    source: 'camera',
+    event_type: spec.event_type,
+    severity: spec.severity,
+    severity_name: { 1: 'log', 2: 'notify', 3: 'alert', 4: 'escalate' }[spec.severity],
+    rule: spec.rule,
+    reason: `${spec.label} by AI Pro Dome`,
+    use_case: spec.use_case,
+    route: ctx.route ?? null,
+    lat: ctx.lat ?? null,
+    lng: ctx.lng ?? null,
+    onboard: ctx.onboard ?? null,
+    sensor_health: ctx.sensor_health ?? 'camera',
+    acknowledged: 0,
+    detail: {
+      signal,
+      device: 'MS-C2972-RFPG1',
+      bus_resolved_via: via,
+      ...detail,
+      vehicle_context: Object.keys(ctx).length ? ctx : 'no counting data for this vehicle',
+    },
+  };
+
+  // The write is the event. If the database is unavailable the detection is
+  // still worth surfacing in the live feed and the capture ring, so the
+  // insert failure is contained rather than 500ing back at the camera.
+  const stored = writeEvent(engine, store, row);
+
+  // Corroboration is checked after the detection has been written, never
+  // instead of it. The compound rule is an addition to the record, not a
+  // filter on it.
+  const compound = compoundEvent(signal, busId, nowTs, row, ctx);
+  if (compound) {
+    writeEvent(engine, store, compound);
+    state.compoundRaised += 1;
+    console.log(`[camera] ESCALATE ${busId} violence_disruption \u2014 ${compound.reason}`);
+  }
+
+  state.accepted += 1;
+  state.bySignal[signal] = (state.bySignal[signal] ?? 0) + 1;
+  state.lastEventAt = detectedAt;
+
+  return {
+    accepted: true,
+    stored,
+    event_id: row.event_id,
+    bus_id: busId,
+    row,
+    ...compound ? { compound_event_id: compound.event_id } : {},
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
 
@@ -387,85 +481,45 @@ function createCameraRouter(engine, store) {
     }
 
     const { bus, via } = resolveBus(req);
-    const nowTs = Date.now();
-    const key = `${bus}:${signal}`;
-    const sinceLast = (nowTs - (state.lastAlertTs[key] ?? 0)) / 1000;
 
-    if (sinceLast < COOLDOWN_SEC) {
-      state.suppressed += 1;
-      capture(req, signal, 'suppressed', {
-        body,
-        note: `within ${COOLDOWN_SEC}s cooldown (${Math.round(sinceLast)}s since last)`,
-      });
-      // 200, not 429. The camera treats a non-2xx as a delivery failure and
-      // there is nothing wrong here — the event was received and deliberately
-      // folded into the previous one.
-      return res.json({ accepted: false, reason: 'cooldown', cooldown_sec: COOLDOWN_SEC });
-    }
-
-    state.lastAlertTs[key] = nowTs;
-
-    const ctx = vehicleContext(engine, bus);
-    const detectedAt = new Date(nowTs).toISOString();
-    const row = {
-      event_id: `cam-${bus}-${signal}-${nowTs}`,
-      detected_at: detectedAt,
-      bus_id: bus,
-      source: 'camera',
-      event_type: spec.event_type,
-      severity: spec.severity,
-      severity_name: { 1: 'log', 2: 'notify', 3: 'alert', 4: 'escalate' }[spec.severity],
-      rule: spec.rule,
-      reason: `${spec.label} by AI Pro Dome`,
-      use_case: spec.use_case,
-      route: ctx.route ?? null,
-      lat: ctx.lat ?? null,
-      lng: ctx.lng ?? null,
-      onboard: ctx.onboard ?? null,
-      sensor_health: ctx.sensor_health ?? 'camera',
-      acknowledged: 0,
+    const result = recordDetection({
+      engine,
+      store,
+      signal,
+      bus,
+      via,
       detail: {
-        signal,
-        device: 'MS-C2972-RFPG1',
+        transport: 'http_notification',
         from_ip: clientIp(req),
-        bus_resolved_via: via,
         http_method: req.method,
         content_type: req.headers['content-type'] || null,
         query: { ...req.query, token: undefined },
         payload: body.json ?? (body.text ? { raw: body.text } : null),
         snapshot_bytes: body.binary_bytes,
-        vehicle_context: Object.keys(ctx).length ? ctx : 'no counting data for this vehicle',
       },
-    };
+    });
 
-    // The write is the event. If the database is unavailable the detection is
-    // still worth surfacing in the live feed and the capture ring, so the
-    // insert failure is contained rather than 500ing back at the camera.
-    const stored = writeEvent(engine, store, row);
-
-    // Corroboration is checked after the detection has been written, never
-    // instead of it. The compound rule is an addition to the record, not a
-    // filter on it.
-    const compound = compoundEvent(signal, bus, nowTs, row, ctx);
-    if (compound) {
-      writeEvent(engine, store, compound);
-      state.compoundRaised += 1;
-      console.log(`[camera] ESCALATE ${bus} violence_disruption \u2014 ${compound.reason}`);
+    if (!result.accepted) {
+      capture(req, signal, 'suppressed', {
+        body,
+        note: `within ${COOLDOWN_SEC}s cooldown (${result.since_last_sec}s since last)`,
+      });
+      // 200, not 429. The camera treats a non-2xx as a delivery failure and
+      // there is nothing wrong here — the event was received and deliberately
+      // folded into the previous one.
+      return res.json({ accepted: false, reason: result.reason, cooldown_sec: COOLDOWN_SEC });
     }
 
-    state.accepted += 1;
-    state.bySignal[signal] = (state.bySignal[signal] ?? 0) + 1;
-    state.lastEventAt = detectedAt;
-    capture(req, signal, 'accepted', { body, note: `event ${row.event_id}` });
+    capture(req, signal, 'accepted', { body, note: `event ${result.event_id}` });
 
-    console.log(`[camera] ${row.severity_name.toUpperCase()} ${bus} ${spec.event_type} from ${clientIp(req)}`);
+    console.log(`[camera] ${String(result.row.severity_name).toUpperCase()} ${bus} ${spec.event_type} from ${clientIp(req)}`);
 
     return res.json({
       accepted: true,
-      stored,
-      event_id: row.event_id,
-      bus_id: bus,
-      ...compound ? { compound_event_id: compound.event_id } : {},
+      stored: result.stored,
+      event_id: result.event_id,
+      bus_id: result.bus_id,
+      ...result.compound_event_id ? { compound_event_id: result.compound_event_id } : {},
     });
   });
 
@@ -484,6 +538,7 @@ module.exports = {
   createCameraRouter,
   initCamera,
   cameraState,
+  recordDetection,
   SIGNALS,
   // exported for the self-test
   COMPOUND_SEC,

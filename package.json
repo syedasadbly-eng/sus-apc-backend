@@ -6,7 +6,10 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "lint": "eslint server.js welfare/*.js public/*.js"
+    "lint": "eslint server.js welfare/*.js public/*.js scripts/*.js",
+    "test:welfare": "node welfare/selftest.js && node welfare/camera.selftest.js && node welfare/doorlog.selftest.js && node welfare/occupancy.selftest.js && node welfare/onvif.selftest.js",
+    "onvif:probe": "node scripts/onvif-probe.js",
+    "notify:listen": "node scripts/notify-listener.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0",
