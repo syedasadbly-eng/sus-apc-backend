@@ -3312,3 +3312,80 @@ html, body {
   #view-welfare-console .welfare-headline-main { font-size: 26px; }
   .wc-stat-v { font-size: 24px; }
 }
+
+/* ---- Welfare Console v3: richer status colours, emphasised critical data ---- */
+.main:has(#view-welfare-console.active) {
+  /* Deeper, more saturated signal colours that hold contrast on white */
+  --color-error: #d4202c;   --color-error-light: #fdecee;   --wc-error-line: #f3b4b9;
+  --color-warning: #c25e00; --color-warning-light: #fff3e3; --wc-warn-line: #f5c98c;
+  --color-success: #0a8a4f; --color-success-light: #e6f6ee; --wc-ok-line: #9fdcbd;
+  --wc-num: 'Cabinet Grotesk', 'Satoshi', system-ui, sans-serif;
+}
+#view-welfare-console .wc-stat-v, #view-welfare-console .welfare-headline-main,
+#view-welfare-console .wc-alert-time, #view-welfare-console .wo-tile-count strong,
+#view-welfare-console .wo-big, #view-welfare-console .welfare-kv dd, #view-welfare-console .wc-count {
+  font-family: var(--wc-num); font-variant-numeric: tabular-nums lining-nums;
+}
+
+/* headline: the single most important line on the page */
+#view-welfare-console .welfare-headline-main { font-size: 40px; font-weight: 800; letter-spacing: -0.03em; }
+#view-welfare-console .welfare-headline.bad .welfare-headline-main { color: var(--color-error); }
+#view-welfare-console .welfare-headline.warn .welfare-headline-main { color: var(--color-warning); }
+#view-welfare-console .welfare-headline.ok .welfare-headline-main { color: var(--color-success); }
+#view-welfare-console .welfare-headline.bad { background: linear-gradient(90deg, var(--color-error-light), #fff 42%); }
+#view-welfare-console .welfare-headline.warn { background: linear-gradient(90deg, var(--color-warning-light), #fff 42%); }
+#view-welfare-console .welfare-headline.ok { background: linear-gradient(90deg, var(--color-success-light), #fff 42%); }
+#view-welfare-console .welfare-headline::before { width: 8px; }
+#view-welfare-console .welfare-headline-dot { width: 16px; height: 16px; margin-top: 16px; }
+#view-welfare-console .welfare-headline-dot.bad { animation: wcPulseBad 1.6s ease-in-out infinite; }
+@keyframes wcPulseBad { 0%,100% { box-shadow: 0 0 0 5px rgba(212,32,44,.18); } 50% { box-shadow: 0 0 0 10px rgba(212,32,44,.06); } }
+#view-welfare-console .welfare-headline-sub { font-size: 15.5px; font-weight: 500; color: #2b3342; }
+
+/* stat tiles: colour carries the meaning */
+.wc-stat { min-width: 124px; padding: 14px 18px; border-width: 1.5px; }
+.wc-stat-v { font-size: 40px; font-weight: 800; letter-spacing: -0.035em; }
+.wc-stat.ok   { border-color: var(--wc-ok-line);    background: var(--color-success-light); }
+.wc-stat.warn { border-color: var(--wc-warn-line);  background: var(--color-warning-light); }
+.wc-stat.bad  { border-color: var(--wc-error-line); background: var(--color-error-light); }
+.wc-stat.ok .wc-stat-v { color: var(--color-success); }
+.wc-stat.warn .wc-stat-v { color: var(--color-warning); }
+.wc-stat.bad .wc-stat-v { color: var(--color-error); }
+.wc-stat .wc-stat-k { color: #3b4454; }
+#view-welfare-console .dev-tag { background: var(--color-success); color: #fff; }
+
+/* alert rows */
+.wc-alert-title { font-size: 17px; font-weight: 800; }
+.wc-alert-time { font-size: 15px; font-weight: 800; }
+.wc-alert.sev-escalate:not(.is-seen) .wc-alert-icon { background: var(--color-error); border-color: var(--color-error); color: #fff; }
+.wc-alert.sev-alert:not(.is-seen) .wc-alert-icon { background: var(--color-warning); border-color: var(--color-warning); color: #fff; }
+.wc-alert.sev-escalate:not(.is-seen) .wc-alert-time { color: var(--color-error); }
+.wc-alert.sev-alert:not(.is-seen) .wc-alert-time { color: var(--color-warning); }
+.wc-count { font-size: 12.5px; font-weight: 800; color: #fff; background: var(--sev); border-color: var(--sev); padding: 1px 8px; }
+.wc-seen { color: var(--color-success); font-weight: 700; }
+.wc-seen.part { color: var(--color-warning); font-weight: 700; }
+
+/* bus cards */
+#view-welfare-console .welfare-vcard.ok  { border-color: var(--color-success); }
+#view-welfare-console .welfare-vcard.warn { border-color: var(--color-warning); }
+#view-welfare-console .welfare-vcard.bad { border-color: var(--color-error); }
+#view-welfare-console .welfare-vcard-bus { font-size: 22px; }
+#view-welfare-console .welfare-kv dd { font-size: 20px; font-weight: 800; }
+#view-welfare-console .welfare-health-pill { color: #fff; border: 0; font-weight: 800; }
+#view-welfare-console .welfare-health-pill.ok { background: var(--color-success); color: #fff; }
+#view-welfare-console .welfare-health-pill.warn { background: var(--color-warning); color: #fff; }
+#view-welfare-console .welfare-health-pill.bad { background: var(--color-error); color: #fff; }
+
+/* monitoring tiles */
+#view-welfare-console .wo-tile-count strong { font-size: 36px; }
+#view-welfare-console .wo-status.live { background: var(--color-success-light); border-color: var(--wc-ok-line); color: var(--color-success); }
+#view-welfare-console .wo-status.blocked { background: var(--color-warning-light); border-color: var(--wc-warn-line); color: var(--color-warning); }
+#view-welfare-console .wo-basis.ok { background: var(--color-success-light); color: var(--color-success); }
+#view-welfare-console .wo-basis.warn { background: var(--color-warning-light); color: var(--color-warning); }
+#view-welfare-console .wo-tile-why { background: var(--color-warning-light); color: #8a4300; border: 1px solid var(--wc-warn-line); }
+#view-welfare-console .wo-ring .fill { stroke: var(--color-success); }
+#view-welfare-console .wo-big { font-size: 36px; }
+@media (max-width: 640px) {
+  #view-welfare-console .welfare-headline-main { font-size: 28px; }
+  .wc-stat-v { font-size: 28px; }
+}
+@media (prefers-reduced-motion: reduce) { #view-welfare-console .welfare-headline-dot.bad { animation: none; } }
