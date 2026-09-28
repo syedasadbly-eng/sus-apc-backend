@@ -2920,7 +2920,7 @@ html, body {
 /* ---- Welfare monitoring panel on the Overview ---- */
 .welfare-overview {
   --wo-cam: #f472b6; --wo-pass: #60a5fa; --wo-sys: #34d399;
-  margin-bottom: 24px; padding: 22px; border-radius: 18px;
+  margin-top: 20px; margin-bottom: 24px; padding: 22px; border-radius: 18px;
   border: 1px solid var(--color-border);
   background:
     radial-gradient(1200px 300px at 0% 0%, rgba(59,130,246,0.10), transparent 60%),
