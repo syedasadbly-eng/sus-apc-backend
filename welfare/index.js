@@ -21,6 +21,7 @@ const { WelfareEngine, SEVERITY } = require('./engine');
 const doorlog = require('./doorlog');
 const occupancy = require('./occupancy');
 const camera = require('./camera');
+const driver = require('./driver');
 
 const ENABLED = process.env.FEATURE_WELFARE === 'true';
 
@@ -398,6 +399,13 @@ function initWelfare(app, db, opts = {}) {
       }
     } catch (err) {
       console.error('[camera] mount failed, continuing without camera ingest:', err.message);
+    }
+
+    // Cab screens. PIN-protected, bus-scoped read and acknowledge only.
+    try {
+      if (driver.initDriver()) app.use('/api/welfare', driver.createDriverRouter(engine, store));
+    } catch (err) {
+      console.error('[driver] mount failed, continuing without driver screens:', err.message);
     }
 
     // Derived occupancy. Welfare console only — see the header of

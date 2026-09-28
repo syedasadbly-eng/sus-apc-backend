@@ -1,7 +1,26 @@
 # Driver display
 
-`public/driver.html` is a cab-mounted alert screen, one per bus. It uses the existing
-welfare API and adds no backend changes.
+`public/driver.html` is a cab-mounted alert screen, one per bus. It talks only to the
+PIN-protected, bus-scoped routes in `welfare/driver.js`.
+
+## PIN
+
+| Variable | Example | Meaning |
+|---|---|---|
+| `WELFARE_DRIVER_PIN` | `4821` | One PIN for every cab screen |
+| `WELFARE_DRIVER_PINS` | `{"515":"4821","419":"7734"}` | Optional per-bus PINs. A bus listed here uses its own PIN, and others use the fleet PIN |
+
+- **First start:** the screen asks for the PIN once and remembers it on that tablet. It asks again only if the server rejects it, for example after the PIN is changed.
+- **Lockout:** five wrong PINs from one address lock that address out for five minutes.
+- **Scope:** a PIN only reads and acknowledges alerts for its own bus. The response carries no camera IP, no raw payload and no other vehicle.
+- **No PIN set:** if neither variable is set, the routes stay open. This is logged loudly at startup.
+
+Routes:
+
+```
+GET  /api/welfare/driver/:bus               X-Driver-Pin: <pin>
+POST /api/welfare/driver/:bus/ack/:eventId  X-Driver-Pin: <pin>
+```
 
 ## Open it
 
@@ -37,7 +56,7 @@ These go to the control-room console only and never reach the cab: sensor health
 drift, `dwell_no_alighting`, and a `sound_classification` on its own.
 
 If there is more than one alert, the worst and newest is shown, with a "+N more" count.
-**SEEN** acknowledges the alert (`POST /api/welfare/events/:id/ack`, `by: driver:<bus>`),
+**SEEN** acknowledges the alert (`POST /api/welfare/driver/:bus/ack/:id`, recorded as `driver:<bus>`),
 so the console can see that the driver has it. Alerts also clear on their own after
 `window` minutes, so the driver never has to touch the screen while driving.
 
