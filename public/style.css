@@ -3059,3 +3059,164 @@ html, body {
 .wo-link { white-space: nowrap; flex: 0 0 auto; }
 @media (max-width: 1100px) { .g-system .wo-group-sub { display: inline; } }
 @media (max-width: 640px) { .g-system .wo-group-sub { display: none; } }
+
+/* ==========================================================================
+   Welfare Console: light, premium canvas
+   Scoped to the Console view only. The rest of the dashboard keeps its dark
+   theme; the tokens are redefined on the content area while this view is
+   open, so the monitoring panel and shared components follow automatically.
+   ========================================================================== */
+.main:has(#view-welfare-console.active) {
+  --color-bg: #f4f5f8;
+  --color-surface: #ffffff;
+  --color-surface-2: #f8f9fb;
+  --color-surface-3: #eef0f4;
+  --color-surface-offset: #f1f3f7;
+  --color-divider: #eceef3;
+  --color-border: #e4e7ee;
+  --color-text: #0e1726;
+  --color-text-muted: #5d6677;
+  --color-text-faint: #98a1b1;
+  --color-text-inverse: #ffffff;
+  --color-primary: #2952d9;
+  --color-primary-hover: #1f43bd;
+  --color-primary-light: rgba(41, 82, 217, 0.08);
+  --color-success: #0e9f6e;
+  --color-success-light: rgba(14, 159, 110, 0.10);
+  --color-warning: #c7780a;
+  --color-warning-light: rgba(199, 120, 10, 0.10);
+  --color-error: #d92d3a;
+  --color-error-light: rgba(217, 45, 58, 0.09);
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --shadow-md: 0 1px 2px rgba(16, 24, 40, 0.04), 0 8px 24px -8px rgba(16, 24, 40, 0.10);
+  --wc-display: 'General Sans', 'Satoshi', 'Inter', system-ui, sans-serif;
+  --wc-body: 'Satoshi', 'Inter', system-ui, sans-serif;
+  background: var(--color-bg);
+  color-scheme: light;
+  padding: 28px 32px 40px;
+}
+#view-welfare-console { font-family: var(--wc-body); color: var(--color-text); max-width: 1320px; margin: 0 auto;
+  -webkit-font-smoothing: antialiased; }
+#view-welfare-console h2, #view-welfare-console .welfare-headline-main, #view-welfare-console .wo-title,
+#view-welfare-console .wo-big, #view-welfare-console .wc-stat-v { font-family: var(--wc-display); }
+
+/* status card */
+#view-welfare-console .welfare-headline {
+  display: flex; align-items: center; justify-content: space-between; gap: 28px;
+  padding: 24px 28px; margin: 0 0 24px; border-radius: 20px;
+  background: var(--color-surface); border: 1px solid var(--color-border); border-left: 1px solid var(--color-border);
+  box-shadow: var(--shadow-md); position: relative; overflow: hidden;
+}
+#view-welfare-console .welfare-headline::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 5px; background: var(--color-text-faint); }
+#view-welfare-console .welfare-headline.ok::before { background: var(--color-success); }
+#view-welfare-console .welfare-headline.warn::before { background: var(--color-warning); }
+#view-welfare-console .welfare-headline.bad::before { background: var(--color-error); }
+.wc-status-left { display: flex; align-items: flex-start; gap: 18px; min-width: 0; flex: 1 1 auto; }
+#view-welfare-console .welfare-headline-dot { width: 14px; height: 14px; margin-top: 30px; flex: 0 0 auto; border-radius: 50%; }
+#view-welfare-console .welfare-headline-dot.ok { box-shadow: 0 0 0 6px var(--color-success-light); }
+#view-welfare-console .welfare-headline-dot.warn { box-shadow: 0 0 0 6px var(--color-warning-light); }
+#view-welfare-console .welfare-headline-dot.bad { box-shadow: 0 0 0 6px var(--color-error-light); }
+.wc-status-text { min-width: 0; }
+.wc-eyebrow { font-size: 11.5px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--color-text-faint); margin-bottom: 4px; }
+#view-welfare-console .welfare-headline-main { font-size: 28px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.15; color: var(--color-text); }
+#view-welfare-console .welfare-headline-sub { font-size: 14.5px; color: var(--color-text-muted); margin-top: 6px; line-height: 1.45; max-width: 62ch; }
+#view-welfare-console .welfare-freshness { display: inline-flex; align-items: center; gap: 8px; margin-top: 12px;
+  font-size: 12.5px; color: var(--color-text-muted); background: var(--color-surface-2); border: 1px solid var(--color-divider);
+  padding: 4px 10px; border-radius: 999px; }
+#view-welfare-console .welfare-freshness.warn { color: var(--color-warning); }
+#view-welfare-console .welfare-freshness.bad { color: var(--color-error); }
+.wc-status-right { display: flex; flex-direction: column; align-items: flex-end; gap: 14px; flex: 0 0 auto; }
+.wc-stats { display: flex; gap: 10px; }
+.wc-stat { min-width: 104px; padding: 12px 16px; border-radius: 14px; background: var(--color-surface-2); border: 1px solid var(--color-divider); }
+.wc-stat-v { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; line-height: 1; font-variant-numeric: tabular-nums; color: var(--color-text); }
+.wc-stat-v span { font-size: 15px; color: var(--color-text-faint); font-weight: 500; }
+.wc-stat-k { font-size: 12px; color: var(--color-text-muted); margin-top: 6px; font-weight: 500; }
+.wc-stat.warn .wc-stat-v { color: var(--color-warning); }
+.wc-stat.bad .wc-stat-v { color: var(--color-error); }
+.wc-status-actions { display: flex; align-items: center; gap: 10px; }
+#view-welfare-console .dev-tag { margin: 0; background: var(--color-success-light); color: var(--color-success); border: 0;
+  font-size: 11px; font-weight: 700; letter-spacing: .06em; padding: 5px 10px; border-radius: 999px; }
+.wc-btn { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; font: inherit; font-size: 13px; font-weight: 600;
+  color: var(--color-text); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 999px;
+  padding: 7px 14px; box-shadow: var(--shadow-sm); transition: background .15s, border-color .15s; }
+.wc-btn:hover { border-color: var(--color-primary); background: var(--color-primary-light); }
+.wc-btn:disabled { opacity: .6; cursor: default; }
+.wc-btn svg { width: 14px; height: 14px; }
+
+/* grid + panels */
+.wc-grid { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(300px, 1fr); gap: 24px; align-items: start; }
+.wc-panel { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 20px; box-shadow: var(--shadow-md); overflow: hidden; }
+.wc-panel-head { display: flex; align-items: center; justify-content: space-between; padding: 20px 24px 14px; }
+.wc-panel-title { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; color: var(--color-text); }
+.wc-panel-sub { font-size: 12.5px; color: var(--color-text-faint); margin-top: 2px; }
+.wc-feed { max-height: 520px; overflow-y: auto; padding: 0 12px 12px; }
+.wc-buses { display: flex; flex-direction: column; gap: 12px; padding: 0 16px 16px; }
+.wc-day { position: sticky; top: 0; z-index: 1; background: var(--color-surface); font-size: 11.5px; font-weight: 700;
+  letter-spacing: .08em; text-transform: uppercase; color: var(--color-text-faint); padding: 12px 12px 8px; }
+
+/* alert rows */
+.wc-alert { --sev: var(--color-primary); --sev-bg: var(--color-primary-light);
+  display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 14px;
+  padding: 12px; border-radius: 14px; transition: background .15s; }
+.wc-alert + .wc-alert { border-top: 1px solid var(--color-divider); border-radius: 0; }
+.wc-alert:hover { background: var(--color-surface-2); border-radius: 14px; }
+.wc-alert.sev-alert { --sev: var(--color-warning); --sev-bg: var(--color-warning-light); }
+.wc-alert.sev-escalate { --sev: var(--color-error); --sev-bg: var(--color-error-light); }
+.wc-alert-icon { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; background: var(--sev-bg); color: var(--sev); }
+.wc-alert-icon svg { width: 19px; height: 19px; }
+.wc-alert-body { min-width: 0; }
+.wc-alert-title { display: flex; align-items: center; gap: 8px; font-size: 14.5px; font-weight: 700; color: var(--color-text); flex-wrap: wrap; }
+.wc-bus { font-size: 11.5px; font-weight: 700; color: var(--color-text-muted); background: var(--color-surface-3); padding: 2px 8px; border-radius: 6px; letter-spacing: .02em; }
+.wc-alert-action { font-size: 13px; color: var(--color-text-muted); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wc-alert-meta { text-align: right; white-space: nowrap; }
+.wc-alert-time { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--color-text); }
+.wc-count { font-size: 11.5px; font-weight: 700; color: var(--sev); background: var(--sev-bg); padding: 2px 7px; border-radius: 999px; font-variant-numeric: tabular-nums; }
+.wc-alert-sub { font-size: 11.5px; color: var(--color-text-faint); margin-top: 3px; }
+.wc-seen { color: var(--color-success); font-weight: 600; margin-left: 4px; }
+.wc-seen.part { color: var(--color-warning); }
+.wc-alert.is-seen .wc-alert-icon { background: var(--color-surface-3); color: var(--color-text-faint); }
+.wc-alert.is-test { opacity: .75; }
+#view-welfare-console .welfare-empty { padding: 36px 16px; text-align: center; color: var(--color-text-muted); font-size: 14px; }
+
+/* bus cards */
+#view-welfare-console .welfare-vcard { margin: 0; padding: 16px 18px; border-radius: 16px; background: var(--color-surface-2);
+  border: 1px solid var(--color-divider); border-left: 1px solid var(--color-divider); box-shadow: none; }
+#view-welfare-console .welfare-vcard-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+#view-welfare-console .welfare-vcard-bus { font-family: var(--wc-display); font-size: 17px; font-weight: 600; color: var(--color-text); }
+#view-welfare-console .welfare-health-pill { border: 0; font-size: 11.5px; font-weight: 700; padding: 4px 10px; border-radius: 999px; }
+#view-welfare-console .welfare-health-pill.ok { background: var(--color-success-light); color: var(--color-success); }
+#view-welfare-console .welfare-health-pill.warn { background: var(--color-warning-light); color: var(--color-warning); }
+#view-welfare-console .welfare-health-pill.bad { background: var(--color-error-light); color: var(--color-error); }
+#view-welfare-console .welfare-vcard-sub { font-size: 13px; color: var(--color-text-muted); margin: 6px 0 12px; line-height: 1.45; }
+#view-welfare-console .welfare-kv { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 0; padding-top: 12px; border-top: 1px solid var(--color-divider); }
+#view-welfare-console .welfare-kv dt { font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--color-text-faint); }
+#view-welfare-console .welfare-kv dd { margin: 3px 0 0; font-size: 15px; font-weight: 600; color: var(--color-text); }
+
+/* monitoring panel on the light canvas */
+#view-welfare-console .welfare-overview { margin-top: 24px; background: var(--color-surface); box-shadow: var(--shadow-md); border-radius: 20px; padding: 26px; }
+#view-welfare-console .wo-hero-card, #view-welfare-console .wo-tile { box-shadow: none; }
+#view-welfare-console .wo-tile:hover { box-shadow: var(--shadow-md); }
+#view-welfare-console .wo-head-icon { box-shadow: 0 6px 16px rgba(41,82,217,0.25); }
+#view-welfare-console .wo-basis.info { color: #1d4ed8; background: rgba(41,82,217,0.08); }
+#view-welfare-console .welfare-overview { --wo-cam: #db2777; --wo-pass: #2563eb; --wo-sys: #059669; }
+
+@media (max-width: 1100px) {
+  .wc-grid { grid-template-columns: 1fr; }
+  #view-welfare-console .welfare-headline { flex-direction: column; align-items: stretch; }
+  .wc-status-right { align-items: stretch; flex-direction: column-reverse; }
+  .wc-stats .wc-stat { flex: 1; }
+  .wc-status-actions { justify-content: flex-start; }
+}
+@media (max-width: 640px) {
+  .main:has(#view-welfare-console.active) { padding: 16px; }
+  #view-welfare-console .welfare-headline { padding: 20px; }
+  #view-welfare-console .welfare-headline-main { font-size: 22px; }
+  .wc-stat { min-width: 0; padding: 10px 12px; }
+  .wc-stat-v { font-size: 22px; }
+  .wc-alert { grid-template-columns: 36px minmax(0,1fr); }
+  .wc-alert-meta { grid-column: 2; text-align: left; }
+}
+/* Keep the Console inside the viewport on narrow screens: the shared header's
+   min-content width was forcing the content column wider than the screen. */
+.dashboard:has(#view-welfare-console.active) { grid-template-columns: var(--sidebar-width) minmax(0, 1fr); }
+.dashboard.sidebar-collapsed:has(#view-welfare-console.active) { grid-template-columns: var(--sidebar-collapsed) minmax(0, 1fr); }

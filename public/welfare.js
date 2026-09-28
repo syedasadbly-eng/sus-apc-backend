@@ -730,11 +730,28 @@
     setText('wHeadlineMain', main);
     setText('wHeadlineSub', sub);
 
+    // ---- at-a-glance figures ----
+    const stats = document.getElementById('wStats');
+    if (stats) {
+      const watched = inService.length - watchable.length;
+      const tiles = [
+        { k: 'Open alerts', v: open.length, tone: open.length ? 'warn' : 'ok' },
+        { k: 'Urgent', v: urgent.length, tone: urgent.length ? 'bad' : 'ok' },
+        { k: 'Buses watched', v: `${watched}<span>/${inService.length}</span>`, tone: watchable.length ? 'bad' : 'ok' },
+      ];
+      stats.innerHTML = tiles.map((t) => `
+        <div class="wc-stat ${t.tone}"><div class="wc-stat-v">${t.v}</div><div class="wc-stat-k">${esc(t.k)}</div></div>`).join('');
+    }
+
     // ---- alert feed ----
+    // The raw feed printed one identical card per detection, so a camera test
+    // run became a wall of 30 "Possible altercation" cards. Repeats of the
+    // same thing on the same bus on the same day are now one row with a
+    // count; the Event Log still has every individual event.
     const feed = document.getElementById('wAlertFeed');
     if (feed) {
       feed.innerHTML = events.length
-        ? events.map(eventCard).join('')
+        ? groupedFeed(events)
         : `<div class="welfare-empty">Nothing has happened in the last 7 days. That is what you want to see.${
   testCount && !showTests ? `<div class="welfare-dim" style="margin-top:8px">${testCount} test event${testCount > 1 ? 's' : ''} hidden — see Rules &amp; Testing.</div>` : ''
 }</div>`;
@@ -749,6 +766,67 @@
     }
 
     icons();
+  }
+
+  const EVENT_ICONS = {
+    fall: 'person-standing', violence: 'siren', violence_disruption: 'megaphone',
+    sound_classification: 'audio-waveform', lone_traveller: 'user', lone_traveller_late_night: 'moon',
+    end_of_service_occupancy: 'warehouse', terminus_occupancy: 'map-pin', stationary_with_occupants: 'circle-parking',
+    dwell_no_alighting: 'timer', sensor_stale: 'wifi-low', sensor_offline: 'wifi-off', sensor_recovered: 'wifi',
+    shift_ended: 'moon-star', sensor_fault: 'triangle-alert', sensor_suspect: 'scan-eye', data_quality_drift: 'activity',
+  };
+
+  function dayLabel(iso) {
+    const d = new Date(iso); const today = new Date();
+    const y = new Date(); y.setDate(today.getDate() - 1);
+    if (d.toDateString() === today.toDateString()) return 'Today';
+    if (d.toDateString() === y.toDateString()) return 'Yesterday';
+    return d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
+  }
+
+  function groupedFeed(events) {
+    const days = [];
+    const byDay = new Map();
+    for (const e of events) {        // arrives newest first
+      const day = new Date(e.detected_at).toDateString();
+      if (!byDay.has(day)) { byDay.set(day, { label: dayLabel(e.detected_at), groups: new Map() }); days.push(byDay.get(day)); }
+      const key = `${e.bus_id}|${e.event_type}|${e.source === 'simulated'}`;
+      const g = byDay.get(day).groups;
+      if (!g.has(key)) g.set(key, { first: e, items: [] });
+      g.get(key).items.push(e);
+    }
+    return days.map((d) => `
+      <div class="wc-day">${esc(d.label)}</div>
+      ${[...d.groups.values()].map(alertRow).join('')}`).join('');
+  }
+
+  function alertRow(g) {
+    const e = g.first;                 // newest of the group
+    const n = g.items.length;
+    const unseen = g.items.filter((x) => !x.acknowledged).length;
+    const sev = SEV[Math.max(...g.items.map((x) => x.severity))] || SEV[1];
+    const act = action(e.event_type);
+    const test = e.source === 'simulated' ? '<span class="welfare-chip sim">test</span>' : '';
+    const oldest = g.items[g.items.length - 1];
+    const span = n > 1 ? ` · first ${esc(fmtClock(oldest.detected_at))}` : '';
+    const seen = unseen === 0 ? '<span class="wc-seen">Seen</span>'
+      : n > 1 && unseen < n ? `<span class="wc-seen part">${unseen} unseen</span>` : '';
+    return `
+      <div class="wc-alert ${sev.cls}${e.source === 'simulated' ? ' is-test' : ''}${unseen === 0 ? ' is-seen' : ''}" title="${esc(e.reason || '')}">
+        <span class="wc-alert-icon"><i data-lucide="${EVENT_ICONS[e.event_type] || 'bell'}"></i></span>
+        <div class="wc-alert-body">
+          <div class="wc-alert-title">${test}${esc(label(e.event_type))}<span class="wc-bus">Bus ${esc(e.bus_id)}</span></div>
+          <div class="wc-alert-action">${esc(act || e.reason || '')}</div>
+        </div>
+        <div class="wc-alert-meta">
+          <div class="wc-alert-time">${esc(timeAgo(e.detected_at))}${n > 1 ? `<span class="wc-count">×${n}</span>` : ''}</div>
+          <div class="wc-alert-sub">${esc(fmtClock(e.detected_at))}${span} ${seen}</div>
+        </div>
+      </div>`;
+  }
+
+  function fmtClock(iso) {
+    try { return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); } catch { return ''; }
   }
 
   // Operator-facing. Leads with the bus and what to do; the rule name, use
