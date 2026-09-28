@@ -392,6 +392,15 @@
     const inService = (fleet || []).filter((h) => !h.off_shift && !h.never_reported && h.onboard != null);
     const onboardNow = inService.reduce((n, h) => n + Number(h.onboard || 0), 0);
 
+    // The legend footer is hidden on the Console to cut clutter, so each tag
+    // carries its own meaning on hover instead.
+    const BASIS_HINT = {
+      measured: 'Measured: straight off the sensor or camera',
+      modelled: 'Estimated: modelled passenger count, treat alerts as leads',
+      proxy: 'Proxy: stands in for the real measure',
+      unproven: 'Unproven: not yet seen working on a bus',
+      none: 'Not wired yet',
+    };
     const tile = (x) => {
       const p = PARAMS[x.signal] || { group: 'system', icon: 'circle', title: x.signal, text: x.detail || '', types: [] };
       const isLive = x.status === 'live';
@@ -419,7 +428,7 @@
             </div>
             ${p.types.length && isLive ? sparkBars(counts, p.group) : ''}
           </div>
-          ${bWord ? `<span class="wo-basis ${bCls}">${esc(bWord)}</span>` : ''}
+          ${bWord ? `<span class="wo-basis ${bCls}" title="${esc(BASIS_HINT[x.trust] || '')}">${esc(bWord)}</span>` : ''}
         </article>`;
     };
 
@@ -815,12 +824,12 @@
       <div class="wc-alert ${sev.cls}${e.source === 'simulated' ? ' is-test' : ''}${unseen === 0 ? ' is-seen' : ''}" title="${esc(e.reason || '')}">
         <span class="wc-alert-icon"><i data-lucide="${EVENT_ICONS[e.event_type] || 'bell'}"></i></span>
         <div class="wc-alert-body">
-          <div class="wc-alert-title">${test}${esc(label(e.event_type))}<span class="wc-bus">Bus ${esc(e.bus_id)}</span></div>
-          <div class="wc-alert-action">${esc(act || e.reason || '')}</div>
+          <div class="wc-alert-title">${test}${esc(label(e.event_type))}${n > 1 ? `<span class="wc-count" title="${n} alerts${esc(span)}${unseen ? `, ${unseen} not yet seen` : ''}">×${n}</span>` : ''}</div>
+          <div class="wc-alert-action"><span class="wc-bus">Bus ${esc(e.bus_id)}</span>${esc(act || e.reason || '')}</div>
         </div>
         <div class="wc-alert-meta">
-          <div class="wc-alert-time">${esc(timeAgo(e.detected_at))}${n > 1 ? `<span class="wc-count">×${n}</span>` : ''}</div>
-          <div class="wc-alert-sub">${esc(fmtClock(e.detected_at))}${span} ${seen}</div>
+          <div class="wc-alert-time">${esc(timeAgo(e.detected_at))}</div>
+          <div class="wc-alert-sub">${esc(fmtClock(e.detected_at))}${seen ? ` ${seen}` : ''}</div>
         </div>
       </div>`;
   }
@@ -887,7 +896,7 @@
       sub = `${faults.join(', ')}.`;
     } else {
       headline = 'All normal';
-      sub = 'Nothing needs attention on this bus.';
+      sub = '';
     }
 
     const seen = h.last_seen_sec_ago == null ? 'unknown'
@@ -908,7 +917,7 @@
           <span class="welfare-vcard-bus">Bus ${esc(h.bus_id)}</span>
           <span class="welfare-health-pill ${cls}">${esc(headline)}</span>
         </div>
-        <div class="welfare-vcard-sub">${esc(sub)}</div>
+        ${sub ? `<div class="welfare-vcard-sub">${esc(sub)}</div>` : ''}
         <dl class="welfare-kv">
           ${rows.map(([k, v]) => {
       const cell = (v && typeof v === 'object' && typeof v.html === 'string') ? v.html : esc(v);
