@@ -144,6 +144,14 @@
     const simPanel = document.getElementById('welfareSimPanel');
     if (simPanel) simPanel.hidden = !lastStatus.allow_sim;
 
+    const ov = document.getElementById('welfareOverviewPanel');
+    if (ov) ov.hidden = false;
+    document.getElementById('wOverviewDetails')?.addEventListener('click', () => {
+      document.querySelector('.nav-item[data-view="welfare-signals"]')?.click();
+    });
+    renderOverviewWelfare();
+    setInterval(renderOverviewWelfare, 60000);
+
     hookNavigation();
     wireControls();
     icons();
@@ -206,6 +214,79 @@
     if (view === 'welfare-log') return renderLog();
     if (view === 'welfare-rules') return renderRules();
     if (view === 'welfare-drivers') return renderDrivers();
+  }
+
+  // -------------------------------------------------------------------------
+  // Overview panel — what the welfare layer is watching, on the main dashboard
+  // -------------------------------------------------------------------------
+
+  // Plain-English line per signal for a dashboard reader. The engineering
+  // description stays on Signal Delivery; unknown signals fall back to it.
+  const PARAM_TEXT = {
+    'Occupancy': 'Onboard count and how full the bus is',
+    'Sensor integrity': 'Counter feed is live and counting correctly',
+    'Lone Traveller': 'One person on board for 30 min, escalated at night',
+    'End of service': 'Someone still on board when the bus reaches the depot',
+    'Stationary with occupants': 'Bus parked for 60 min with people on board',
+    'Dwell (proxy)': 'People held on board with nobody getting off for 20 min',
+    'Distress': 'Passenger fall, detected by the AI Dome camera',
+    'Aggression': 'Violent behaviour, detected by the AI Dome camera',
+    'Violence & Disruption': 'Violence and a loud sound within 90 s of each other',
+  };
+  const STATUS_CHIP = {
+    live: ['ok', 'Watching'],
+    blocked: ['warn', 'Not yet'],
+    disabled: ['muted', 'Off'],
+    camera: ['warn', 'Awaiting camera'],
+  };
+  const TRUST_TEXT = {
+    measured: 'measured', modelled: 'estimated', proxy: 'proxy', unproven: 'unproven', none: 'not wired',
+  };
+
+  async function renderOverviewWelfare() {
+    const grid = document.getElementById('wOverviewGrid');
+    if (!grid) return;
+    let data;
+    try { data = await api('/signals'); } catch {
+      setText('wOverviewSubtitle', 'Welfare data unavailable right now');
+      return;
+    }
+    const sig = Array.isArray(data) ? data : (data.signals || []);
+    const sum = Array.isArray(data) ? null : data.summary;
+    const live = sig.filter((x) => x.status === 'live').length;
+    const ev7 = sum?.events_7d ?? sig.reduce((n, x) => n + (Number(x.events) || 0), 0);
+    setText('wOverviewSubtitle',
+      `${live} of ${sig.length} signals being watched \u00b7 ${ev7} event${ev7 === 1 ? '' : 's'} in the last 7 days`);
+
+    grid.innerHTML = sig.map((x) => {
+      const [cls, word] = STATUS_CHIP[x.status] || ['muted', x.status];
+      const trust = TRUST_TEXT[x.trust] || x.trust || '';
+      const trustCls = x.trust === 'measured' ? 'ok' : (x.trust === 'none' ? 'muted' : 'warn');
+      const n = x.events == null ? '\u2014' : x.events;
+      const why = x.status !== 'live' && x.blocked_by ? x.blocked_by
+        : x.status === 'disabled' ? (x.detail || '') : '';
+      return `
+        <div class="welfare-param ${x.status !== 'live' ? 'is-off' : ''}">
+          <div class="welfare-param-top">
+            <span class="welfare-param-name">${esc(x.signal)}</span>
+            <span class="welfare-chip ${cls}">${esc(word)}</span>
+          </div>
+          <div class="welfare-param-text">${esc(PARAM_TEXT[x.signal] || x.detail || '')}</div>
+          ${why ? `<div class="welfare-param-why">${esc(why)}</div>` : ''}
+          <div class="welfare-param-bottom">
+            ${trust ? `<span class="welfare-chip ${trustCls}">${esc(trust)}</span>` : '<span></span>'}
+            <span class="welfare-param-count" title="Events in the last 7 days"><strong>${esc(n)}</strong> / 7d</span>
+          </div>
+        </div>`;
+    }).join('');
+
+    const foot = document.getElementById('wOverviewFoot');
+    if (foot) {
+      foot.innerHTML = '<span class="welfare-chip ok">measured</span> straight off the sensor or camera \u00b7 '
+        + '<span class="welfare-chip warn">estimated</span> passenger count is modelled, treat alerts as leads \u00b7 '
+        + '<span class="welfare-chip warn">proxy</span> stands in for the real measure';
+    }
+    icons();
   }
 
   // -------------------------------------------------------------------------

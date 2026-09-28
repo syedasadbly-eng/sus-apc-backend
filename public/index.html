@@ -364,6 +364,26 @@
         </div>
       </div>
 
+      <!-- Welfare monitoring summary. Hidden unless /api/welfare/status says the
+           welfare layer is on; filled by renderOverviewWelfare() in welfare.js. -->
+      <div class="chart-panel welfare-overview" id="welfareOverviewPanel" hidden>
+        <div class="chart-header">
+          <div>
+            <div class="chart-title">Welfare monitoring</div>
+            <div class="chart-subtitle" id="wOverviewSubtitle">Loading…</div>
+          </div>
+          <div class="chart-actions">
+            <button class="btn btn-secondary btn-sm" id="wOverviewDetails" type="button">
+              <i data-lucide="activity"></i> Signal details
+            </button>
+          </div>
+        </div>
+        <div class="chart-body">
+          <div class="welfare-param-grid" id="wOverviewGrid"></div>
+          <div class="welfare-param-foot" id="wOverviewFoot"></div>
+        </div>
+      </div>
+
       <!-- Hourly Passenger Flow (moved above the GPS map) -->
       <div class="chart-grid">
         <div class="chart-panel">
