@@ -125,6 +125,7 @@ const state = {
   captures: [],          // raw request ring, newest first
   lastEventAt: null,     // ISO of the last accepted detection
   lastSeenAt: null,      // ISO of the last request of any kind, incl. rejected
+  restored: false,       // true while the two times above came from the database, not a live request
   accepted: 0,
   suppressed: 0,
   rejected: 0,
@@ -144,6 +145,9 @@ function cameraState() {
     map: cameraMap(),
     last_seen_at: state.lastSeenAt,
     last_event_at: state.lastEventAt,
+    // True until the camera sends something after a restart: the times above
+    // are the newest saved camera event, not a request seen by this process.
+    restored_from_db: state.restored,
     accepted: state.accepted,
     suppressed: state.suppressed,
     rejected: state.rejected,
@@ -232,6 +236,7 @@ function capture(req, signal, outcome, extra = {}) {
   state.captures.unshift(entry);
   if (state.captures.length > CAPTURE_LIMIT) state.captures.length = CAPTURE_LIMIT;
   state.lastSeenAt = entry.at;
+  state.restored = false;
   return entry;
 }
 
@@ -369,7 +374,24 @@ function compoundEvent(signal, bus, nowTs, primary, ctx) {
 // Router
 // ---------------------------------------------------------------------------
 
+/** Seed last-seen from the newest saved camera event, once, at mount. */
+function restoreLastSeen(store) {
+  if (state.lastSeenAt || !store || typeof store.lastCameraEventAt !== 'function') return;
+  try {
+    const at = store.lastCameraEventAt();
+    if (at) {
+      state.lastSeenAt = at;
+      state.lastEventAt = state.lastEventAt || at;
+      state.restored = true;
+      console.log(`[camera] last event restored from the database: ${at}`);
+    }
+  } catch (err) {
+    console.error('[camera] could not restore last event time:', err.message);
+  }
+}
+
 function createCameraRouter(engine, store) {
+  restoreLastSeen(store);
   const router = express.Router();
 
   // Accept every content type as a Buffer, so nothing the camera sends can be

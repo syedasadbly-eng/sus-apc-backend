@@ -61,6 +61,7 @@ function fakeEngine() {
 
 async function main() {
   const store = fakeStore();
+  store.lastCameraEventAt = () => '2026-09-01T10:00:00.000Z';
   const engine = fakeEngine();
 
   const app = express();
@@ -157,6 +158,16 @@ async function main() {
   r = await call('/camera/fall?bus=999&token=test-token');
   check('unknown bus accepted', r.status === 200 && r.body.accepted === true, JSON.stringify(r.body));
   check('unknown bus not added to the vehicle map', !engine.vehicles.has('999'));
+
+  // --- restore after restart ----------------------------------------------
+  // Checked here, after requests have arrived: a live request must replace
+  // the restored time and clear the flag.
+  {
+    const st = camera.cameraState();
+    check('live request replaces the restored last-seen time',
+      st.last_seen_at > '2026-09-01T10:00:00.000Z' && st.restored_from_db === false,
+      `${st.last_seen_at} restored=${st.restored_from_db}`);
+  }
 
   // --- bus resolution -------------------------------------------------------
   console.log('\nBus resolution');
