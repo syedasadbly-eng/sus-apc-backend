@@ -323,9 +323,15 @@
     const today = perDay[perDay.length - 1];
 
     const cam = status?.camera || {};
-    const camAgeMin = cam.last_seen_at ? (Date.now() - Date.parse(cam.last_seen_at)) / 60000 : null;
+    // Fallback for a service that predates restored_from_db: newest camera
+    // event in the 7-day list, so a redeploy never blanks a working camera.
+    const lastCamEvent = real.filter((e) => e.source === 'camera')
+      .map((e) => e.detected_at).sort().pop() || null;
+    const camLast = cam.last_seen_at || lastCamEvent;
+    const camRestored = Boolean(cam.restored_from_db || (!cam.last_seen_at && lastCamEvent));
+    const camAgeMin = camLast ? (Date.now() - Date.parse(camLast)) / 60000 : null;
     const camTone = camAgeMin == null ? 'idle' : camAgeMin <= 30 ? 'ok' : camAgeMin <= 24 * 60 ? 'warn' : 'idle';
-    const camWord = camAgeMin == null ? 'No contact since restart'
+    const camWord = camAgeMin == null ? 'No events on record'
       : camAgeMin <= 30 ? 'Active' : camAgeMin <= 24 * 60 ? 'Quiet' : 'Silent';
 
     document.getElementById('wOverviewHero').innerHTML = `
@@ -364,9 +370,11 @@
         <div class="wo-hero-body">
           <div class="wo-hero-kicker">AI Pro Dome camera</div>
           <div class="wo-hero-main"><span class="wo-dot tone-${camTone}"></span>${esc(camWord)}</div>
-          <div class="wo-muted">${cam.last_seen_at ? `Last event ${esc(timeAgo(cam.last_seen_at))}` : 'Waiting for its first event'}
+          <div class="wo-muted">${camLast ? `Last event ${esc(timeAgo(camLast))}` : 'Waiting for its first event'}
             · Bus ${esc(cam.default_bus || '—')}</div>
-          <div class="wo-muted">${Number(cam.accepted || 0)} events received since restart</div>
+          <div class="wo-muted">${camRestored
+    ? 'From saved events · waiting for its next one'
+    : `${Number(cam.accepted || 0)} event${Number(cam.accepted) === 1 ? '' : 's'} received since restart`}</div>
         </div>
       </div>`;
 

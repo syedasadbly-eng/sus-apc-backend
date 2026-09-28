@@ -162,6 +162,15 @@ function createStore(db) {
       return out;
     },
 
+    /** Newest real camera detection on record. Lets the camera's last-seen
+     *  time survive a redeploy: it is otherwise held only in memory, so every
+     *  deploy made a working camera read "no contact". */
+    lastCameraEventAt() {
+      const r = db.prepare(`SELECT MAX(detected_at) AS at FROM welfare_events
+        WHERE source = 'camera'`).get();
+      return r?.at || null;
+    },
+
     acknowledge(eventId, by) {
       const r = db.prepare(`UPDATE welfare_events
         SET acknowledged = 1, acknowledged_at = ?, acknowledged_by = ?
