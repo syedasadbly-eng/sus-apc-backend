@@ -208,7 +208,7 @@
   }
 
   function renderView(view) {
-    if (view === 'welfare-console') return renderConsole();
+    if (view === 'welfare-console') { renderOverviewWelfare(); return renderConsole(); }
     if (view === 'welfare-signals') return renderSignals();
     if (view === 'welfare-health') return renderHealth();
     if (view === 'welfare-log') return renderLog();

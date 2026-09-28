@@ -364,35 +364,6 @@
         </div>
       </div>
 
-      <!-- Welfare monitoring summary. Hidden unless /api/welfare/status says the
-           welfare layer is on; filled by renderOverviewWelfare() in welfare.js. -->
-      <section class="welfare-overview" id="welfareOverviewPanel" hidden aria-labelledby="wOverviewTitle">
-        <header class="wo-head">
-          <div class="wo-head-left">
-            <span class="wo-head-icon"><i data-lucide="shield-plus"></i></span>
-            <div>
-              <h2 class="wo-title" id="wOverviewTitle">Welfare monitoring</h2>
-              <div class="wo-subtitle" id="wOverviewSubtitle">Loading…</div>
-            </div>
-          </div>
-          <button class="wo-link" id="wOverviewDetails" type="button">
-            Signal details <i data-lucide="arrow-right"></i>
-          </button>
-        </header>
-
-        <div class="wo-hero" id="wOverviewHero">
-          <div class="wo-hero-card wo-skeleton"></div>
-          <div class="wo-hero-card wo-skeleton"></div>
-          <div class="wo-hero-card wo-skeleton"></div>
-        </div>
-
-        <div class="wo-blockers" id="wOverviewBlockers" hidden></div>
-
-        <div class="wo-groups" id="wOverviewGroups"></div>
-
-        <footer class="wo-legend" id="wOverviewFoot"></footer>
-      </section>
-
       <!-- Hourly Passenger Flow (moved above the GPS map) -->
       <div class="chart-grid">
         <div class="chart-panel">
@@ -1287,6 +1258,36 @@
         </div>
       </div>
 
+
+      <!-- Welfare monitoring summary: what the welfare layer is watching.
+           Hidden unless /api/welfare/status says it is on; filled by
+           renderOverviewWelfare() in welfare.js. -->
+      <section class="welfare-overview" id="welfareOverviewPanel" hidden aria-labelledby="wOverviewTitle">
+        <header class="wo-head">
+          <div class="wo-head-left">
+            <span class="wo-head-icon"><i data-lucide="shield-plus"></i></span>
+            <div>
+              <h2 class="wo-title" id="wOverviewTitle">Welfare monitoring</h2>
+              <div class="wo-subtitle" id="wOverviewSubtitle">Loading…</div>
+            </div>
+          </div>
+          <button class="wo-link" id="wOverviewDetails" type="button">
+            Signal details <i data-lucide="arrow-right"></i>
+          </button>
+        </header>
+
+        <div class="wo-hero" id="wOverviewHero">
+          <div class="wo-hero-card wo-skeleton"></div>
+          <div class="wo-hero-card wo-skeleton"></div>
+          <div class="wo-hero-card wo-skeleton"></div>
+        </div>
+
+        <div class="wo-blockers" id="wOverviewBlockers" hidden></div>
+
+        <div class="wo-groups" id="wOverviewGroups"></div>
+
+        <footer class="wo-legend" id="wOverviewFoot"></footer>
+      </section>
     </div>
 
     <!-- ===== SIGNAL DELIVERY ===== -->
