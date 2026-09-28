@@ -164,6 +164,10 @@ async function main() {
   r = await call('/camera/violence?token=test-token'); // no bus= → IP map
   check('falls back to the IP map when bus is not given',
     r.body.bus_id === '515', String(r.body.bus_id));
+  await new Promise((res) => setTimeout(res, 2100));
+  r = await call('/camera/sound?bus=lab-rig&token=test-token');
+  check('legacy bus=lab-rig is renamed to 515',
+    r.body.bus_id === '515', String(r.body.bus_id));
 
   // --- cooldown -------------------------------------------------------------
   console.log('\nRepeat suppression');

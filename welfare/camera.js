@@ -59,7 +59,26 @@ function cameraMap() {
   }
 }
 
-const DEFAULT_BUS = process.env.WELFARE_CAMERA_BUS || 'lab-rig';
+const DEFAULT_BUS = process.env.WELFARE_CAMERA_BUS || '515';
+
+/** Renames applied after the bus is resolved, whichever route resolved it.
+ *  The AI Pro Dome's notification URLs were configured with ?bus=lab-rig, so
+ *  that name is mapped onto the vehicle the camera now belongs to without
+ *  touching the camera. Override with WELFARE_CAMERA_ALIASES (JSON). */
+function busAliases() {
+  const base = { 'lab-rig': '515' };
+  try {
+    return process.env.WELFARE_CAMERA_ALIASES
+      ? { ...base, ...JSON.parse(process.env.WELFARE_CAMERA_ALIASES) } : base;
+  } catch {
+    console.error('[camera] WELFARE_CAMERA_ALIASES is not valid JSON, ignoring it');
+    return base;
+  }
+}
+function alias(bus) {
+  const a = busAliases()[String(bus)];
+  return a ? String(a) : String(bus);
+}
 
 /** Corroboration window for the compound rule. A fight and the noise it makes
  *  do not land at the same instant: violence needs 12s of sustained action
@@ -120,7 +139,8 @@ function cameraState() {
     connected: state.lastSeenAt != null,
     token_required: Boolean(TOKEN),
     cooldown_sec: COOLDOWN_SEC,
-    default_bus: DEFAULT_BUS,
+    default_bus: alias(DEFAULT_BUS),
+    aliases: busAliases(),
     map: cameraMap(),
     last_seen_at: state.lastSeenAt,
     last_event_at: state.lastEventAt,
@@ -218,6 +238,12 @@ function capture(req, signal, outcome, extra = {}) {
 /** Which vehicle this detection belongs to: explicit query wins, then the IP
  *  map, then the configured default. */
 function resolveBus(req) {
+  const r = resolveBusRaw(req);
+  const renamed = alias(r.bus);
+  return renamed === r.bus ? r : { bus: renamed, via: `${r.via}+alias:${r.bus}` };
+}
+
+function resolveBusRaw(req) {
   const explicit = req.query?.bus || req.query?.bus_id || req.query?.busId;
   if (explicit) return { bus: String(explicit), via: 'query' };
   const ip = clientIp(req);
@@ -476,7 +502,7 @@ function initCamera() {
   if (!TOKEN) {
     console.warn('[camera] WELFARE_CAMERA_TOKEN is not set — /api/welfare/camera/* accepts unauthenticated writes');
   }
-  console.log(`[camera] ingest ready: /api/welfare/camera/{${Object.keys(SIGNALS).join(',')}} · default bus ${DEFAULT_BUS} · cooldown ${COOLDOWN_SEC}s · violence+sound window ${COMPOUND_SEC}s`);
+  console.log(`[camera] ingest ready: /api/welfare/camera/{${Object.keys(SIGNALS).join(',')}} · default bus ${alias(DEFAULT_BUS)} · cooldown ${COOLDOWN_SEC}s · violence+sound window ${COMPOUND_SEC}s`);
   return true;
 }
 
