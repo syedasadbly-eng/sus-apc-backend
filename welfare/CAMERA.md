@@ -53,9 +53,9 @@ For each detection, open its page under `Settings > Event`, tick **HTTP
 Notification** under Alarm Action, and fill in URL 1:
 
 ```
-http://<console-host>/api/welfare/camera/fall?bus=lab-rig&token=<TOKEN>
-http://<console-host>/api/welfare/camera/violence?bus=lab-rig&token=<TOKEN>
-http://<console-host>/api/welfare/camera/sound?bus=lab-rig&token=<TOKEN>
+http://<console-host>/api/welfare/camera/fall?bus=515&token=<TOKEN>
+http://<console-host>/api/welfare/camera/violence?bus=515&token=<TOKEN>
+http://<console-host>/api/welfare/camera/sound?bus=515&token=<TOKEN>
 ```
 
 - **HTTP Method** — either works. POST also carries the payload, which is worth
@@ -89,7 +89,8 @@ hardcoded `false` it returned before.
 |---|---|---|
 | `WELFARE_CAMERA_TOKEN` | unset | shared secret; **unset means the route accepts unauthenticated writes** |
 | `WELFARE_CAMERA_COOLDOWN_SEC` | 30 | repeat suppression, per bus per signal |
-| `WELFARE_CAMERA_BUS` | `lab-rig` | vehicle when the request names none |
+| `WELFARE_CAMERA_BUS` | `515` | vehicle when the request names none |
+| `WELFARE_CAMERA_ALIASES` | `{"lab-rig":"515"}` | renames applied after the bus is resolved, so a camera still posting `?bus=lab-rig` lands on 515 |
 | `WELFARE_CAMERA_MAP` | `{}` | source IP → bus id, e.g. `{"192.168.5.190":"515"}` |
 
 This route writes to the database from the public internet, so it is **not**

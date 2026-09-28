@@ -50,6 +50,6 @@ device policy.
 ## Camera events
 
 Camera events carry the bus resolved by `WELFARE_CAMERA_MAP`, else `?bus=` on the camera's
-notification URL, else `default_bus`. The lab camera currently posts as `lab-rig`, so
-`driver.html?bus=lab-rig` shows its alerts. Once the dome is fitted to a vehicle, map its IP
-to the bus number and its alerts will appear on that bus's screen.
+notification URL, else `default_bus`. The AI Pro Dome is assigned to bus 515: its URLs still say `?bus=lab-rig`,
+and `WELFARE_CAMERA_ALIASES` (default `{"lab-rig":"515"}`) renames that on arrival, so its
+alerts appear on `driver.html?bus=515`.
