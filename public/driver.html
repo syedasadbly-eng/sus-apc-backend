@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0b0f17">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>SUS Driver Alerts</title>
+<!--
+  DRIVER DISPLAY — Smart Urban Sensing welfare layer
+
+  A cab-mounted screen that shows ONE thing: whether the driver needs to act.
+
+  Design rules (keep these when editing):
+    1. One alert at a time, worst first. Everything else is a "+N more" count.
+    2. Two to four words of headline, one line of action. Readable at arm's
+       length in a glance. No rule names, no severities, no sensor jargon.
+    3. Only alerts a driver can act on. Sensor health, count drift and a
+       sound on its own go to the control-room console, never the cab.
+    4. Nothing requires a touch while moving. Alerts clear themselves after
+       ALERT_WINDOW_MIN; the "Seen" button is for when the bus is stopped.
+    5. Never show "All clear" when we cannot see. Lost connection and paused
+       monitoring have their own grey state.
+    6. No external scripts or fonts: cab connectivity is patchy, so this file
+       must render from cache on its own.
+
+  URL parameters:
+    ?bus=515          vehicle this screen belongs to (required)
+    &api=https://...  backend base URL (default: same origin)
+    &window=10        minutes an alert stays on screen unless acknowledged
+    &test=1           also show simulated events, marked TEST
+    &sound=0          start muted
+-->
+<style>
+  :root {
+    --bg: #0b0f17;
+    --ink: #f4f6fa;
+    --ink-dim: #9aa4b5;
+    --ok: #1f9d63;
+    --ok-deep: #0d3b28;
+    --warn: #f0a202;
+    --warn-deep: #3d2a00;
+    --bad: #e5383b;
+    --bad-deep: #4a0d0f;
+    --idle: #5b6577;
+    --idle-deep: #1a1f2a;
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: var(--bg); color: var(--ink); font-family: var(--font); }
+  body { overflow: hidden; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+
+  .screen {
+    position: fixed; inset: 0;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    padding: clamp(12px, 2.5vh, 28px) clamp(16px, 3vw, 40px);
+    transition: background-color 250ms ease;
+  }
+  .screen.state-ok   { background: radial-gradient(ellipse at 50% 45%, var(--ok-deep), var(--bg) 70%); }
+  .screen.state-idle { background: radial-gradient(ellipse at 50% 45%, var(--idle-deep), var(--bg) 70%); }
+  .screen.state-warn { background: var(--warn); color: #111; }
+  .screen.state-bad  { background: var(--bad); color: #fff; }
+  .screen.state-bad.flash { animation: flash 1s steps(2, jump-none) 6; }
+  @keyframes flash { 50% { background: var(--bad-deep); } }
+
+  /* ---- top bar ---- */
+  .top { display: flex; align-items: center; justify-content: space-between; gap: 16px;
+         font-size: clamp(16px, 2.6vh, 26px); font-weight: 600; }
+  .bus { display: flex; align-items: center; gap: 12px; }
+  .bus-num { font-size: 1.35em; font-weight: 800; letter-spacing: 0.02em; }
+  .clock { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 1.35em; }
+  .conn { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; opacity: 0.85; }
+  .conn .dot { width: 0.7em; height: 0.7em; border-radius: 50%; background: var(--ok); }
+  .conn.off .dot { background: var(--idle); }
+  .state-warn .conn .dot, .state-bad .conn .dot { background: currentColor; }
+  .mute { background: none; border: 2px solid currentColor; color: inherit; border-radius: 999px;
+          padding: 6px 14px; font: inherit; font-size: 0.8em; opacity: 0.8; cursor: pointer; }
+
+  /* ---- main message ---- */
+  .main { display: flex; flex-direction: column; align-items: center; justify-content: center;
+          text-align: center; gap: clamp(10px, 2.5vh, 28px); min-height: 0; }
+  .icon svg { width: clamp(84px, 20vh, 220px); height: auto; display: block; }
+  .headline { font-size: clamp(40px, 11vh, 132px); font-weight: 900; line-height: 0.98;
+              letter-spacing: -0.01em; text-transform: uppercase; max-width: 16ch; text-wrap: balance; }
+  .state-ok .headline, .state-idle .headline { font-size: clamp(36px, 9vh, 104px); text-transform: none; }
+  .action { font-size: clamp(22px, 4.6vh, 52px); font-weight: 700; max-width: 26ch; line-height: 1.15; text-wrap: balance; }
+  .state-ok .action, .state-idle .action { color: var(--ink-dim); font-weight: 600; }
+  .meta { font-size: clamp(16px, 2.8vh, 28px); font-weight: 600; opacity: 0.85; }
+  .test-tag { display: inline-block; background: #7c4dff; color: #fff; font-weight: 800;
+              padding: 2px 12px; border-radius: 6px; margin-right: 10px; letter-spacing: 0.06em; }
+
+  /* ---- bottom bar ---- */
+  .bottom { display: flex; align-items: center; justify-content: space-between; gap: 16px;
+            font-size: clamp(16px, 2.6vh, 26px); font-weight: 600; min-height: clamp(64px, 14vh, 130px); }
+  .more { opacity: 0.9; }
+  .seen {
+    min-height: clamp(64px, 13vh, 120px); min-width: clamp(220px, 30vw, 420px);
+    border: 0; border-radius: 18px; cursor: pointer;
+    font: inherit; font-size: clamp(24px, 5vh, 48px); font-weight: 900; letter-spacing: 0.04em;
+    background: #fff; color: #111; box-shadow: 0 6px 0 rgba(0,0,0,0.35);
+  }
+  .seen:active { transform: translateY(4px); box-shadow: 0 2px 0 rgba(0,0,0,0.35); }
+  .state-warn .seen { background: #111; color: var(--warn); }
+  .seen[hidden] { display: none; }
+  .brand { opacity: 0.55; font-size: 0.85em; }
+
+  /* ---- start overlay (browsers need one tap before audio / fullscreen / wake lock) ---- */
+  .start { position: fixed; inset: 0; background: var(--bg); display: flex; flex-direction: column;
+           align-items: center; justify-content: center; gap: 28px; text-align: center; padding: 24px; z-index: 10; }
+  .start h1 { font-size: clamp(32px, 7vh, 72px); font-weight: 900; }
+  .start p { color: var(--ink-dim); font-size: clamp(18px, 3vh, 30px); max-width: 30ch; }
+  .start button { min-height: 96px; min-width: 340px; border-radius: 20px; border: 0; cursor: pointer;
+                  background: var(--ok); color: #fff; font: inherit; font-size: clamp(26px, 5vh, 44px); font-weight: 900; }
+  .start input { font: inherit; font-size: 32px; padding: 12px 18px; border-radius: 12px; border: 2px solid var(--idle);
+                 background: #121826; color: var(--ink); width: 240px; text-align: center; }
+  .start[hidden] { display: none; }
+
+  @media (prefers-reduced-motion: reduce) { .screen.state-bad.flash { animation: none; } }
+  /* Night: dim the calm states so the cab is not lit up; alerts stay full strength. */
+  body.night .screen.state-ok, body.night .screen.state-idle { filter: brightness(0.6); }
+</style>
+</head>
+<body>
+
+<div class="start" id="start">
+  <h1>Driver alert screen</h1>
+  <p id="startMsg">Tap start once. The screen then stays on and will sound for new alerts.</p>
+  <input id="busInput" inputmode="text" placeholder="Bus no." aria-label="Bus number" hidden>
+  <button id="startBtn" type="button">Start</button>
+</div>
+
+<main class="screen state-idle" id="screen" aria-live="assertive">
+  <header class="top">
+    <div class="bus"><span>Bus</span><span class="bus-num" id="busNum">—</span></div>
+    <span class="conn" id="conn"><span class="dot"></span><span id="connText">Connecting…</span></span>
+    <div style="display:flex;align-items:center;gap:16px">
+      <button class="mute" id="muteBtn" type="button" aria-label="Toggle alert sound">Sound on</button>
+      <span class="clock" id="clock">--:--</span>
+    </div>
+  </header>
+
+  <section class="main">
+    <div class="icon" id="icon" aria-hidden="true"></div>
+    <div class="headline" id="headline">Starting…</div>
+    <div class="action" id="action">&nbsp;</div>
+    <div class="meta" id="meta">&nbsp;</div>
+  </section>
+
+  <footer class="bottom">
+    <span class="more" id="more"><span class="brand">Smart Urban Sensing</span></span>
+    <button class="seen" id="seenBtn" type="button" hidden>SEEN</button>
+  </footer>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  // Storage can be unavailable (kiosk/private mode, sandboxed frames). Never let
+  // that stop the screen from starting.
+  const store = {
+    get(k) { try { return window.localStorage.getItem(k); } catch { return null; } },
+    set(k, v) { try { window.localStorage.setItem(k, v); } catch { /* ignore */ } },
+  };
+  const q = new URLSearchParams(location.search);
+  const API = (q.get('api') || '').replace(/\/$/, '') + '/api/welfare';
+  const WINDOW_MIN = Math.max(1, Number(q.get('window')) || 10);
+  const SHOW_TESTS = q.get('test') === '1';
+  const POLL_MS = 5000;
+  const OFFLINE_AFTER_MS = 30000;
+  let BUS = q.get('bus') || store.get('sus-driver-bus') || '';
+  let soundOn = q.get('sound') !== '0' && store.get('sus-driver-sound') !== '0';
+
+  // Only what a driver can act on. Wording is deliberately short: it has to be
+  // read in a glance. Anything not in this table never reaches the cab.
+  const DRIVER = {
+    fall:                      { tone: 'bad',  icon: 'fall',  head: 'Passenger may have fallen', act: 'Stop when safe and check on them.' },
+    violence:                  { tone: 'bad',  icon: 'alert', head: 'Incident on board',          act: 'Follow the incident procedure. Call control when safe.' },
+    violence_disruption:       { tone: 'bad',  icon: 'alert', head: 'Incident on board',          act: 'Follow the incident procedure. Call control when safe.' },
+    end_of_service_occupancy:  { tone: 'bad',  icon: 'person',head: 'Someone still on board',     act: 'Walk the bus before you park up.' },
+    terminus_occupancy:        { tone: 'warn', icon: 'person',head: 'Someone still on board',     act: 'Walk the bus before it turns around.' },
+    lone_traveller_late_night: { tone: 'warn', icon: 'person',head: 'Lone passenger, late',       act: 'Check they are alright and know their stop.' },
+    stationary_with_occupants: { tone: 'warn', icon: 'person',head: 'People on board, bus parked',act: 'Check nobody has been left on board.' },
+  };
+  const RANK = { bad: 2, warn: 1 };
+
+  const ICONS = {
+    ok: '<svg viewBox="0 0 96 96" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><circle cx="48" cy="48" r="40" stroke="#1f9d63"/><path d="M30 49l12 12 24-26" stroke="#1f9d63"/></svg>',
+    idle: '<svg viewBox="0 0 96 96" fill="none" stroke="#9aa4b5" stroke-width="7" stroke-linecap="round"><circle cx="48" cy="48" r="40"/><path d="M36 36v24M60 36v24"/></svg>',
+    alert: '<svg viewBox="0 0 96 96" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><path d="M48 10L90 84H6z"/><path d="M48 38v20"/><circle cx="48" cy="70" r="1.5" fill="currentColor"/></svg>',
+    fall: '<svg viewBox="0 0 96 96" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><circle cx="66" cy="22" r="8"/><path d="M60 34L40 50l-18-4M52 42l6 22 18 6M40 50l-8 22"/><path d="M8 88h80"/></svg>',
+    person: '<svg viewBox="0 0 96 96" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><circle cx="48" cy="22" r="11"/><path d="M26 86V62c0-12 10-20 22-20s22 8 22 20v24"/></svg>',
+    offline: '<svg viewBox="0 0 96 96" fill="none" stroke="#9aa4b5" stroke-width="7" stroke-linecap="round"><path d="M12 36c20-18 52-18 72 0M24 50c14-12 34-12 48 0M36 64c7-6 17-6 24 0"/><circle cx="48" cy="78" r="3" fill="#9aa4b5"/><path d="M14 14l68 68"/></svg>',
+  };
+
+  const $ = (id) => document.getElementById(id);
+  const shownIds = new Set();
+  let lastOkAt = 0;
+  let lastAlertId = null;
+  let current = null;
+  let busHealth = null;
+
+  // ---------------- data ----------------
+  async function get(path) {
+    const r = await fetch(API + path, { cache: 'no-store' });
+    if (!r.ok) throw new Error(r.status);
+    return r.json();
+  }
+
+  async function poll() {
+    try {
+      const since = new Date(Date.now() - WINDOW_MIN * 60000).toISOString();
+      const [events, health] = await Promise.all([
+        get(`/events?bus=${encodeURIComponent(BUS)}&unack=true&from=${encodeURIComponent(since)}&limit=50`),
+        get('/fleet-health').catch(() => null),
+      ]);
+      lastOkAt = Date.now();
+      if (Array.isArray(health)) busHealth = health.find((h) => String(h.bus_id) === String(BUS)) || null;
+      const active = (events || [])
+        .filter((e) => DRIVER[e.event_type])
+        .filter((e) => SHOW_TESTS || e.source !== 'simulated')
+        .filter((e) => Date.now() - Date.parse(e.detected_at) <= WINDOW_MIN * 60000)
+        .sort((a, b) => (RANK[DRIVER[b.event_type].tone] - RANK[DRIVER[a.event_type].tone])
+                        || (Date.parse(b.detected_at) - Date.parse(a.detected_at)));
+      render(active);
+    } catch {
+      render(null);
+    }
+  }
+
+  // ---------------- view ----------------
+  function setState(tone) { $('screen').className = `screen state-${tone}`; }
+
+  function render(active) {
+    const offline = !lastOkAt || Date.now() - lastOkAt > OFFLINE_AFTER_MS;
+    $('conn').classList.toggle('off', offline);
+    $('connText').textContent = offline ? 'No connection' : 'Connected';
+
+    if (active && active.length) {
+      const e = active[0];
+      const d = DRIVER[e.event_type];
+      current = e;
+      setState(d.tone);
+      $('icon').innerHTML = ICONS[d.icon];
+      $('headline').textContent = d.head;
+      $('action').textContent = d.act;
+      const mins = Math.max(0, Math.round((Date.now() - Date.parse(e.detected_at)) / 60000));
+      $('meta').innerHTML = (e.source === 'simulated' ? '<span class="test-tag">TEST</span>' : '')
+        + (mins < 1 ? 'Just now' : `${mins} min ago`);
+      $('more').textContent = active.length > 1 ? `+${active.length - 1} more alert${active.length > 2 ? 's' : ''}` : '';
+      $('seenBtn').hidden = false;
+      if (e.event_id !== lastAlertId) {
+        lastAlertId = e.event_id;
+        if (!shownIds.has(e.event_id)) {
+          shownIds.add(e.event_id);
+          if (d.tone === 'bad') { $('screen').classList.add('flash'); }
+          chime(d.tone);
+        }
+      }
+      return;
+    }
+
+    current = null; lastAlertId = null;
+    $('seenBtn').hidden = true;
+    $('more').innerHTML = '<span class="brand">Smart Urban Sensing</span>';
+    $('meta').innerHTML = '&nbsp;';
+
+    // Never claim "all clear" when we cannot actually see.
+    if (offline) {
+      setState('idle');
+      $('icon').innerHTML = ICONS.offline;
+      $('headline').textContent = 'No connection';
+      $('action').textContent = 'Alerts cannot reach this screen. Drive as normal.';
+      return;
+    }
+    if (busHealth && (!busHealth.trustworthy || busHealth.never_reported)) {
+      setState('idle');
+      $('icon').innerHTML = ICONS.idle;
+      $('headline').textContent = busHealth.off_shift ? 'Off shift' : 'Monitoring paused';
+      $('action').textContent = busHealth.off_shift
+        ? 'Monitoring starts again when the bus is in service.'
+        : 'The on-board sensor is not reporting. Tell the depot.';
+      return;
+    }
+    setState('ok');
+    $('icon').innerHTML = ICONS.ok;
+    $('headline').textContent = 'All clear';
+    $('action').textContent = 'Welfare monitoring is on.';
+  }
+
+  async function acknowledge() {
+    if (!current) return;
+    const id = current.event_id;
+    $('seenBtn').disabled = true;
+    try {
+      await fetch(`${API}/events/${encodeURIComponent(id)}/ack`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ by: `driver:${BUS}` }),
+      });
+    } catch { /* next poll will show it again; better than hiding it */ }
+    $('seenBtn').disabled = false;
+    poll();
+  }
+
+  // ---------------- sound ----------------
+  let audio = null;
+  function chime(tone) {
+    if (!soundOn || !audio) return;
+    const notes = tone === 'bad' ? [880, 660, 880, 660] : [660, 880];
+    notes.forEach((f, i) => {
+      const o = audio.createOscillator(); const g = audio.createGain();
+      o.type = 'sine'; o.frequency.value = f;
+      const t = audio.currentTime + i * 0.28;
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.5, t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.25);
+      o.connect(g).connect(audio.destination); o.start(t); o.stop(t + 0.26);
+    });
+  }
+  function paintMute() { $('muteBtn').textContent = soundOn ? 'Sound on' : 'Sound off'; }
+
+  // ---------------- clock / night ----------------
+  function tick() {
+    const d = new Date();
+    $('clock').textContent = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const h = d.getHours();
+    document.body.classList.toggle('night', h >= 20 || h < 6);
+  }
+
+  // ---------------- start ----------------
+  let wakeLock = null;
+  async function keepAwake() {
+    try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch {}
+  }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') keepAwake(); });
+
+  function start() {
+    if (!BUS) {
+      const v = $('busInput').value.trim();
+      if (!v) { $('busInput').focus(); return; }
+      BUS = v;
+    }
+    store.set('sus-driver-bus', BUS);
+    try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch {}
+    try { document.documentElement.requestFullscreen?.(); } catch {}
+    keepAwake();
+    $('start').hidden = true;
+    $('busNum').textContent = BUS;
+    poll();
+    setInterval(poll, POLL_MS);
+  }
+
+  if (!BUS) { $('busInput').hidden = false; $('startMsg').textContent = 'Enter the bus number, then tap start.'; }
+  $('startBtn').addEventListener('click', start);
+  $('seenBtn').addEventListener('click', acknowledge);
+  $('muteBtn').addEventListener('click', () => {
+    soundOn = !soundOn; store.set('sus-driver-sound', soundOn ? '1' : '0'); paintMute();
+  });
+  $('screen').addEventListener('animationend', () => $('screen').classList.remove('flash'));
+  paintMute(); tick(); setInterval(tick, 10000);
+})();
+</script>
+</body>
+</html>
