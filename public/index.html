@@ -42,6 +42,8 @@
 <!-- MQTT.js for browser WebSocket MQTT connection -->
 <script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
 
+<link rel="preconnect" href="https://api.fontshare.com">
+<link rel="stylesheet" href="https://api.fontshare.com/v2/css?f[]=general-sans@500,600,700&f[]=satoshi@400,500,700&display=swap">
 <link rel="stylesheet" href="./base.css">
 <link rel="stylesheet" href="./style.css">
 </head>
@@ -1214,50 +1216,55 @@
     <!-- ===== WELFARE CONSOLE ===== -->
     <div class="view" id="view-welfare-console">
       <!-- One answer to one question: does anything need attention right now. -->
-      <div class="welfare-headline" id="wHeadline">
-        <div class="welfare-headline-dot" id="wHeadlineDot"></div>
-        <div>
-          <div class="welfare-headline-main" id="wHeadlineMain">Checking…</div>
-          <div class="welfare-headline-sub" id="wHeadlineSub">&nbsp;</div>
-          <!-- Without this, "quiet because all is well" and "the pipeline is
-               dead" look identical on a screen whose event feed can legitimately
-               sit still for hours. -->
-          <div class="welfare-freshness" id="wFreshness">&nbsp;</div>
-        </div>
-        <span class="dev-tag" id="welfareModeTag">checking…</span>
-      </div>
-
-      <div class="chart-grid cols-2">
-        <div class="chart-panel">
-          <div class="chart-header">
-            <div>
-              <div class="chart-title">What has happened</div>
-              <div class="chart-subtitle">Newest first, updates every 15 seconds</div>
-            </div>
-            <div class="chart-actions">
-              <button class="btn btn-sm" id="wRefreshBtn">
-                <i data-lucide="refresh-cw"></i> Refresh
-              </button>
-            </div>
+      <section class="welfare-headline" id="wHeadline" aria-live="polite">
+        <div class="wc-status-left">
+          <div class="welfare-headline-dot" id="wHeadlineDot"></div>
+          <div class="wc-status-text">
+            <div class="wc-eyebrow">Right now</div>
+            <div class="welfare-headline-main" id="wHeadlineMain">Checking…</div>
+            <div class="welfare-headline-sub" id="wHeadlineSub">&nbsp;</div>
+            <!-- Without this, "quiet because all is well" and "the pipeline is
+                 dead" look identical on a screen whose event feed can legitimately
+                 sit still for hours. -->
+            <div class="welfare-freshness" id="wFreshness">&nbsp;</div>
           </div>
-          <div class="chart-body welfare-feed" id="wAlertFeed">
+        </div>
+        <div class="wc-status-right">
+          <div class="wc-stats" id="wStats"></div>
+          <div class="wc-status-actions">
+            <span class="dev-tag" id="welfareModeTag">checking…</span>
+            <button class="wc-btn" id="wRefreshBtn" type="button">
+              <i data-lucide="refresh-cw"></i> Refresh
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <div class="wc-grid">
+        <section class="wc-panel" aria-labelledby="wFeedTitle">
+          <header class="wc-panel-head">
+            <div>
+              <h2 class="wc-panel-title" id="wFeedTitle">Alerts</h2>
+              <div class="wc-panel-sub">Last 7 days · repeats grouped · updates every 15 s</div>
+            </div>
+          </header>
+          <div class="wc-feed" id="wAlertFeed">
             <div class="welfare-empty">Waiting for events.</div>
           </div>
-        </div>
+        </section>
 
-        <div class="chart-panel">
-          <div class="chart-header">
+        <section class="wc-panel" aria-labelledby="wBusTitle">
+          <header class="wc-panel-head">
             <div>
-              <div class="chart-title">Buses right now</div>
-              <div class="chart-subtitle">One line per vehicle</div>
+              <h2 class="wc-panel-title" id="wBusTitle">Buses</h2>
+              <div class="wc-panel-sub">One card per vehicle</div>
             </div>
-          </div>
-          <div class="chart-body welfare-feed" id="wVehicleCards">
+          </header>
+          <div class="wc-buses" id="wVehicleCards">
             <div class="welfare-empty">No vehicles reporting.</div>
           </div>
-        </div>
+        </section>
       </div>
-
 
       <!-- Welfare monitoring summary: what the welfare layer is watching.
            Hidden unless /api/welfare/status says it is on; filled by
