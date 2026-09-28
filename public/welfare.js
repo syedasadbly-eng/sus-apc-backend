@@ -13,6 +13,7 @@
 
   const WELFARE_VIEWS = [
     'welfare-console', 'welfare-signals', 'welfare-health', 'welfare-log', 'welfare-rules',
+    'welfare-drivers',
   ];
 
   const SEV = {
@@ -204,6 +205,111 @@
     if (view === 'welfare-health') return renderHealth();
     if (view === 'welfare-log') return renderLog();
     if (view === 'welfare-rules') return renderRules();
+    if (view === 'welfare-drivers') return renderDrivers();
+  }
+
+  // -------------------------------------------------------------------------
+  // Driver screens
+  // -------------------------------------------------------------------------
+
+  // Must match DRIVER in public/driver.html: the card has to say exactly what
+  // the cab is showing, or it is worse than no card at all.
+  const DRIVER_SCREEN = {
+    fall:                      { tone: 'bad',  head: 'Passenger may have fallen' },
+    violence:                  { tone: 'bad',  head: 'Incident on board' },
+    violence_disruption:       { tone: 'bad',  head: 'Incident on board' },
+    end_of_service_occupancy:  { tone: 'bad',  head: 'Someone still on board' },
+    terminus_occupancy:        { tone: 'warn', head: 'Someone still on board' },
+    lone_traveller_late_night: { tone: 'warn', head: 'Lone passenger, late' },
+    stationary_with_occupants: { tone: 'warn', head: 'People on board, bus parked' },
+  };
+  const DRIVER_WINDOW_MIN = 10;
+
+  function driverUrl(bus) {
+    return `${location.origin}/driver.html?bus=${encodeURIComponent(bus)}`;
+  }
+
+  async function renderDrivers() {
+    const grid = document.getElementById('wDriverCards');
+    if (!grid) return;
+    let health = []; let events = [];
+    try {
+      const since = new Date(Date.now() - DRIVER_WINDOW_MIN * 60000).toISOString();
+      [health, events] = await Promise.all([
+        api('/fleet-health').catch(() => []),
+        api(`/events?unack=true&from=${encodeURIComponent(since)}&limit=200`).catch(() => []),
+      ]);
+    } catch { /* fall through with what we have */ }
+
+    const buses = new Map();
+    (health || []).forEach((h) => buses.set(String(h.bus_id), h));
+    // The camera can name a vehicle the counting feed has not reported yet.
+    const camBus = lastStatus?.camera?.default_bus;
+    if (camBus && !buses.has(String(camBus))) buses.set(String(camBus), null);
+
+    const showTests = Boolean(lastStatus && lastStatus.allow_sim);
+    const active = (events || []).filter((e) => DRIVER_SCREEN[e.event_type]
+      && e.source !== 'simulated'
+      && Date.now() - Date.parse(e.detected_at) <= DRIVER_WINDOW_MIN * 60000);
+
+    const cards = [...buses.entries()]
+      .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
+      .map(([bus, h]) => {
+        const mine = active.filter((e) => String(e.bus_id) === bus)
+          .sort((a, b) => ({ bad: 2, warn: 1 }[DRIVER_SCREEN[b.event_type].tone]
+            - { bad: 2, warn: 1 }[DRIVER_SCREEN[a.event_type].tone])
+            || Date.parse(b.detected_at) - Date.parse(a.detected_at));
+        let tone; let head; let sub;
+        if (mine.length) {
+          const e = mine[0];
+          tone = DRIVER_SCREEN[e.event_type].tone;
+          head = DRIVER_SCREEN[e.event_type].head;
+          sub = `${timeAgo(e.detected_at)} \u00b7 waiting for the driver to press SEEN`
+            + (mine.length > 1 ? ` \u00b7 +${mine.length - 1} more` : '');
+        } else if (h && (!h.trustworthy || h.never_reported)) {
+          tone = 'idle';
+          head = h.off_shift ? 'Off shift' : 'Monitoring paused';
+          sub = h.off_shift ? 'Screen is grey until the bus is back in service.'
+            : 'Sensor not reporting, so the screen will not claim all clear.';
+        } else {
+          tone = 'ok';
+          head = 'All clear';
+          sub = h ? 'Monitoring on. Nothing for the driver to do.'
+            : 'Camera only. No counting sensor on this vehicle yet.';
+        }
+        const url = driverUrl(bus);
+        return `
+          <div class="welfare-driver-card tone-${tone}">
+            <div class="welfare-driver-top">
+              <span class="welfare-card-bus strong">Bus ${esc(bus)}</span>
+              <span class="welfare-driver-dot"></span>
+            </div>
+            <div class="welfare-driver-head">${esc(head)}</div>
+            <div class="welfare-driver-sub">${esc(sub)}</div>
+            <div class="welfare-driver-actions">
+              <a class="btn btn-primary btn-sm" href="${esc(url)}" target="_blank" rel="noopener">
+                <i data-lucide="external-link"></i> Open screen</a>
+              <button class="btn btn-secondary btn-sm w-copy-driver" data-url="${esc(url)}">
+                <i data-lucide="link"></i> Copy link</button>
+            </div>
+            <div class="welfare-driver-url">${esc(url.replace(/^https?:\/\//, ''))}</div>
+          </div>`;
+      });
+
+    grid.innerHTML = cards.length ? cards.join('')
+      : '<div class="welfare-empty">No buses are reporting yet.</div>';
+    const alerting = active.length;
+    setText('wDriversSubtitle', `${buses.size} screen${buses.size === 1 ? '' : 's'} \u00b7 `
+      + (alerting ? `${alerting} alert${alerting > 1 ? 's' : ''} showing in a cab` : 'no alerts showing in any cab')
+      + (showTests ? ' \u00b7 test events are not counted here' : ''));
+
+    grid.querySelectorAll('.w-copy-driver').forEach((b) => {
+      b.addEventListener('click', async () => {
+        try { await navigator.clipboard.writeText(b.dataset.url); b.lastChild.textContent = ' Copied'; }
+        catch { window.prompt('Copy this link', b.dataset.url); }
+      });
+    });
+    icons();
   }
 
   // -------------------------------------------------------------------------

@@ -1190,6 +1190,7 @@ function updateHeader(view) {
     'welfare-health': ['Sensor Integrity', 'Welfare / Rule 12'],
     'welfare-log': ['Welfare Event Log', 'Welfare / Audit Trail'],
     'welfare-rules': ['Rules & Testing', 'Welfare / Configuration'],
+    'welfare-drivers': ['Driver Screens', 'Welfare / In-cab Displays'],
   };
   const [title, breadcrumb] = titles[view] || ['Dashboard', 'Overview'];
   document.getElementById('headerTitle').textContent = title;

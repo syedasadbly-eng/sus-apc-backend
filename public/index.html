@@ -266,6 +266,10 @@
           <i data-lucide="sliders-horizontal"></i>
           Rules &amp; Testing
         </button>
+        <button class="nav-item" data-view="welfare-drivers">
+          <i data-lucide="monitor-smartphone"></i>
+          Driver Screens
+        </button>
       </div>
     </nav>
 
@@ -1177,6 +1181,35 @@
     <!-- ===== WELFARE DEVELOPMENT INTERFACE ============================= -->
     <!-- Feature-flagged. All views inert unless FEATURE_WELFARE=true.     -->
     <!-- ================================================================= -->
+
+    <!-- ===== DRIVER SCREENS ===== -->
+    <!-- One card per bus: what its cab screen is showing right now, and the
+         link to open it. The screen itself is public/driver.html. -->
+    <div class="view" id="view-welfare-drivers">
+      <div class="dev-banner">
+        <i data-lucide="monitor-smartphone"></i>
+        <div>
+          <strong>What each driver is seeing right now.</strong>
+          Open a bus's screen on the cab tablet and tap Start once. It shows one alert at a time
+          and only the alerts a driver can act on. When the driver presses SEEN, the alert is
+          acknowledged here too.
+        </div>
+      </div>
+
+      <div class="chart-panel">
+        <div class="chart-header">
+          <div>
+            <div class="chart-title">Driver screens</div>
+            <div class="chart-subtitle" id="wDriversSubtitle">Loading…</div>
+          </div>
+        </div>
+        <div class="chart-body">
+          <div class="welfare-driver-grid" id="wDriverCards">
+            <div class="welfare-empty">Loading…</div>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <!-- ===== WELFARE CONSOLE ===== -->
     <div class="view" id="view-welfare-console">

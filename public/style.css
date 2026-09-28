@@ -2889,3 +2889,30 @@ html, body {
 }
 .welfare-freshness.warn .pulse { background: var(--color-warning); }
 .welfare-freshness.bad  .pulse { background: var(--color-error); }
+
+/* ---- Driver screens (welfare) ---- */
+.welfare-driver-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+.welfare-driver-card {
+  border: 1px solid var(--color-border); border-top: 4px solid var(--color-success);
+  border-radius: var(--radius-md); background: var(--color-surface-2);
+  padding: 16px; display: flex; flex-direction: column; gap: 6px; min-width: 0;
+}
+.welfare-driver-card.tone-warn { border-top-color: var(--color-warning); }
+.welfare-driver-card.tone-bad  { border-top-color: var(--color-error); }
+.welfare-driver-card.tone-idle { border-top-color: var(--color-text-secondary, #64748b); }
+.welfare-driver-top { display: flex; align-items: center; justify-content: space-between; }
+.welfare-driver-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--color-success); }
+.tone-warn .welfare-driver-dot { background: var(--color-warning); }
+.tone-bad  .welfare-driver-dot { background: var(--color-error); animation: wDriverPulse 1.2s ease-in-out infinite; }
+.tone-idle .welfare-driver-dot { background: var(--color-text-secondary, #64748b); }
+@keyframes wDriverPulse { 50% { opacity: 0.3; } }
+.welfare-driver-head { font-size: 20px; font-weight: 700; line-height: 1.2; color: var(--color-text); }
+.tone-bad .welfare-driver-head { color: var(--color-error); }
+.tone-warn .welfare-driver-head { color: var(--color-warning); }
+.welfare-driver-sub { font-size: 13px; color: var(--color-text-secondary, #94a3b8); min-height: 2.6em; }
+.welfare-driver-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.welfare-driver-actions .btn { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }
+.welfare-driver-actions .btn i { width: 14px; height: 14px; }
+.welfare-driver-url { font-size: 11px; color: var(--color-text-secondary, #94a3b8); font-family: ui-monospace, monospace;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { .tone-bad .welfare-driver-dot { animation: none; } }
