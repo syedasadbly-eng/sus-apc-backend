@@ -220,72 +220,230 @@
   // Overview panel — what the welfare layer is watching, on the main dashboard
   // -------------------------------------------------------------------------
 
-  // Plain-English line per signal for a dashboard reader. The engineering
-  // description stays on Signal Delivery; unknown signals fall back to it.
-  const PARAM_TEXT = {
-    'Occupancy': 'Onboard count and how full the bus is',
-    'Sensor integrity': 'Counter feed is live and counting correctly',
-    'Lone Traveller': 'One person on board for 30 min, escalated at night',
-    'End of service': 'Someone still on board when the bus reaches the depot',
-    'Stationary with occupants': 'Bus parked for 60 min with people on board',
-    'Dwell (proxy)': 'People held on board with nobody getting off for 20 min',
-    'Distress': 'Passenger fall, detected by the AI Dome camera',
-    'Aggression': 'Violent behaviour, detected by the AI Dome camera',
-    'Violence & Disruption': 'Violence and a loud sound within 90 s of each other',
+  // One entry per signal, keyed by the name /signals returns. `types` are the
+  // event types that count towards the signal's sparkline, so the tile can
+  // show when it fired, not just how often.
+  const PARAMS = {
+    'Distress':               { group: 'camera', icon: 'person-standing', title: 'Passenger falls',
+      text: 'AI Dome camera detects someone falling', types: ['fall'] },
+    'Aggression':             { group: 'camera', icon: 'siren', title: 'Violence',
+      text: 'AI Dome camera detects violent behaviour', types: ['violence'] },
+    'Violence & Disruption':  { group: 'camera', icon: 'audio-lines', title: 'Violence + loud sound',
+      text: 'Violence and a sound alert within 90 s: the strongest signal', types: ['violence_disruption'] },
+    'Occupancy':              { group: 'passenger', icon: 'users', title: 'Occupancy',
+      text: 'How many people are on board and how full the bus is', types: [] },
+    'Lone Traveller':         { group: 'passenger', icon: 'user', title: 'Lone traveller',
+      text: 'One person alone on board for 30 min, escalated after 20:00', types: ['lone_traveller', 'lone_traveller_late_night'] },
+    'Dwell (proxy)':          { group: 'passenger', icon: 'timer', title: 'Nobody getting off',
+      text: 'People held on board with no one alighting for 20 min', types: ['dwell_no_alighting'] },
+    'End of service':         { group: 'passenger', icon: 'warehouse', title: 'Left on board at depot',
+      text: 'Someone still on board when the bus reaches the depot', types: ['end_of_service_occupancy', 'terminus_occupancy'] },
+    'Stationary with occupants': { group: 'passenger', icon: 'circle-parking', title: 'Parked with people on',
+      text: 'Bus parked for 60 min with people still on board', types: ['stationary_with_occupants'] },
+    'Sensor integrity':       { group: 'system', icon: 'shield-check', title: 'Sensor integrity',
+      text: 'Counters are live and counting correctly. Every rule depends on it',
+      types: ['sensor_stale', 'sensor_offline', 'sensor_fault', 'sensor_suspect', 'data_quality_drift'] },
   };
-  const STATUS_CHIP = {
-    live: ['ok', 'Watching'],
-    blocked: ['warn', 'Not yet'],
-    disabled: ['muted', 'Off'],
-    camera: ['warn', 'Awaiting camera'],
-  };
-  const TRUST_TEXT = {
-    measured: 'measured', modelled: 'estimated', proxy: 'proxy', unproven: 'unproven', none: 'not wired',
+  const GROUPS = [
+    ['camera', 'Camera detection', 'cctv', 'AI Pro Dome on board'],
+    ['system', 'System health', 'activity', 'Can the alerts be trusted'],
+    ['passenger', 'Passenger welfare', 'users', 'From the VS125 passenger counters'],
+  ];
+  const STATUS_WORD = { live: 'Watching', blocked: 'Not yet', disabled: 'Off', camera: 'Awaiting camera' };
+  const BASIS = {
+    measured: ['ok', 'Measured'], modelled: ['warn', 'Estimated'], proxy: ['info', 'Proxy'],
+    unproven: ['muted', 'Unproven'], none: ['muted', 'Not wired'],
   };
 
+  function dayKeys(n) {
+    const out = [];
+    for (let i = n - 1; i >= 0; i -= 1) {
+      const d = new Date(Date.now() - i * 86400000);
+      out.push(d.toISOString().slice(0, 10));
+    }
+    return out;
+  }
+
+  function sparkBars(counts, cls) {
+    const max = Math.max(1, ...counts);
+    const w = 7; const gap = 3; const h = 26;
+    const bars = counts.map((c, i) => {
+      const bh = c ? Math.max(3, Math.round((c / max) * h)) : 2;
+      return `<rect x="${i * (w + gap)}" y="${h - bh}" width="${w}" height="${bh}" rx="1.5" class="${c ? 'on' : 'off'}"/>`;
+    }).join('');
+    return `<svg class="wo-spark ${cls}" viewBox="0 0 ${counts.length * (w + gap) - gap} ${h}" aria-hidden="true">${bars}</svg>`;
+  }
+
+  function ring(live, total) {
+    const r = 34; const c = 2 * Math.PI * r;
+    const f = total ? live / total : 0;
+    return `<svg class="wo-ring" viewBox="0 0 84 84" aria-hidden="true">
+      <circle cx="42" cy="42" r="${r}" class="track"/>
+      <circle cx="42" cy="42" r="${r}" class="fill" stroke-dasharray="${(c * f).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 42 42)"/>
+    </svg>`;
+  }
+
   async function renderOverviewWelfare() {
-    const grid = document.getElementById('wOverviewGrid');
-    if (!grid) return;
-    let data;
-    try { data = await api('/signals'); } catch {
-      setText('wOverviewSubtitle', 'Welfare data unavailable right now');
+    const groupsEl = document.getElementById('wOverviewGroups');
+    if (!groupsEl) return;
+    let data; let events = []; let status = lastStatus; let fleet = [];
+    try {
+      const since = new Date(Date.now() - 7 * 86400000).toISOString();
+      [data, events, status, fleet] = await Promise.all([
+        api('/signals'),
+        api(`/events?from=${encodeURIComponent(since)}&limit=1000`).catch(() => []),
+        api('/status').catch(() => lastStatus),
+        api('/fleet-health').catch(() => []),
+      ]);
+    } catch {
+      setText('wOverviewSubtitle', 'Welfare data is unavailable right now');
       return;
     }
     const sig = Array.isArray(data) ? data : (data.signals || []);
-    const sum = Array.isArray(data) ? null : data.summary;
-    const live = sig.filter((x) => x.status === 'live').length;
-    const ev7 = sum?.events_7d ?? sig.reduce((n, x) => n + (Number(x.events) || 0), 0);
-    setText('wOverviewSubtitle',
-      `${live} of ${sig.length} signals being watched \u00b7 ${ev7} event${ev7 === 1 ? '' : 's'} in the last 7 days`);
+    const sum = Array.isArray(data) ? {} : (data.summary || {});
+    const real = (events || []).filter((e) => e.source !== 'simulated');
+    const days = dayKeys(7);
 
-    grid.innerHTML = sig.map((x) => {
-      const [cls, word] = STATUS_CHIP[x.status] || ['muted', x.status];
-      const trust = TRUST_TEXT[x.trust] || x.trust || '';
-      const trustCls = x.trust === 'measured' ? 'ok' : (x.trust === 'none' ? 'muted' : 'warn');
-      const n = x.events == null ? '\u2014' : x.events;
-      const why = x.status !== 'live' && x.blocked_by ? x.blocked_by
-        : x.status === 'disabled' ? (x.detail || '') : '';
+    // ---- per-type daily buckets ----
+    const byTypeDay = {};
+    const lastByType = {};
+    real.forEach((e) => {
+      const d = String(e.detected_at).slice(0, 10);
+      (byTypeDay[e.event_type] ||= {})[d] = ((byTypeDay[e.event_type] || {})[d] || 0) + 1;
+      if (!lastByType[e.event_type] || e.detected_at > lastByType[e.event_type]) lastByType[e.event_type] = e.detected_at;
+    });
+
+    // ---- hero ----
+    const live = sig.filter((x) => x.status === 'live').length;
+    const notYet = sig.filter((x) => x.status === 'blocked' || x.status === 'camera').length;
+    const off = sig.filter((x) => x.status === 'disabled').length;
+    const alertTypes = new Set(Object.values(PARAMS).flatMap((p) => p.types));
+    const welfareEvents = real.filter((e) => alertTypes.has(e.event_type));
+    const perDay = days.map((d) => welfareEvents.filter((e) => String(e.detected_at).startsWith(d)).length);
+    const today = perDay[perDay.length - 1];
+
+    const cam = status?.camera || {};
+    const camAgeMin = cam.last_seen_at ? (Date.now() - Date.parse(cam.last_seen_at)) / 60000 : null;
+    const camTone = camAgeMin == null ? 'idle' : camAgeMin <= 30 ? 'ok' : camAgeMin <= 24 * 60 ? 'warn' : 'idle';
+    const camWord = camAgeMin == null ? 'No contact since restart'
+      : camAgeMin <= 30 ? 'Active' : camAgeMin <= 24 * 60 ? 'Quiet' : 'Silent';
+
+    document.getElementById('wOverviewHero').innerHTML = `
+      <div class="wo-hero-card">
+        <div class="wo-ring-wrap">${ring(live, sig.length)}
+          <div class="wo-ring-label"><strong>${live}</strong><span>of ${sig.length}</span></div>
+        </div>
+        <div class="wo-hero-body">
+          <div class="wo-hero-kicker">Coverage</div>
+          <div class="wo-hero-main">${live} signals watching</div>
+          <div class="wo-hero-pills">
+            <span class="wo-pill ok"><i></i>${live} watching</span>
+            ${notYet ? `<span class="wo-pill warn"><i></i>${notYet} not yet</span>` : ''}
+            ${off ? `<span class="wo-pill muted"><i></i>${off} off</span>` : ''}
+          </div>
+        </div>
+      </div>
+      <div class="wo-hero-card">
+        <div class="wo-hero-body grow">
+          <div class="wo-hero-kicker">Welfare events · last 7 days</div>
+          <div class="wo-hero-main"><span class="wo-big">${welfareEvents.length}</span>
+            <span class="wo-muted">${today} today</span></div>
+          <div class="wo-week">
+            ${perDay.map((n, i) => {
+    const max = Math.max(1, ...perDay);
+    const d = new Date(`${days[i]}T12:00:00Z`);
+    return `<div class="wo-week-col" title="${n} on ${d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' })}">
+                <div class="wo-week-bar ${i === perDay.length - 1 ? 'today' : ''}" style="height:${n ? Math.max(8, (n / max) * 100) : 4}%"></div>
+                <span>${d.toLocaleDateString('en-GB', { weekday: 'narrow' })}</span></div>`;
+  }).join('')}
+          </div>
+        </div>
+      </div>
+      <div class="wo-hero-card">
+        <span class="wo-cam-icon tone-${camTone}"><i data-lucide="cctv"></i></span>
+        <div class="wo-hero-body">
+          <div class="wo-hero-kicker">AI Pro Dome camera</div>
+          <div class="wo-hero-main"><span class="wo-dot tone-${camTone}"></span>${esc(camWord)}</div>
+          <div class="wo-muted">${cam.last_seen_at ? `Last event ${esc(timeAgo(cam.last_seen_at))}` : 'Waiting for its first event'}
+            · Bus ${esc(cam.default_bus || '—')}</div>
+          <div class="wo-muted">${Number(cam.accepted || 0)} events received since restart</div>
+        </div>
+      </div>`;
+
+    // ---- blockers ----
+    const blk = document.getElementById('wOverviewBlockers');
+    const blockers = sig.filter((x) => x.status !== 'live');
+    if (blk) {
+      blk.hidden = !blockers.length;
+      blk.innerHTML = `<i data-lucide="triangle-alert"></i><div><strong>${blockers.length} signal${blockers.length > 1 ? 's' : ''} not running yet:</strong> `
+        + blockers.map((x) => `${esc((PARAMS[x.signal] || {}).title || x.signal)} <span class="wo-muted">(${x.status === 'disabled' ? 'switched off' : 'waiting on a fix'})</span>`).join(', ')
+        + '. Details are on the dashed tiles below.</div>';
+    }
+
+    // ---- groups ----
+    const inService = (fleet || []).filter((h) => !h.off_shift && !h.never_reported && h.onboard != null);
+    const onboardNow = inService.reduce((n, h) => n + Number(h.onboard || 0), 0);
+
+    const tile = (x) => {
+      const p = PARAMS[x.signal] || { group: 'system', icon: 'circle', title: x.signal, text: x.detail || '', types: [] };
+      const isLive = x.status === 'live';
+      const counts = days.map((d) => p.types.reduce((n, t) => n + ((byTypeDay[t] || {})[d] || 0), 0));
+      const last = p.types.map((t) => lastByType[t]).filter(Boolean).sort().pop();
+      const n = x.events == null ? null : Number(x.events);
+      const [bCls, bWord] = BASIS[x.trust] || ['muted', x.trust || ''];
+      const tone = !isLive ? 'off' : p.group;
       return `
-        <div class="welfare-param ${x.status !== 'live' ? 'is-off' : ''}">
-          <div class="welfare-param-top">
-            <span class="welfare-param-name">${esc(x.signal)}</span>
-            <span class="welfare-chip ${cls}">${esc(word)}</span>
+        <article class="wo-tile tone-${tone}">
+          <div class="wo-tile-top">
+            <span class="wo-tile-icon"><i data-lucide="${p.icon}"></i></span>
+            <span class="wo-status ${isLive ? 'live' : x.status}"><i></i>${esc(STATUS_WORD[x.status] || x.status)}</span>
           </div>
-          <div class="welfare-param-text">${esc(PARAM_TEXT[x.signal] || x.detail || '')}</div>
-          ${why ? `<div class="welfare-param-why">${esc(why)}</div>` : ''}
-          <div class="welfare-param-bottom">
-            ${trust ? `<span class="welfare-chip ${trustCls}">${esc(trust)}</span>` : '<span></span>'}
-            <span class="welfare-param-count" title="Events in the last 7 days"><strong>${esc(n)}</strong> / 7d</span>
+          <h3 class="wo-tile-title">${esc(p.title)}</h3>
+          <p class="wo-tile-text">${esc(p.text)}</p>
+          ${!isLive ? `<div class="wo-tile-why"><i data-lucide="info"></i>${esc(x.blocked_by || x.detail || 'Switched off')}</div>` : ''}
+          <div class="wo-tile-foot">
+            <div class="wo-tile-count">
+              ${n == null ? (inService.length
+    ? `<strong>${onboardNow}</strong><span>on board now · ${inService.length} bus${inService.length > 1 ? 'es' : ''}</span>`
+    : '<span class="wo-cont">No bus in service</span>')
+    : `<strong>${n}</strong><span>${n === 1 ? 'event' : 'events'} · 7d</span>`}
+              ${last && isLive ? `<em>last ${esc(timeAgo(last))}</em>` : ''}
+            </div>
+            ${p.types.length && isLive ? sparkBars(counts, p.group) : ''}
           </div>
+          ${bWord ? `<span class="wo-basis ${bCls}">${esc(bWord)}</span>` : ''}
+        </article>`;
+    };
+
+    groupsEl.innerHTML = GROUPS.map(([key, name, icon, sub]) => {
+      const items = sig.filter((x) => ((PARAMS[x.signal] || {}).group || 'system') === key)
+        .sort((a, c) => (a.status === 'live' ? 0 : 1) - (c.status === 'live' ? 0 : 1));
+      if (!items.length) return '';
+      const liveN = items.filter((x) => x.status === 'live').length;
+      return `
+        <div class="wo-group g-${key}">
+          <div class="wo-group-head">
+            <i data-lucide="${icon}"></i><span class="wo-group-name">${esc(name)}</span>
+            <span class="wo-group-sub">${esc(sub)}</span>
+            <span class="wo-group-count">${liveN}/${items.length} watching</span>
+          </div>
+          <div class="wo-grid">${items.map(tile).join('')}</div>
         </div>`;
     }).join('');
 
+    const updated = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    setText('wOverviewSubtitle', `${live} of ${sig.length} signals watching · ${welfareEvents.length} welfare events in 7 days · updated ${updated}`);
+
     const foot = document.getElementById('wOverviewFoot');
     if (foot) {
-      foot.innerHTML = '<span class="welfare-chip ok">measured</span> straight off the sensor or camera \u00b7 '
-        + '<span class="welfare-chip warn">estimated</span> passenger count is modelled, treat alerts as leads \u00b7 '
-        + '<span class="welfare-chip warn">proxy</span> stands in for the real measure';
+      foot.innerHTML = [
+        ['ok', 'Measured', 'straight off the sensor or camera'],
+        ['warn', 'Estimated', 'modelled passenger count, treat alerts as leads'],
+        ['info', 'Proxy', 'stands in for the real measure'],
+        ['muted', 'Unproven', 'not yet seen working on a bus'],
+      ].map(([c, w, t]) => `<span class="wo-legend-item"><span class="wo-basis ${c}">${w}</span>${t}</span>`).join('');
     }
+    void sum;
     icons();
   }
 
