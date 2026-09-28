@@ -3220,3 +3220,95 @@ html, body {
    min-content width was forcing the content column wider than the screen. */
 .dashboard:has(#view-welfare-console.active) { grid-template-columns: var(--sidebar-width) minmax(0, 1fr); }
 .dashboard.sidebar-collapsed:has(#view-welfare-console.active) { grid-template-columns: var(--sidebar-collapsed) minmax(0, 1fr); }
+
+/* ---- Welfare Console v2: strong outlines, dynamic type, less clutter ---- */
+.main:has(#view-welfare-console.active) {
+  --wc-display: 'Cabinet Grotesk', 'Satoshi', 'Inter', system-ui, sans-serif;
+  --wc-line: #1c2434;          /* card outline */
+  --wc-line-soft: #e3e6ec;     /* inner dividers */
+  --color-bg: #f3f4f6;
+  --shadow-md: none;
+}
+#view-welfare-console h2, #view-welfare-console h3, #view-welfare-console .welfare-headline-main,
+#view-welfare-console .wo-title, #view-welfare-console .wo-big, #view-welfare-console .wc-stat-v,
+#view-welfare-console .welfare-vcard-bus, #view-welfare-console .wo-tile-count strong,
+#view-welfare-console .wo-hero-main, #view-welfare-console .wo-ring-label { font-family: var(--wc-display); }
+
+/* one outline language for every card */
+#view-welfare-console .welfare-headline,
+#view-welfare-console .wc-panel,
+#view-welfare-console .welfare-overview,
+#view-welfare-console .welfare-vcard,
+#view-welfare-console .wo-hero-card,
+#view-welfare-console .wo-tile {
+  border: 1.5px solid var(--wc-line); box-shadow: none;
+}
+#view-welfare-console .welfare-headline, #view-welfare-console .wc-panel, #view-welfare-console .welfare-overview { border-radius: 16px; }
+#view-welfare-console .welfare-vcard, #view-welfare-console .wo-hero-card, #view-welfare-console .wo-tile { border-radius: 12px; background: var(--color-surface); }
+
+/* status card */
+#view-welfare-console .welfare-headline { padding: 26px 30px; border-width: 1.5px; }
+#view-welfare-console .welfare-headline::before { width: 6px; }
+#view-welfare-console .welfare-headline-main { font-size: 34px; font-weight: 800; letter-spacing: -0.025em; line-height: 1.05; }
+#view-welfare-console .welfare-headline-sub { font-size: 15px; margin-top: 8px; color: #3f4859; }
+#view-welfare-console .welfare-headline-dot { margin-top: 12px; }
+#view-welfare-console .welfare-freshness { background: none; border: 0; padding: 0; margin-top: 10px; font-size: 12.5px; }
+.wc-stat { border: 1.5px solid var(--wc-line-soft); border-radius: 12px; background: var(--color-surface); min-width: 112px; }
+.wc-stat-v { font-size: 32px; font-weight: 800; letter-spacing: -0.03em; }
+.wc-stat-k { font-size: 11.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--color-text-faint); }
+.wc-btn { border: 1.5px solid var(--wc-line); border-radius: 10px; box-shadow: none; }
+.wc-btn:hover { background: var(--wc-line); color: #fff; border-color: var(--wc-line); }
+
+/* panels */
+.wc-panel-head { padding: 18px 22px 14px; border-bottom: 1.5px solid var(--wc-line); }
+.wc-panel-title { font-size: 20px; font-weight: 800; letter-spacing: -0.02em; }
+.wc-feed { padding: 4px 8px 8px; max-height: 560px; }
+.wc-buses { padding: 16px; }
+.wc-day { padding: 14px 14px 6px; color: #6b7384; }
+
+/* alert rows: one line of meaning, one line of detail */
+.wc-alert { padding: 14px; gap: 14px; }
+.wc-alert + .wc-alert { border-top: 1px solid var(--wc-line-soft); }
+.wc-alert-icon { border-radius: 10px; border: 1.5px solid currentColor; background: var(--color-surface); }
+.wc-alert.is-seen .wc-alert-icon { background: var(--color-surface); border-color: var(--wc-line-soft); }
+.wc-alert-title { font-family: var(--wc-display); font-size: 16.5px; font-weight: 700; letter-spacing: -0.01em; }
+.wc-alert-action { display: flex; align-items: center; gap: 8px; }
+.wc-bus { flex: 0 0 auto; background: none; border: 1px solid var(--wc-line-soft); color: #3f4859; border-radius: 6px; padding: 1px 7px; }
+.wc-count { font-family: var(--wc-body); border: 1.5px solid currentColor; background: none; padding: 0 7px; }
+.wc-alert-time { font-size: 13.5px; font-weight: 700; }
+
+/* bus cards */
+#view-welfare-console .welfare-vcard { padding: 16px 18px; }
+#view-welfare-console .welfare-vcard-bus { font-size: 20px; font-weight: 800; letter-spacing: -0.02em; }
+#view-welfare-console .welfare-health-pill { border: 1.5px solid currentColor; background: none; }
+#view-welfare-console .welfare-kv { border-top: 1px solid var(--wc-line-soft); margin-top: 12px; }
+#view-welfare-console .welfare-kv dd { font-family: var(--wc-display); font-size: 17px; font-weight: 700; }
+
+/* monitoring panel, decluttered for the Console */
+#view-welfare-console .welfare-overview { padding: 24px; background: var(--color-surface); }
+#view-welfare-console .wo-title { font-size: 24px; font-weight: 800; letter-spacing: -0.02em; }
+#view-welfare-console .wo-head-icon { box-shadow: none; border-radius: 10px; background: var(--wc-line); }
+#view-welfare-console .wo-link { border: 1.5px solid var(--wc-line); border-radius: 10px; }
+#view-welfare-console .wo-link:hover { background: var(--wc-line); color: #fff; }
+#view-welfare-console .wo-blockers,
+#view-welfare-console .wo-legend,
+#view-welfare-console .wo-tile-text,
+#view-welfare-console .wo-spark,
+#view-welfare-console .wo-group-sub { display: none !important; }
+#view-welfare-console .wo-tile { padding: 16px; gap: 8px; min-height: 0; }
+#view-welfare-console .wo-tile::before { height: 4px; border-radius: 10px 10px 0 0; }
+#view-welfare-console .wo-tile:hover { transform: none; box-shadow: none; border-color: var(--accent); }
+#view-welfare-console .wo-tile.tone-off { border-style: dashed; border-color: #8a93a3; background: var(--color-surface-2); }
+#view-welfare-console .wo-tile-title { font-family: var(--wc-display); font-size: 16.5px; font-weight: 700; }
+#view-welfare-console .wo-tile-count strong { font-size: 30px; font-weight: 800; letter-spacing: -0.03em; }
+#view-welfare-console .wo-tile-icon { background: none; border: 1.5px solid var(--accent); border-radius: 9px; color: var(--accent); }
+#view-welfare-console .wo-status { background: none; border: 1.5px solid currentColor; }
+#view-welfare-console .wo-basis { cursor: help; }
+#view-welfare-console .wo-group-head { padding-bottom: 8px; border-bottom: 1px solid var(--wc-line-soft); margin-bottom: 12px; }
+#view-welfare-console .wo-group-name { font-family: var(--wc-display); font-size: 15px; font-weight: 800; }
+#view-welfare-console .wo-hero-card { min-height: 104px; }
+#view-welfare-console .wo-cam-icon { box-shadow: none; }
+@media (max-width: 640px) {
+  #view-welfare-console .welfare-headline-main { font-size: 26px; }
+  .wc-stat-v { font-size: 24px; }
+}
