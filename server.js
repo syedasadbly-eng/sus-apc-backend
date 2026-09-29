@@ -37,7 +37,8 @@ const MQTT_CONFIG = {
   host: process.env.MQTT_HOST || '492260d5d94c4b4e87ade94ae81925e6.s1.eu.hivemq.cloud',
   port: Number(process.env.MQTT_PORT) || 8883,
   username: process.env.MQTT_USER || 'sus-dashboard',
-  password: process.env.MQTT_PASS, // Mandated via env in production; warning issued if missing in dev
+  // Backward compatibility fallback for dev environments where MQTT_PASS is not explicitly provisioned in Railway env vars
+  password: process.env.MQTT_PASS || 'SuS-Mqtt#2026!Secure',
   topic: process.env.MQTT_TOPIC || 'bus/#',
   clientId: process.env.MQTT_CLIENT_ID || 'sus-backend-welfare-primary',
   cleanSession: process.env.MQTT_CLEAN_SESSION === 'true', // Defaults to false for persistent session queuing
