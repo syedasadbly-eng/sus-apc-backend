@@ -737,24 +737,18 @@
     }
 
     const dot = document.getElementById('wHeadlineDot');
-    if (dot) dot.className = `welfare-headline-dot ${tone}`;
-    const strip = document.getElementById('wHeadline');
-    if (strip) strip.className = `welfare-headline ${tone}`;
-    setText('wHeadlineMain', main);
-    setText('wHeadlineSub', sub);
+    if (dot) dot.className = `welfare-pulse-dot ${tone}`;
+    const statusCard = document.getElementById('wDeckStatus');
+    if (statusCard) statusCard.className = `welfare-deck-card status-card tone-${tone}`;
+    setText('wHeadlineMain', tone === 'ok' ? 'All Clear' : (urgent.length ? 'Urgent Alert' : 'Attention Required'));
+    setText('wHeadlineSub', main);
 
-    // ---- at-a-glance figures ----
-    const stats = document.getElementById('wStats');
-    if (stats) {
-      const watched = inService.length - watchable.length;
-      const tiles = [
-        { k: 'Open alerts', v: open.length, tone: open.length ? 'warn' : 'ok' },
-        { k: 'Urgent', v: urgent.length, tone: urgent.length ? 'bad' : 'ok' },
-        { k: 'Buses watched', v: `${watched}<span>/${inService.length}</span>`, tone: watchable.length ? 'bad' : 'ok' },
-      ];
-      stats.innerHTML = tiles.map((t) => `
-        <div class="wc-stat ${t.tone}"><div class="wc-stat-v">${t.v}</div><div class="wc-stat-k">${esc(t.k)}</div></div>`).join('');
-    }
+    // Update Top Deck 3 KPIs
+    const watched = inService.length - watchable.length;
+    setText('wDeckAlertsVal', open.length);
+    setText('wDeckUrgentMeta', `${urgent.length} critical · ${open.length - urgent.length} notices`);
+    setText('wDeckFleetVal', `${watched} / ${inService.length || health.length}`);
+    setText('wDeckFleetMeta', watchable.length ? `${watchable.length} bus telemetry paused` : 'All saloons connected');
 
     // ---- alert feed ----
     // The raw feed printed one identical card per detection, so a camera test
@@ -814,29 +808,62 @@
   }
 
   function alertRow(g) {
-    const e = g.first;                 // newest of the group
+    const e = g.first;
     const n = g.items.length;
     const unseen = g.items.filter((x) => !x.acknowledged).length;
+    const unres = g.items.filter((x) => !x.resolved).length;
     const sev = SEV[Math.max(...g.items.map((x) => x.severity))] || SEV[1];
     const act = action(e.event_type);
-    const test = e.source === 'simulated' ? '<span class="welfare-chip sim">test</span>' : '';
-    const oldest = g.items[g.items.length - 1];
-    const span = n > 1 ? ` · first ${esc(fmtClock(oldest.detected_at))}` : '';
+    const test = e.source === 'simulated' ? '<span class="exec-chip sim">TEST</span>' : '';
     const ageSec = (Date.now() - Date.parse(e.detected_at)) / 1000;
     const isSlaBreach = (e.severity >= 4 && unseen > 0 && ageSec > 300);
-    const slaBadge = isSlaBreach ? '<span class="wc-sla-breach" title="Critical SLA exceeded (>5 min unacknowledged)">SLA BREACH</span>' : '';
-    const seen = unseen === 0 ? '<span class="wc-seen">Seen / Resolved</span>'
-      : n > 1 && unseen < n ? `<span class="wc-seen part">${unseen} unseen</span>` : '';
+    const slaBadge = isSlaBreach ? '<span class="exec-sla-badge">SLA BREACH</span>' : '';
+    
+    // Status text
+    let statusBadge = '<span class="exec-status-pill open">OPEN</span>';
+    if (unres === 0) {
+      statusBadge = '<span class="exec-status-pill resolved"><i data-lucide="check-check"></i> RESOLVED</span>';
+    } else if (unseen === 0) {
+      statusBadge = '<span class="exec-status-pill acked"><i data-lucide="eye"></i> ACKNOWLEDGED</span>';
+    }
+
+    const sevTag = e.severity === 4 ? 'CRITICAL' : (e.severity === 3 ? 'ALERT' : 'NOTICE');
+
     return `
-      <div class="wc-alert ${sev.cls}${e.source === 'simulated' ? ' is-test' : ''}${unseen === 0 ? ' is-seen' : ''}" title="${esc(e.reason || '')}">
-        <span class="wc-alert-icon"><i data-lucide="${EVENT_ICONS[e.event_type] || 'bell'}"></i></span>
-        <div class="wc-alert-body">
-          <div class="wc-alert-title">${test}${esc(label(e.event_type))}${n > 1 ? `<span class="wc-count" title="${n} alerts${esc(span)}${unseen ? `, ${unseen} not yet seen` : ''}">×${n}</span>` : ''}</div>
-          <div class="wc-alert-action"><span class="wc-bus">Bus ${esc(e.bus_id)}</span>${esc(act || e.reason || '')}</div>
+      <div class="exec-alert-card ${sev.cls}${unres === 0 ? ' is-resolved' : ''}" data-event-id="${esc(e.event_id)}">
+        <div class="exec-alert-left">
+          <div class="exec-alert-icon-box ${sev.cls}">
+            <i data-lucide="${EVENT_ICONS[e.event_type] || 'bell'}"></i>
+          </div>
         </div>
-        <div class="wc-alert-meta">
-          <div class="wc-alert-time">${slaBadge}${esc(timeAgo(e.detected_at))}</div>
-          <div class="wc-alert-sub">${esc(fmtClock(e.detected_at))}${seen ? ` ${seen}` : ''}</div>
+        <div class="exec-alert-content">
+          <div class="exec-alert-header">
+            <div class="exec-alert-title-row">
+              <span class="exec-bus-badge">Bus ${esc(e.bus_id)}</span>
+              <span class="exec-alert-heading">${esc(label(e.event_type))}</span>
+              ${test}
+              ${n > 1 ? `<span class="exec-counter-badge">×${n}</span>` : ''}
+              ${slaBadge}
+            </div>
+            <div class="exec-alert-timing">
+              <span class="exec-time-ago">${esc(timeAgo(e.detected_at))}</span>
+              <span class="exec-time-clock">${esc(fmtClock(e.detected_at))}</span>
+            </div>
+          </div>
+          <div class="exec-alert-guidance">
+            <i data-lucide="shield-check" class="guidance-icon"></i>
+            <span>${esc(act || e.reason || 'Assess passenger condition.')}</span>
+          </div>
+          <div class="exec-alert-footer">
+            <div class="exec-alert-state-wrap">
+              <span class="exec-sev-tag ${sev.cls}">${sevTag}</span>
+              ${statusBadge}
+            </div>
+            <div class="exec-card-actions">
+              ${unseen > 0 ? `<button type="button" class="exec-btn exec-btn-ack" onclick="window.welfareAckEvent('${esc(e.event_id)}')"><i data-lucide="check"></i> Ack</button>` : ''}
+              ${unres > 0 ? `<button type="button" class="exec-btn exec-btn-resolve" onclick="window.welfareResolveEvent('${esc(e.event_id)}')"><i data-lucide="shield"></i> Resolve</button>` : ''}
+            </div>
+          </div>
         </div>
       </div>`;
   }
@@ -918,19 +945,43 @@
     const rows = [['On board', onboard], ['Last update', seen]];
     if (h.lone_for_sec != null) rows.push(['Alone for', `${Math.round(h.lone_for_sec / 60)} min`]);
 
+    const cap = 16;
+    const aboardVal = typeof h.onboard === 'number' ? h.onboard : 0;
+    const pct = Math.min(100, Math.round((aboardVal / cap) * 100));
+
     return `
-      <div class="welfare-vcard ${cls}">
-        <div class="welfare-vcard-head">
-          <span class="welfare-vcard-bus">Bus ${esc(h.bus_id)}</span>
-          <span class="welfare-health-pill ${cls}">${esc(headline)}</span>
+      <div class="exec-vcard ${cls}">
+        <div class="exec-vcard-header">
+          <div class="exec-vcard-identity">
+            <div class="bus-icon-wrap"><i data-lucide="bus"></i></div>
+            <div>
+              <div class="exec-vcard-title">Bus ${esc(h.bus_id)}</div>
+              <div class="exec-vcard-route">${esc(h.route || 'Downtown Loop')}</div>
+            </div>
+          </div>
+          <span class="exec-vcard-status-tag ${cls}">${esc(headline)}</span>
         </div>
-        ${sub ? `<div class="welfare-vcard-sub">${esc(sub)}</div>` : ''}
-        <dl class="welfare-kv">
-          ${rows.map(([k, v]) => {
-      const cell = (v && typeof v === 'object' && typeof v.html === 'string') ? v.html : esc(v);
-      return `<div><dt>${esc(k)}</dt><dd>${cell}</dd></div>`;
-    }).join('')}
-        </dl>
+
+        <div class="exec-occupancy-block">
+          <div class="occupancy-labels">
+            <span class="occ-title">Saloon Occupancy</span>
+            <span class="occ-count"><strong>${aboardVal}</strong> / ${cap} pax (${pct}%)</span>
+          </div>
+          <div class="exec-progress-bar">
+            <div class="exec-progress-fill ${pct >= 100 ? 'over' : (pct >= 75 ? 'warn' : 'ok')}" style="width: ${pct}%"></div>
+          </div>
+        </div>
+
+        <div class="exec-vcard-stats-grid">
+          <div class="vcard-stat-cell">
+            <span class="stat-lbl">Telemetry Ping</span>
+            <span class="stat-val">${esc(seen)}</span>
+          </div>
+          <div class="vcard-stat-cell">
+            <span class="stat-lbl">GPS Position</span>
+            <span class="stat-val ${h.gps_valid ? 'text-ok' : 'text-faint'}">${h.gps_valid ? 'Active Fix' : 'Fallback'}</span>
+          </div>
+        </div>
       </div>`;
   }
 
@@ -1636,3 +1687,44 @@
     bootstrap();
   }
 }());
+
+  // Global actions for inline card interaction
+  window.welfareAckEvent = async function(id) {
+    try {
+      await fetch(`/api/welfare/events/${encodeURIComponent(id)}/ack`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ by: 'operator-console' })
+      });
+      updateConsole();
+    } catch (err) {
+      alert('Could not acknowledge: ' + err.message);
+    }
+  };
+
+  window.welfareResolveEvent = async function(id) {
+    const notes = prompt('Enter resolution notes / incident clearance:', 'Passenger assisted; incident cleared.');
+    if (!notes) return;
+    try {
+      await fetch(`/api/welfare/events/${encodeURIComponent(id)}/resolve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ by: 'operator', notes })
+      });
+      updateConsole();
+    } catch (err) {
+      alert('Could not resolve: ' + err.message);
+    }
+  };
+
+  // Wire diagnostics toggle button
+  document.addEventListener('DOMContentLoaded', () => {
+    const diagBtn = document.getElementById('wToggleDiagnosticBtn');
+    const diagPanel = document.getElementById('welfareOverviewPanel');
+    if (diagBtn && diagPanel) {
+      diagBtn.addEventListener('click', () => {
+        diagPanel.hidden = !diagPanel.hidden;
+        diagBtn.classList.toggle('active', !diagPanel.hidden);
+      });
+    }
+  });

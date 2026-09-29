@@ -1221,70 +1221,109 @@
 
     <!-- ===== WELFARE CONSOLE ===== -->
     <div class="view" id="view-welfare-console">
-      <!-- One answer to one question: does anything need attention right now. -->
-      <section class="welfare-headline" id="wHeadline" aria-live="polite">
-        <div class="wc-status-left">
-          <div class="welfare-headline-dot" id="wHeadlineDot"></div>
-          <div class="wc-status-text">
-            <div class="welfare-headline-main" id="wHeadlineMain">Checking…</div>
-            <div class="welfare-headline-sub" id="wHeadlineSub">&nbsp;</div>
-            <!-- Without this, "quiet because all is well" and "the pipeline is
-                 dead" look identical on a screen whose event feed can legitimately
-                 sit still for hours. -->
-            <div class="welfare-freshness" id="wFreshness">&nbsp;</div>
+      <!-- Executive Top Deck: Clean 3-Metric KPI & Live System Pulse -->
+      <div class="welfare-deck">
+        <div class="welfare-deck-card status-card" id="wDeckStatus">
+          <div class="welfare-deck-icon-wrap">
+            <div class="welfare-pulse-dot" id="wHeadlineDot"></div>
+            <i data-lucide="activity" class="deck-icon"></i>
+          </div>
+          <div class="welfare-deck-info">
+            <span class="deck-label">Fleet Safety Status</span>
+            <div class="deck-val" id="wHeadlineMain">Monitoring Active</div>
+            <div class="deck-meta" id="wHeadlineSub">All systems nominal</div>
           </div>
         </div>
-        <div class="wc-status-right">
-          <div class="wc-stats" id="wStats"></div>
-          <div class="wc-status-actions">
-            <span class="dev-tag" id="welfareModeTag">checking…</span>
-            <button class="wc-btn" id="wRefreshBtn" type="button">
-              <i data-lucide="refresh-cw"></i> Refresh
+
+        <div class="welfare-deck-card" id="wDeckAlerts">
+          <div class="welfare-deck-icon-wrap alert-wrap">
+            <i data-lucide="shield-alert" class="deck-icon alert-icon"></i>
+          </div>
+          <div class="welfare-deck-info">
+            <span class="deck-label">Active Incidents</span>
+            <div class="deck-val alert-val" id="wDeckAlertsVal">0</div>
+            <div class="deck-meta" id="wDeckUrgentMeta">0 critical escalations</div>
+          </div>
+        </div>
+
+        <div class="welfare-deck-card" id="wDeckFleet">
+          <div class="welfare-deck-icon-wrap fleet-wrap">
+            <i data-lucide="bus" class="deck-icon fleet-icon"></i>
+          </div>
+          <div class="welfare-deck-info">
+            <span class="deck-label">Monitored Fleet</span>
+            <div class="deck-val fleet-val" id="wDeckFleetVal">2 / 2</div>
+            <div class="deck-meta" id="wDeckFleetMeta">100% telemetry online</div>
+          </div>
+        </div>
+
+        <div class="welfare-deck-actions">
+          <div class="deck-time" id="wFreshness">Syncing...</div>
+          <div class="deck-btns">
+            <span class="dev-tag" id="welfareModeTag">Camera Active</span>
+            <button class="btn btn-secondary btn-sm" id="wRefreshBtn" type="button" title="Refresh Live Feeds">
+              <i data-lucide="refresh-cw" style="width:13px;height:13px"></i> Refresh
+            </button>
+            <button class="btn btn-secondary btn-sm" id="wToggleDiagnosticBtn" type="button" title="Toggle Monitoring Diagnostics">
+              <i data-lucide="sliders" style="width:13px;height:13px"></i> Diagnostics
             </button>
           </div>
         </div>
-      </section>
+      </div>
 
+      <!-- Main Operational Grid: Active Incidents (Left) & Live Fleet Saloons (Right) -->
       <div class="wc-grid">
         <section class="wc-panel" aria-labelledby="wFeedTitle">
           <header class="wc-panel-head">
-            <div>
-              <h2 class="wc-panel-title" id="wFeedTitle">Alerts</h2>
-              <div class="wc-panel-sub">Last 7 days · repeats grouped · updates every 15 s</div>
+            <div class="panel-head-left">
+              <i data-lucide="bell-ring" class="head-icon"></i>
+              <div>
+                <h2 class="wc-panel-title" id="wFeedTitle">Live Incident Queue</h2>
+                <div class="wc-panel-sub">Real-time alerts with one-click resolution</div>
+              </div>
+            </div>
+            <div class="feed-filters" id="wFeedFilterBar">
+              <button class="feed-filter-btn active" data-filter="all">All</button>
+              <button class="feed-filter-btn" data-filter="urgent">Urgent</button>
+              <button class="feed-filter-btn" data-filter="unresolved">Unresolved</button>
             </div>
           </header>
           <div class="wc-feed" id="wAlertFeed">
-            <div class="welfare-empty">Waiting for events.</div>
+            <div class="welfare-empty">Scanning for telemetry events...</div>
           </div>
         </section>
 
         <section class="wc-panel" aria-labelledby="wBusTitle">
           <header class="wc-panel-head">
-            <div>
-              <h2 class="wc-panel-title" id="wBusTitle">Buses</h2>
-              <div class="wc-panel-sub">One card per vehicle</div>
+            <div class="panel-head-left">
+              <i data-lucide="layout-grid" class="head-icon"></i>
+              <div>
+                <h2 class="wc-panel-title" id="wBusTitle">Fleet Saloon Status</h2>
+                <div class="wc-panel-sub">Real-time onboard loads & sensor pings</div>
+              </div>
             </div>
+            <a href="driver.html?bus=515" target="_blank" class="cab-link" title="Open Driver Alert Display">
+              <i data-lucide="external-link" style="width:13px;height:13px"></i> Driver View
+            </a>
           </header>
           <div class="wc-buses" id="wVehicleCards">
-            <div class="welfare-empty">No vehicles reporting.</div>
+            <div class="welfare-empty">Loading fleet telemetry...</div>
           </div>
         </section>
       </div>
 
-      <!-- Welfare monitoring summary: what the welfare layer is watching.
-           Hidden unless /api/welfare/status says it is on; filled by
-           renderOverviewWelfare() in welfare.js. -->
+      <!-- Collapsible Technical Diagnostics Drawer (Hidden by default, toggled via Diagnostics button) -->
       <section class="welfare-overview" id="welfareOverviewPanel" hidden aria-labelledby="wOverviewTitle">
         <header class="wo-head">
           <div class="wo-head-left">
-            <span class="wo-head-icon"><i data-lucide="shield-plus"></i></span>
+            <span class="wo-head-icon"><i data-lucide="cpu"></i></span>
             <div>
-              <h2 class="wo-title" id="wOverviewTitle">Welfare monitoring</h2>
-              <div class="wo-subtitle" id="wOverviewSubtitle">Loading…</div>
+              <h2 class="wo-title" id="wOverviewTitle">Telemetry &amp; Sensor Architecture</h2>
+              <div class="wo-subtitle" id="wOverviewSubtitle">Edge Sensor Health &amp; AI Dome Diagnostics</div>
             </div>
           </div>
           <button class="wo-link" id="wOverviewDetails" type="button">
-            Signal details <i data-lucide="arrow-right"></i>
+            Full Signal Matrix <i data-lucide="arrow-right"></i>
           </button>
         </header>
 
@@ -1295,9 +1334,7 @@
         </div>
 
         <div class="wo-blockers" id="wOverviewBlockers" hidden></div>
-
         <div class="wo-groups" id="wOverviewGroups"></div>
-
         <footer class="wo-legend" id="wOverviewFoot"></footer>
       </section>
     </div>
