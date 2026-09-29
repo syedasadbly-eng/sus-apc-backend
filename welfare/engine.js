@@ -96,6 +96,11 @@ const CONFIG = {
   // counting the silence as time held. See ruleDwell for why.
   dwellMaxGapSec: Number(process.env.WELFARE_DWELL_MAX_GAP_SEC ?? 1200),
 
+  // ---- R5 overcrowding (Use Case 5) --------------------------------------
+  busCapacity: Number(process.env.BUS_CAPACITY ?? 16),
+  overcrowdThresholdPercent: Number(process.env.WELFARE_OVERCROWD_PERCENT ?? 100),
+  overcrowdSustainSec: Number(process.env.WELFARE_OVERCROWD_SUSTAIN_SEC ?? 60),
+
   // ---- R6 end of service -------------------------------------------------
   depots: envJson('WELFARE_DEPOTS', DEFAULT_DEPOTS),
   termini: envJson('WELFARE_TERMINI', []),
@@ -493,11 +498,13 @@ class WelfareEngine extends EventEmitter {
     const loneOn = this.ruleEnabled('lone_traveller');
     const eosOn = this.ruleEnabled('end_of_service') || this.ruleEnabled('stationary');
     const dwellOn = this.ruleEnabled('dwell');
+    const overcrowdOn = this.ruleEnabled('overcrowding') || this.ruleEnabled('all');
 
-    if ((loneOn || eosOn || dwellOn) && this.isTrustworthy(v)) {
+    if ((loneOn || eosOn || dwellOn || overcrowdOn) && this.isTrustworthy(v)) {
       if (loneOn) out.push(...this.ruleLoneTraveller(v, ts, nowTs));
       if (eosOn) out.push(...this.ruleEndOfService(v, ts, nowTs));
       if (dwellOn) out.push(...this.ruleDwell(v, ts, nowTs));
+      if (overcrowdOn) out.push(...this.ruleOvercrowding(v, ts, nowTs));
     } else {
       v.loneSinceTs = null;
       v.stationarySinceTs = null;
@@ -651,6 +658,44 @@ class WelfareEngine extends EventEmitter {
     const on = ruleFamilies(this.cfg.enabledRules);
     if (on.length === 0) return false;
     return on.includes('all') || on.includes(family);
+  }
+
+  // -------------------------------------------------------------------------
+  // R5 — overcrowding (Use Case 5)
+  // Fires when onboard passengers meet or exceed standing capacity threshold.
+  // -------------------------------------------------------------------------
+  ruleOvercrowding(v, ts, nowTs) {
+    const out = [];
+    const cap = this.cfg.busCapacity || 16;
+    const aboard = v.onboard != null ? v.onboard : (v.onboardRaw != null ? v.onboardRaw : 0);
+    const pct = Math.round((aboard / cap) * 100);
+
+    if (pct < this.cfg.overcrowdThresholdPercent) {
+      v.overcrowdSinceTs = null;
+      return out;
+    }
+    if (v.overcrowdSinceTs == null) {
+      v.overcrowdSinceTs = nowTs;
+      return out;
+    }
+
+    const sustainedSec = (nowTs - v.overcrowdSinceTs) / 1000;
+    if (sustainedSec < this.cfg.overcrowdSustainSec) return out;
+
+    out.push(this.raise(v, {
+      event_type: 'overcrowding',
+      severity: SEVERITY.ALERT,
+      rule: 'R5_overcrowding',
+      use_case: 5,
+      reason: `Route capacity exceeded: ${aboard}/${cap} passengers aboard (${pct}%) for ${Math.round(sustainedSec / 60)} min`,
+      detail: {
+        onboard: aboard,
+        capacity: cap,
+        occupancy_percent: pct,
+        sustained_minutes: Math.round(sustainedSec / 60),
+      },
+    }, nowTs));
+    return out;
   }
 
   // -------------------------------------------------------------------------
@@ -1006,6 +1051,19 @@ class WelfareEngine extends EventEmitter {
     const cam = this.cameraStatus();
 
     return [
+      {
+        signal: 'Overcrowding', use_case: 5,
+        status: (this.ruleEnabled('overcrowding') || this.ruleEnabled('all')) ? 'live' : 'disabled',
+        source: 'VS125',
+        detail: 'Vehicle at or exceeding standing capacity — prompts second vehicle dispatch',
+        events: c.overcrowding ?? 0,
+        family: 'overcrowding',
+        enabled: this.ruleEnabled('overcrowding') || this.ruleEnabled('all'),
+        basis: 'Modelled or measured passenger load vs declared vehicle capacity',
+        trust: anyModelled ? 'modelled' : 'measured',
+        threshold: `Occupancy >= ${cfg.overcrowdThresholdPercent}% capacity (${cfg.busCapacity} pax) sustained ${mins(cfg.overcrowdSustainSec)}`,
+        blocked_by: null,
+      },
       {
         signal: 'Occupancy', use_case: 5, status: 'live', source: 'VS125',
         detail: anyModelled

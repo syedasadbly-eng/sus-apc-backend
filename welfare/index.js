@@ -55,6 +55,10 @@ function createStore(db) {
       acknowledged   INTEGER NOT NULL DEFAULT 0,
       acknowledged_at TEXT,
       acknowledged_by TEXT,
+      resolved       INTEGER NOT NULL DEFAULT 0,
+      resolved_at    TEXT,
+      resolved_by    TEXT,
+      resolution_notes TEXT,
       detail         TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_welfare_detected ON welfare_events(detected_at DESC);
@@ -62,6 +66,10 @@ function createStore(db) {
     CREATE INDEX IF NOT EXISTS idx_welfare_type ON welfare_events(event_type, detected_at DESC);
     CREATE INDEX IF NOT EXISTS idx_welfare_sev ON welfare_events(severity, detected_at DESC);
   `);
+  try { db.prepare("ALTER TABLE welfare_events ADD COLUMN resolved INTEGER NOT NULL DEFAULT 0").run(); } catch (_) {}
+  try { db.prepare("ALTER TABLE welfare_events ADD COLUMN resolved_at TEXT").run(); } catch (_) {}
+  try { db.prepare("ALTER TABLE welfare_events ADD COLUMN resolved_by TEXT").run(); } catch (_) {}
+  try { db.prepare("ALTER TABLE welfare_events ADD COLUMN resolution_notes TEXT").run(); } catch (_) {}
 
   const insertStmt = db.prepare(`
     INSERT OR IGNORE INTO welfare_events
@@ -140,7 +148,10 @@ function createStore(db) {
             -- on 4 Sep showed as a badge of 1 - and that 1 was an 18-hour-old
             -- offline on a different bus. Anything an operator is expected to
             -- look at has to be counted, so this starts at severity 2.
-            SUM(CASE WHEN acknowledged = 0 AND severity >= 2 THEN 1 ELSE 0 END) AS open_real
+            SUM(CASE WHEN acknowledged = 0 AND severity >= 2 THEN 1 ELSE 0 END) AS open_real,
+            SUM(CASE WHEN resolved = 1 THEN 1 ELSE 0 END) AS resolved_total,
+            -- SLA breaches: Level 4 Escalate unacknowledged after 300s (5 minutes)
+            SUM(CASE WHEN acknowledged = 0 AND severity = 4 AND (strftime('%s', 'now') - strftime('%s', detected_at)) > 300 THEN 1 ELSE 0 END) AS sla_breaches_urgent
           FROM welfare_events ${w}`).get(since),
         // Always reported, so the interface can say how many test rows were
         // excluded rather than silently dropping them.
@@ -175,6 +186,15 @@ function createStore(db) {
       const r = db.prepare(`UPDATE welfare_events
         SET acknowledged = 1, acknowledged_at = ?, acknowledged_by = ?
         WHERE event_id = ?`).run(new Date().toISOString(), by || 'dev-console', eventId);
+      return r.changes > 0;
+    },
+
+    resolve(eventId, by, notes) {
+      const nowIso = new Date().toISOString();
+      const r = db.prepare(`UPDATE welfare_events
+        SET resolved = 1, resolved_at = ?, resolved_by = ?, resolution_notes = ?,
+            acknowledged = 1, acknowledged_at = COALESCE(acknowledged_at, ?)
+        WHERE event_id = ?`).run(nowIso, by || 'operator', notes || 'Incident resolved', nowIso, eventId);
       return r.changes > 0;
     },
 
@@ -261,6 +281,12 @@ function createRouter(engine, store, meta) {
     res.status(ok ? 200 : 404).json({ acknowledged: ok });
   });
 
+  router.post('/events/:id/resolve', (req, res) => {
+    const { by, notes } = req.body ?? {};
+    const ok = store.resolve(req.params.id, by, notes);
+    res.status(ok ? 200 : 404).json({ resolved: ok });
+  });
+
   // ---- Dev-only simulation ------------------------------------------------
   // Lets the interface be exercised and demonstrated before the camera is
   // fitted. Writes into welfare_events flagged source='simulated'.
@@ -282,6 +308,16 @@ function createRouter(engine, store, meta) {
         event_type: 'lone_traveller_late_night', severity: SEVERITY.ALERT,
         rule: 'R4_lone_traveller_late_night', use_case: 6,
         reason: 'Simulated: single occupant for 7 min on an off-peak service',
+      },
+      dwell_distress: {
+        event_type: 'dwell_distress_unresponsive', severity: SEVERITY.ESCALATE,
+        rule: 'R2_dwell_distress', use_case: 3,
+        reason: 'Simulated: passenger fall detected with vehicle held (unresponsive passenger)',
+      },
+      overcrowding: {
+        event_type: 'overcrowding', severity: SEVERITY.ALERT,
+        rule: 'R5_overcrowding', use_case: 5,
+        reason: 'Simulated: standing capacity exceeded (18/16 pax, 112%)',
       },
       end_of_service: {
         event_type: 'end_of_service_occupancy', severity: SEVERITY.ESCALATE,
