@@ -1696,7 +1696,7 @@
   } else {
     bootstrap();
   }
-}());
+
 
   // Global actions for inline card interaction
   // Ack / Resolve on a card act on every event the card stands for. They
@@ -1763,3 +1763,4 @@
       });
     }
   });
+}());
