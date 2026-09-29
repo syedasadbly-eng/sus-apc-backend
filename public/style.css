@@ -3755,3 +3755,13 @@ html, body {
     grid-template-columns: 1fr;
   }
 }
+
+/* Clear all: acknowledge every open welfare alert */
+.wc-clear-all {
+  background: #16a34a;
+  color: #fff;
+  border: 1px solid #15803d;
+  font-weight: 600;
+}
+.wc-clear-all:hover { background: #15803d; }
+.btn-icon .badge[hidden], .wc-clear-all[hidden] { display: none; }
