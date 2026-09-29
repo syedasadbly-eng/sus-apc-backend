@@ -3389,3 +3389,21 @@ html, body {
   .wc-stat-v { font-size: 28px; }
 }
 @media (prefers-reduced-motion: reduce) { #view-welfare-console .welfare-headline-dot.bad { animation: none; } }
+
+/* SLA breach indicator badge for Welfare alerts */
+.wc-sla-breach {
+  display: inline-block;
+  background: #d4202c;
+  color: #ffffff;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  padding: 2px 7px;
+  border-radius: 4px;
+  margin-right: 6px;
+  animation: wcSlaPulse 1.4s ease-in-out infinite;
+}
+@keyframes wcSlaPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.75; transform: scale(1.04); }
+}

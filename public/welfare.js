@@ -45,6 +45,8 @@
     sound_classification: 'Unusual sound on board',
     violence_disruption: 'Altercation, and it was heard too',
     dwell_exceeded: 'Long time on board',
+    overcrowding: 'Standing capacity exceeded',
+    dwell_distress_unresponsive: 'Unresponsive passenger (Fall + Dwell)',
   };
 
   // What the person reading this screen should actually DO. An alert with no
@@ -70,6 +72,8 @@
     // Two detectors agreeing. This is the strongest evidence the camera can
     // offer, so the instruction is unhedged.
     violence_disruption: 'Follow the incident procedure. Two detectors agree.',
+    overcrowding: 'Prepare second vehicle dispatch / notify operator.',
+    dwell_distress_unresponsive: 'Medical priority: check passenger / dispatch ambulance immediately.',
   };
 
   const action = (t) => EVENT_ACTIONS[t] || '';
@@ -779,7 +783,7 @@
 
   const EVENT_ICONS = {
     fall: 'person-standing', violence: 'siren', violence_disruption: 'megaphone',
-    sound_classification: 'audio-waveform', lone_traveller: 'user', lone_traveller_late_night: 'moon',
+    sound_classification: 'audio-waveform', lone_traveller: 'user', lone_traveller_late_night: 'moon', overcrowding: 'users', dwell_distress_unresponsive: 'heart-pulse',
     end_of_service_occupancy: 'warehouse', terminus_occupancy: 'map-pin', stationary_with_occupants: 'circle-parking',
     dwell_no_alighting: 'timer', sensor_stale: 'wifi-low', sensor_offline: 'wifi-off', sensor_recovered: 'wifi',
     shift_ended: 'moon-star', sensor_fault: 'triangle-alert', sensor_suspect: 'scan-eye', data_quality_drift: 'activity',
@@ -818,7 +822,10 @@
     const test = e.source === 'simulated' ? '<span class="welfare-chip sim">test</span>' : '';
     const oldest = g.items[g.items.length - 1];
     const span = n > 1 ? ` · first ${esc(fmtClock(oldest.detected_at))}` : '';
-    const seen = unseen === 0 ? '<span class="wc-seen">Seen</span>'
+    const ageSec = (Date.now() - Date.parse(e.detected_at)) / 1000;
+    const isSlaBreach = (e.severity >= 4 && unseen > 0 && ageSec > 300);
+    const slaBadge = isSlaBreach ? '<span class="wc-sla-breach" title="Critical SLA exceeded (>5 min unacknowledged)">SLA BREACH</span>' : '';
+    const seen = unseen === 0 ? '<span class="wc-seen">Seen / Resolved</span>'
       : n > 1 && unseen < n ? `<span class="wc-seen part">${unseen} unseen</span>` : '';
     return `
       <div class="wc-alert ${sev.cls}${e.source === 'simulated' ? ' is-test' : ''}${unseen === 0 ? ' is-seen' : ''}" title="${esc(e.reason || '')}">
@@ -828,7 +835,7 @@
           <div class="wc-alert-action"><span class="wc-bus">Bus ${esc(e.bus_id)}</span>${esc(act || e.reason || '')}</div>
         </div>
         <div class="wc-alert-meta">
-          <div class="wc-alert-time">${esc(timeAgo(e.detected_at))}</div>
+          <div class="wc-alert-time">${slaBadge}${esc(timeAgo(e.detected_at))}</div>
           <div class="wc-alert-sub">${esc(fmtClock(e.detected_at))}${seen ? ` ${seen}` : ''}</div>
         </div>
       </div>`;
