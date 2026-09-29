@@ -37,8 +37,11 @@ const MQTT_CONFIG = {
   host: process.env.MQTT_HOST || '492260d5d94c4b4e87ade94ae81925e6.s1.eu.hivemq.cloud',
   port: Number(process.env.MQTT_PORT) || 8883,
   username: process.env.MQTT_USER || 'sus-dashboard',
-  password: process.env.MQTT_PASS || 'SuS-Mqtt#2026!Secure',
+  password: process.env.MQTT_PASS, // Mandated via env in production; warning issued if missing in dev
   topic: process.env.MQTT_TOPIC || 'bus/#',
+  clientId: process.env.MQTT_CLIENT_ID || 'sus-backend-welfare-primary',
+  cleanSession: process.env.MQTT_CLEAN_SESSION === 'true', // Defaults to false for persistent session queuing
+  qos: Number(process.env.MQTT_QOS) || 1, // Guaranteed delivery (QoS 1)
 };
 
 // Gateway / bus mapping — multiple topics can map to the same bus (multi-door)
@@ -1071,11 +1074,20 @@ function connectMqtt() {
   const url = `mqtts://${MQTT_CONFIG.host}:${MQTT_CONFIG.port}`;
   console.log(`[MQTT] Connecting to ${url}...`);
 
+  if (!MQTT_CONFIG.password) {
+    if (process.env.NODE_ENV === 'production') {
+      console.error('[MQTT] FATAL: MQTT_PASS environment variable is required in production.');
+      process.exit(1);
+    } else {
+      console.warn('[MQTT] WARNING: No MQTT_PASS set in environment. Telemetry broker connection may be rejected.');
+    }
+  }
+
   mqttClient = mqtt.connect(url, {
     username: MQTT_CONFIG.username,
     password: MQTT_CONFIG.password,
-    clientId: 'sus-backend-' + Math.random().toString(16).slice(2, 8),
-    clean: true,
+    clientId: MQTT_CONFIG.clientId,
+    clean: MQTT_CONFIG.cleanSession,
     reconnectPeriod: 5000,
     connectTimeout: 15000,
     protocolVersion: 4,
@@ -1083,11 +1095,11 @@ function connectMqtt() {
   });
 
   mqttClient.on('connect', () => {
-    console.log('[MQTT] Connected');
+    console.log(`[MQTT] Connected (clientId: ${MQTT_CONFIG.clientId}, cleanSession: ${MQTT_CONFIG.cleanSession})`);
     mqttStats.connected = true;
-    mqttClient.subscribe(MQTT_CONFIG.topic, { qos: 0 }, (err) => {
+    mqttClient.subscribe(MQTT_CONFIG.topic, { qos: MQTT_CONFIG.qos }, (err) => {
       if (err) console.error('[MQTT] Subscribe error:', err);
-      else console.log(`[MQTT] Subscribed to: ${MQTT_CONFIG.topic}`);
+      else console.log(`[MQTT] Subscribed to: ${MQTT_CONFIG.topic} (QoS: ${MQTT_CONFIG.qos})`);
     });
   });
 
