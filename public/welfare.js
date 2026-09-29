@@ -82,6 +82,9 @@
   let pollTimer = null;
   let volumeChart = null;
   let lastStatus = null;
+  // Event ids behind the open-alert count, kept so "Clear all" acts on
+  // exactly what the strip is showing.
+  let lastOpenIds = [];
 
   // -------------------------------------------------------------------------
   // Helpers
@@ -208,6 +211,10 @@
         badge.textContent = n;
         badge.hidden = n === 0;
       }
+      // The header bell's red dot was permanently on. It now means
+      // "open welfare alerts" and goes out when there are none.
+      const bell = document.getElementById('headerBellDot');
+      if (bell) bell.hidden = n === 0;
     } catch { /* silent — dev interface must never disrupt the dashboard */ }
   }
 
@@ -642,6 +649,9 @@
       })
       .sort((a, b) => Date.parse(b.detected_at) - Date.parse(a.detected_at));
     const urgent = open.filter((e) => e.severity >= 3);
+    lastOpenIds = open.map((e) => e.event_id);
+    const clearBtn = document.getElementById('wClearAllBtn');
+    if (clearBtn) clearBtn.hidden = open.length === 0;
 
     // The headline used to be an if/else chain, so it reported exactly one
     // thing and silently dropped the rest: a paused bus outranked open
@@ -860,8 +870,8 @@
               ${statusBadge}
             </div>
             <div class="exec-card-actions">
-              ${unseen > 0 ? `<button type="button" class="exec-btn exec-btn-ack" onclick="window.welfareAckEvent('${esc(e.event_id)}')"><i data-lucide="check"></i> Ack</button>` : ''}
-              ${unres > 0 ? `<button type="button" class="exec-btn exec-btn-resolve" onclick="window.welfareResolveEvent('${esc(e.event_id)}')"><i data-lucide="shield"></i> Resolve</button>` : ''}
+              ${unseen > 0 ? `<button type="button" class="exec-btn exec-btn-ack" data-ids="${esc(g.items.filter((x) => !x.acknowledged).map((x) => x.event_id).join(','))}" onclick="window.welfareAckEvent(this.dataset.ids)"><i data-lucide="check"></i> Ack${n > 1 ? ' all' : ''}</button>` : ''}
+              ${unres > 0 ? `<button type="button" class="exec-btn exec-btn-resolve" data-ids="${esc(g.items.filter((x) => !x.resolved).map((x) => x.event_id).join(','))}" onclick="window.welfareResolveEvent(this.dataset.ids)"><i data-lucide="shield"></i> Resolve${n > 1 ? ' all' : ''}</button>` : ''}
             </div>
           </div>
         </div>
@@ -1689,31 +1699,56 @@
 }());
 
   // Global actions for inline card interaction
-  window.welfareAckEvent = async function(id) {
+  // Ack / Resolve on a card act on every event the card stands for. They
+  // used to send only the first id of a grouped card and then call a function
+  // that did not exist, so the counts and red dots never went down.
+  const toIds = (v) => (Array.isArray(v) ? v : String(v || '').split(',')).filter(Boolean);
+
+  async function bulk(action, ids, extra) {
+    const res = await fetch(`/api/welfare/events/${action}-many`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids, ...extra }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  }
+
+  window.welfareAckEvent = async function(v) {
+    const ids = toIds(v);
+    if (!ids.length) return;
     try {
-      await fetch(`/api/welfare/events/${encodeURIComponent(id)}/ack`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ by: 'operator-console' })
-      });
-      updateConsole();
+      await bulk('ack', ids, { by: 'operator-console' });
+      await refreshNow();
     } catch (err) {
       alert('Could not acknowledge: ' + err.message);
     }
   };
 
-  window.welfareResolveEvent = async function(id) {
-    const notes = prompt('Enter resolution notes / incident clearance:', 'Passenger assisted; incident cleared.');
+  window.welfareResolveEvent = async function(v) {
+    const ids = toIds(v);
+    if (!ids.length) return;
+    const notes = prompt('Resolution note:', 'Passenger assisted; incident cleared.');
     if (!notes) return;
     try {
-      await fetch(`/api/welfare/events/${encodeURIComponent(id)}/resolve`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ by: 'operator', notes })
-      });
-      updateConsole();
+      await bulk('resolve', ids, { by: 'operator', notes });
+      await refreshNow();
     } catch (err) {
       alert('Could not resolve: ' + err.message);
+    }
+  };
+
+  // "Clear all": acknowledges every open alert the strip is counting. They
+  // stay in the queue and the Event Log as acknowledged; nothing is deleted.
+  window.welfareClearAll = async function() {
+    const ids = lastOpenIds.slice();
+    if (!ids.length) return;
+    if (!confirm(`Acknowledge all ${ids.length} open alert${ids.length === 1 ? '' : 's'}?\n\nThis clears the red counts. The alerts stay in the Event Log.`)) return;
+    try {
+      await bulk('ack', ids, { by: 'operator-console (clear all)' });
+      await refreshNow();
+    } catch (err) {
+      alert('Could not clear alerts: ' + err.message);
     }
   };
 

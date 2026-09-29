@@ -276,6 +276,30 @@ function createRouter(engine, store, meta) {
     }
   });
 
+  // Bulk actions. A grouped console card ("Possible fall x4") stands for
+  // several events, and "Clear all" stands for every open one, so the console
+  // sends the whole list in one request instead of one call per event.
+  const idList = (body) => (Array.isArray(body?.ids) ? body.ids : [])
+    .filter((x) => typeof x === 'string' && x.length && x.length < 200)
+    .slice(0, 1000);
+
+  router.post('/events/ack-many', (req, res) => {
+    const ids = idList(req.body);
+    if (!ids.length) return res.status(400).json({ error: 'ids[] required' });
+    let n = 0;
+    for (const id of ids) if (store.acknowledge(id, req.body?.by)) n += 1;
+    return res.json({ requested: ids.length, acknowledged: n });
+  });
+
+  router.post('/events/resolve-many', (req, res) => {
+    const ids = idList(req.body);
+    if (!ids.length) return res.status(400).json({ error: 'ids[] required' });
+    const { by, notes } = req.body ?? {};
+    let n = 0;
+    for (const id of ids) if (store.resolve(id, by, notes)) n += 1;
+    return res.json({ requested: ids.length, resolved: n });
+  });
+
   router.post('/events/:id/ack', (req, res) => {
     const ok = store.acknowledge(req.params.id, req.body?.by);
     res.status(ok ? 200 : 404).json({ acknowledged: ok });

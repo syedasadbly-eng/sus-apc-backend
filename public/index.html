@@ -301,9 +301,10 @@
       </div>
       <div class="live-badge" id="liveBadge" style="display:none">LIVE</div>
       <div class="header-time" id="headerTime">--:--:--</div>
-      <button class="btn-icon tooltip" data-tooltip="Notifications" aria-label="Notifications">
+      <button class="btn-icon tooltip" data-tooltip="Welfare alerts" aria-label="Welfare alerts" id="headerBellBtn"
+        onclick="document.querySelector('.nav-item[data-view=&quot;welfare-console&quot;]')?.click()">
         <i data-lucide="bell"></i>
-        <span class="badge"></span>
+        <span class="badge" id="headerBellDot" hidden></span>
       </button>
       <div class="export-dropdown" id="globalExport">
         <button class="btn btn-secondary" id="exportBtn">
@@ -1261,6 +1262,9 @@
           <div class="deck-time" id="wFreshness">Syncing...</div>
           <div class="deck-btns">
             <span class="dev-tag" id="welfareModeTag">Camera Active</span>
+            <button class="btn btn-sm wc-clear-all" id="wClearAllBtn" type="button" hidden onclick="window.welfareClearAll()" title="Acknowledge every open alert">
+              <i data-lucide="check-check" style="width:13px;height:13px"></i> Clear all
+            </button>
             <button class="btn btn-secondary btn-sm" id="wRefreshBtn" type="button" title="Refresh Live Feeds">
               <i data-lucide="refresh-cw" style="width:13px;height:13px"></i> Refresh
             </button>
