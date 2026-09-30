@@ -70,6 +70,11 @@ function createStore(db) {
   try { db.prepare("ALTER TABLE welfare_events ADD COLUMN resolved_at TEXT").run(); } catch (_) {}
   try { db.prepare("ALTER TABLE welfare_events ADD COLUMN resolved_by TEXT").run(); } catch (_) {}
   try { db.prepare("ALTER TABLE welfare_events ADD COLUMN resolution_notes TEXT").run(); } catch (_) {}
+  // Driver's answer from the cab screen: 'ok' (checked, passenger OK) or
+  // 'help' (driver needs help). Null until the driver answers.
+  try { db.prepare("ALTER TABLE welfare_events ADD COLUMN driver_response TEXT").run(); } catch (_) {}
+  try { db.prepare("ALTER TABLE welfare_events ADD COLUMN driver_response_at TEXT").run(); } catch (_) {}
+  try { db.prepare("ALTER TABLE welfare_events ADD COLUMN driver_response_by TEXT").run(); } catch (_) {}
 
   const insertStmt = db.prepare(`
     INSERT OR IGNORE INTO welfare_events
@@ -198,6 +203,25 @@ function createStore(db) {
       return r.changes > 0;
     },
 
+    /**
+     * Driver answer from the cab. 'ok' also acknowledges the event: the driver
+     * has seen it and dealt with it. 'help' deliberately does NOT acknowledge,
+     * so the alert stays open and counted in the console until control acts.
+     */
+    driverRespond(eventId, response, by) {
+      const nowIso = new Date().toISOString();
+      const r = response === 'ok'
+        ? db.prepare(`UPDATE welfare_events
+            SET driver_response = 'ok', driver_response_at = ?, driver_response_by = ?,
+                acknowledged = 1, acknowledged_at = COALESCE(acknowledged_at, ?),
+                acknowledged_by = COALESCE(acknowledged_by, ?)
+            WHERE event_id = ?`).run(nowIso, by, nowIso, by, eventId)
+        : db.prepare(`UPDATE welfare_events
+            SET driver_response = 'help', driver_response_at = ?, driver_response_by = ?
+            WHERE event_id = ?`).run(nowIso, by, eventId);
+      return r.changes > 0;
+    },
+
     purgeAll() {
       return db.prepare('DELETE FROM welfare_events').run().changes;
     },
@@ -298,6 +322,18 @@ function createRouter(engine, store, meta) {
     let n = 0;
     for (const id of ids) if (store.resolve(id, by, notes)) n += 1;
     return res.json({ requested: ids.length, resolved: n });
+  });
+
+  router.post('/events/driver-response', (req, res) => {
+    const ids = idList(req.body);
+    const response = req.body?.response;
+    if (!ids.length) return res.status(400).json({ error: 'ids[] required' });
+    if (response !== 'ok' && response !== 'help') return res.status(400).json({ error: "response must be 'ok' or 'help'" });
+    const bus = String(req.body?.bus || '').slice(0, 40);
+    const by = bus ? `driver:${bus}` : 'driver';
+    let n = 0;
+    for (const id of ids) if (store.driverRespond(id, response, by)) n += 1;
+    return res.json({ requested: ids.length, updated: n, response });
   });
 
   router.post('/events/:id/ack', (req, res) => {
