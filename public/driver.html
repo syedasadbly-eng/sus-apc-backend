@@ -24,7 +24,9 @@
        control. "Need help" keeps it open and flags it red in the console.
     5. Never show "All clear" when we cannot see. Lost connection and paused
        monitoring have their own grey state.
-    6. No external scripts or fonts: cab connectivity is patchy, so this file
+    6. PIN-protected. The screen asks for the cab PIN once, remembers it,
+       and asks again only if the server rejects it (WELFARE_DRIVER_PIN).
+    7. No external scripts or fonts: cab connectivity is patchy, so this file
        must render from cache on its own.
 
   URL parameters:
@@ -136,6 +138,8 @@
   .start input { font: inherit; font-size: 32px; padding: 12px 18px; border-radius: 12px; border: 2px solid var(--idle);
                  background: #121826; color: var(--ink); width: 240px; text-align: center; }
   .start[hidden] { display: none; }
+  .start input[type=password] { letter-spacing: 0.4em; }
+  .pin-error { color: var(--bad); font-size: clamp(18px, 3vh, 28px); font-weight: 700; min-height: 1.2em; }
 
   @media (prefers-reduced-motion: reduce) { .screen.state-bad.flash { animation: none; } }
   /* Night: dim the calm states so the cab is not lit up; alerts stay full strength. */
@@ -148,6 +152,8 @@
   <h1>Driver alert screen</h1>
   <p id="startMsg">Tap start once. The screen then stays on and will sound for new alerts.</p>
   <input id="busInput" inputmode="text" placeholder="Bus no." aria-label="Bus number" hidden>
+  <input id="pinInput" type="password" inputmode="numeric" autocomplete="off" placeholder="PIN" aria-label="Driver PIN" hidden>
+  <div id="pinError" class="pin-error" role="alert"></div>
   <button id="startBtn" type="button">Start</button>
 </div>
 
@@ -194,6 +200,8 @@
   const POLL_MS = 5000;
   const OFFLINE_AFTER_MS = 30000;
   let BUS = q.get('bus') || store.get('sus-driver-bus') || '';
+  let PIN = store.get('sus-driver-pin') || '';
+  let running = false;
   let soundOn = q.get('sound') !== '0' && store.get('sus-driver-sound') !== '0';
 
   // Only what a driver can act on. Wording is deliberately short: it has to be
@@ -227,22 +235,17 @@
   let lastActive = [];
 
   // ---------------- data ----------------
-  async function get(path) {
-    const r = await fetch(API + path, { cache: 'no-store' });
-    if (!r.ok) throw new Error(r.status);
-    return r.json();
-  }
-
   async function poll() {
+    if (!$('start').hidden) return;   // waiting for the PIN
     try {
-      const since = new Date(Date.now() - WINDOW_MIN * 60000).toISOString();
-      const [events, health] = await Promise.all([
-        get(`/events?bus=${encodeURIComponent(BUS)}&unack=true&from=${encodeURIComponent(since)}&limit=50`),
-        get('/fleet-health').catch(() => null),
-      ]);
+      const r = await fetch(`${API}/driver/${encodeURIComponent(BUS)}${SHOW_TESTS ? '?test=1' : ''}`,
+        { cache: 'no-store', headers: { 'X-Driver-Pin': PIN } });
+      if (r.status === 401 || r.status === 429) { askPin(r.status === 429 ? 'Too many tries. Wait 5 minutes.' : (PIN ? 'Wrong PIN' : '')); return; }
+      if (!r.ok) throw new Error(r.status);
+      const data = await r.json();
       lastOkAt = Date.now();
-      if (Array.isArray(health)) busHealth = health.find((h) => String(h.bus_id) === String(BUS)) || null;
-      const active = (events || [])
+      busHealth = data.monitoring;
+      const active = (data.alerts || []).map((e) => ({ ...e, source: e.simulated ? 'simulated' : 'live' }))
         .filter((e) => DRIVER[e.event_type])
         .filter((e) => SHOW_TESTS || e.source !== 'simulated')
         .filter((e) => Date.now() - Date.parse(e.detected_at) <= WINDOW_MIN * 60000)
@@ -332,10 +335,15 @@
     const ids = lastActive.filter((x) => x.event_type === current.event_type).map((x) => x.event_id);
     ['okBtn', 'helpBtn'].forEach((b) => { $(b).disabled = true; });
     try {
-      await fetch(`${API}/events/driver-response`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids, response, bus: BUS }),
+      const r = await fetch(`${API}/driver/${encodeURIComponent(BUS)}/respond`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Driver-Pin': PIN },
+        body: JSON.stringify({ ids, response }),
       });
+      if (r.status === 401 || r.status === 429) {
+        ['okBtn', 'helpBtn'].forEach((b) => { $(b).disabled = false; });
+        askPin(r.status === 429 ? 'Too many tries. Wait 5 minutes.' : 'Wrong PIN');
+        return;
+      }
     } catch { /* next poll will show it again; better than hiding it */ }
     ['okBtn', 'helpBtn'].forEach((b) => { $(b).disabled = false; });
     poll();
@@ -372,13 +380,35 @@
   }
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') keepAwake(); });
 
+  // Shown on first start if the server wants a PIN, and again whenever it
+  // rejects the stored one. The screen underneath keeps its last state.
+  function askPin(msg) {
+    if (!$('start').hidden && !$('pinInput').hidden) { if (msg) $('pinError').textContent = msg; return; }
+    PIN = ''; store.set('sus-driver-pin', '');
+    $('start').hidden = false;
+    $('busInput').hidden = true;
+    $('pinInput').hidden = false; $('pinInput').value = '';
+    $('startMsg').textContent = `Enter the driver PIN for bus ${BUS}.`;
+    $('pinError').textContent = msg || '';
+    $('startBtn').textContent = 'Unlock';
+    setTimeout(() => $('pinInput').focus(), 0);
+  }
+
   function start() {
     if (!BUS) {
       const v = $('busInput').value.trim();
       if (!v) { $('busInput').focus(); return; }
       BUS = v;
     }
+    if (!$('pinInput').hidden) {
+      const p = $('pinInput').value.trim();
+      if (!p) { $('pinInput').focus(); return; }
+      PIN = p; store.set('sus-driver-pin', PIN);
+      $('pinError').textContent = '';
+    }
     store.set('sus-driver-bus', BUS);
+    if (running) { $('start').hidden = true; poll(); return; }
+    running = true;
     try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch {}
     try { document.documentElement.requestFullscreen?.(); } catch {}
     keepAwake();
@@ -390,6 +420,7 @@
 
   if (!BUS) { $('busInput').hidden = false; $('startMsg').textContent = 'Enter the bus number, then tap start.'; }
   $('startBtn').addEventListener('click', start);
+  ['busInput', 'pinInput'].forEach((id) => $(id).addEventListener('keydown', (e) => { if (e.key === 'Enter') start(); }));
   $('okBtn').addEventListener('click', () => answer('ok'));
   $('helpBtn').addEventListener('click', () => answer('help'));
   $('muteBtn').addEventListener('click', () => {
