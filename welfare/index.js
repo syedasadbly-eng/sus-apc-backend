@@ -56,6 +56,10 @@ function createStore(db) {
       acknowledged   INTEGER NOT NULL DEFAULT 0,
       acknowledged_at TEXT,
       acknowledged_by TEXT,
+      resolved       INTEGER NOT NULL DEFAULT 0,
+      resolved_at    TEXT,
+      resolved_by    TEXT,
+      resolution_notes TEXT,
       detail         TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_welfare_detected ON welfare_events(detected_at DESC);
@@ -63,6 +67,15 @@ function createStore(db) {
     CREATE INDEX IF NOT EXISTS idx_welfare_type ON welfare_events(event_type, detected_at DESC);
     CREATE INDEX IF NOT EXISTS idx_welfare_sev ON welfare_events(severity, detected_at DESC);
   `);
+  try { db.prepare("ALTER TABLE welfare_events ADD COLUMN resolved INTEGER NOT NULL DEFAULT 0").run(); } catch (_) {}
+  try { db.prepare("ALTER TABLE welfare_events ADD COLUMN resolved_at TEXT").run(); } catch (_) {}
+  try { db.prepare("ALTER TABLE welfare_events ADD COLUMN resolved_by TEXT").run(); } catch (_) {}
+  try { db.prepare("ALTER TABLE welfare_events ADD COLUMN resolution_notes TEXT").run(); } catch (_) {}
+  // Driver's answer from the cab screen: 'ok' (checked, passenger OK) or
+  // 'help' (driver needs help). Null until the driver answers.
+  try { db.prepare("ALTER TABLE welfare_events ADD COLUMN driver_response TEXT").run(); } catch (_) {}
+  try { db.prepare("ALTER TABLE welfare_events ADD COLUMN driver_response_at TEXT").run(); } catch (_) {}
+  try { db.prepare("ALTER TABLE welfare_events ADD COLUMN driver_response_by TEXT").run(); } catch (_) {}
 
   const insertStmt = db.prepare(`
     INSERT OR IGNORE INTO welfare_events
@@ -141,7 +154,10 @@ function createStore(db) {
             -- on 4 Sep showed as a badge of 1 - and that 1 was an 18-hour-old
             -- offline on a different bus. Anything an operator is expected to
             -- look at has to be counted, so this starts at severity 2.
-            SUM(CASE WHEN acknowledged = 0 AND severity >= 2 THEN 1 ELSE 0 END) AS open_real
+            SUM(CASE WHEN acknowledged = 0 AND severity >= 2 THEN 1 ELSE 0 END) AS open_real,
+            SUM(CASE WHEN resolved = 1 THEN 1 ELSE 0 END) AS resolved_total,
+            -- SLA breaches: Level 4 Escalate unacknowledged after 300s (5 minutes)
+            SUM(CASE WHEN acknowledged = 0 AND severity = 4 AND (strftime('%s', 'now') - strftime('%s', detected_at)) > 300 THEN 1 ELSE 0 END) AS sla_breaches_urgent
           FROM welfare_events ${w}`).get(since),
         // Always reported, so the interface can say how many test rows were
         // excluded rather than silently dropping them.
@@ -163,10 +179,47 @@ function createStore(db) {
       return out;
     },
 
+    /** Newest real camera detection on record. Lets the camera's last-seen
+     *  time survive a redeploy: it is otherwise held only in memory, so every
+     *  deploy made a working camera read "no contact". */
+    lastCameraEventAt() {
+      const r = db.prepare(`SELECT MAX(detected_at) AS at FROM welfare_events
+        WHERE source = 'camera'`).get();
+      return r?.at || null;
+    },
+
     acknowledge(eventId, by) {
       const r = db.prepare(`UPDATE welfare_events
         SET acknowledged = 1, acknowledged_at = ?, acknowledged_by = ?
         WHERE event_id = ?`).run(new Date().toISOString(), by || 'dev-console', eventId);
+      return r.changes > 0;
+    },
+
+    resolve(eventId, by, notes) {
+      const nowIso = new Date().toISOString();
+      const r = db.prepare(`UPDATE welfare_events
+        SET resolved = 1, resolved_at = ?, resolved_by = ?, resolution_notes = ?,
+            acknowledged = 1, acknowledged_at = COALESCE(acknowledged_at, ?)
+        WHERE event_id = ?`).run(nowIso, by || 'operator', notes || 'Incident resolved', nowIso, eventId);
+      return r.changes > 0;
+    },
+
+    /**
+     * Driver answer from the cab. 'ok' also acknowledges the event: the driver
+     * has seen it and dealt with it. 'help' deliberately does NOT acknowledge,
+     * so the alert stays open and counted in the console until control acts.
+     */
+    driverRespond(eventId, response, by) {
+      const nowIso = new Date().toISOString();
+      const r = response === 'ok'
+        ? db.prepare(`UPDATE welfare_events
+            SET driver_response = 'ok', driver_response_at = ?, driver_response_by = ?,
+                acknowledged = 1, acknowledged_at = COALESCE(acknowledged_at, ?),
+                acknowledged_by = COALESCE(acknowledged_by, ?)
+            WHERE event_id = ?`).run(nowIso, by, nowIso, by, eventId)
+        : db.prepare(`UPDATE welfare_events
+            SET driver_response = 'help', driver_response_at = ?, driver_response_by = ?
+            WHERE event_id = ?`).run(nowIso, by, eventId);
       return r.changes > 0;
     },
 
@@ -248,9 +301,51 @@ function createRouter(engine, store, meta) {
     }
   });
 
+  // Bulk actions. A grouped console card ("Possible fall x4") stands for
+  // several events, and "Clear all" stands for every open one, so the console
+  // sends the whole list in one request instead of one call per event.
+  const idList = (body) => (Array.isArray(body?.ids) ? body.ids : [])
+    .filter((x) => typeof x === 'string' && x.length && x.length < 200)
+    .slice(0, 1000);
+
+  router.post('/events/ack-many', (req, res) => {
+    const ids = idList(req.body);
+    if (!ids.length) return res.status(400).json({ error: 'ids[] required' });
+    let n = 0;
+    for (const id of ids) if (store.acknowledge(id, req.body?.by)) n += 1;
+    return res.json({ requested: ids.length, acknowledged: n });
+  });
+
+  router.post('/events/resolve-many', (req, res) => {
+    const ids = idList(req.body);
+    if (!ids.length) return res.status(400).json({ error: 'ids[] required' });
+    const { by, notes } = req.body ?? {};
+    let n = 0;
+    for (const id of ids) if (store.resolve(id, by, notes)) n += 1;
+    return res.json({ requested: ids.length, resolved: n });
+  });
+
+  router.post('/events/driver-response', (req, res) => {
+    const ids = idList(req.body);
+    const response = req.body?.response;
+    if (!ids.length) return res.status(400).json({ error: 'ids[] required' });
+    if (response !== 'ok' && response !== 'help') return res.status(400).json({ error: "response must be 'ok' or 'help'" });
+    const bus = String(req.body?.bus || '').slice(0, 40);
+    const by = bus ? `driver:${bus}` : 'driver';
+    let n = 0;
+    for (const id of ids) if (store.driverRespond(id, response, by)) n += 1;
+    return res.json({ requested: ids.length, updated: n, response });
+  });
+
   router.post('/events/:id/ack', (req, res) => {
     const ok = store.acknowledge(req.params.id, req.body?.by);
     res.status(ok ? 200 : 404).json({ acknowledged: ok });
+  });
+
+  router.post('/events/:id/resolve', (req, res) => {
+    const { by, notes } = req.body ?? {};
+    const ok = store.resolve(req.params.id, by, notes);
+    res.status(ok ? 200 : 404).json({ resolved: ok });
   });
 
   // ---- Dev-only simulation ------------------------------------------------
@@ -274,6 +369,16 @@ function createRouter(engine, store, meta) {
         event_type: 'lone_traveller_late_night', severity: SEVERITY.ALERT,
         rule: 'R4_lone_traveller_late_night', use_case: 6,
         reason: 'Simulated: single occupant for 7 min on an off-peak service',
+      },
+      dwell_distress: {
+        event_type: 'dwell_distress_unresponsive', severity: SEVERITY.ESCALATE,
+        rule: 'R2_dwell_distress', use_case: 3,
+        reason: 'Simulated: passenger fall detected with vehicle held (unresponsive passenger)',
+      },
+      overcrowding: {
+        event_type: 'overcrowding', severity: SEVERITY.ALERT,
+        rule: 'R5_overcrowding', use_case: 5,
+        reason: 'Simulated: standing capacity exceeded (18/16 pax, 112%)',
       },
       end_of_service: {
         event_type: 'end_of_service_occupancy', severity: SEVERITY.ESCALATE,

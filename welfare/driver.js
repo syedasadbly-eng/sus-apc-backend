@@ -4,7 +4,10 @@
    The cab screen (public/driver.html) talks only to these routes:
 
      GET  /api/welfare/driver/:bus               what this bus's screen shows now
-     POST /api/welfare/driver/:bus/ack/:eventId  driver pressed SEEN
+     POST /api/welfare/driver/:bus/respond       driver answered: {ids, response}
+                                                 response 'ok'   = Checked, passenger OK
+                                                 response 'help' = Need help
+     POST /api/welfare/driver/:bus/ack/:eventId  legacy SEEN (kept for old cached screens)
 
    Why separate routes rather than reusing /events:
      - PIN-protected. A tablet left in a cab must not be able to read the whole
@@ -126,6 +129,8 @@ function createDriverRouter(engine, store) {
           detected_at: e.detected_at,
           severity: e.severity,
           simulated: e.source === 'simulated',
+          driver_response: e.driver_response || null,
+          driver_response_at: e.driver_response_at || null,
         }));
       res.json({
         bus,
@@ -141,6 +146,27 @@ function createDriverRouter(engine, store) {
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
+  });
+
+  // The two answer buttons. Scoped exactly like ack: only this bus's own
+  // alerts that are on its screen right now. 'ok' acknowledges them; 'help'
+  // leaves them open so the console keeps them counted and flagged red.
+  router.post('/driver/:bus/respond', requirePin, (req, res) => {
+    const bus = String(req.params.bus);
+    const response = req.body?.response;
+    if (response !== 'ok' && response !== 'help') {
+      return res.status(400).json({ error: "response must be 'ok' or 'help'" });
+    }
+    const ids = (Array.isArray(req.body?.ids) ? req.body.ids : [])
+      .filter((x) => typeof x === 'string' && x.length && x.length < 200).slice(0, 200);
+    if (!ids.length) return res.status(400).json({ error: 'ids[] required' });
+    let active;
+    try { active = new Set(activeFor(store, bus).map((e) => e.event_id)); } catch { active = new Set(); }
+    const mine = ids.filter((id) => active.has(id));
+    if (!mine.length) return res.status(404).json({ updated: 0 });
+    let n = 0;
+    for (const id of mine) if (store.driverRespond(id, response, `driver:${bus}`)) n += 1;
+    return res.json({ requested: ids.length, updated: n, response });
   });
 
   router.post('/driver/:bus/ack/:eventId', requirePin, (req, res) => {

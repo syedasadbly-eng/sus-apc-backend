@@ -33,7 +33,7 @@ Tap **Start** once. This unlocks the alert sound, goes full screen and keeps the
 | Parameter | Default | Meaning |
 |---|---|---|
 | `bus` | asked on first start, then remembered | Vehicle this screen belongs to |
-| `window` | `10` | Minutes an alert stays on screen unless it is marked Seen |
+| `window` | `10` | Minutes an alert stays on screen unless the driver answers it |
 | `test` | off | `test=1` also shows simulated events, marked TEST |
 | `sound` | on | `sound=0` starts muted |
 | `api` | same origin | Backend base URL, if the page is hosted elsewhere |
@@ -56,8 +56,17 @@ These go to the control-room console only and never reach the cab: sensor health
 drift, `dwell_no_alighting`, and a `sound_classification` on its own.
 
 If there is more than one alert, the worst and newest is shown, with a "+N more" count.
-**SEEN** acknowledges the alert (`POST /api/welfare/driver/:bus/ack/:id`, recorded as `driver:<bus>`),
-so the console can see that the driver has it. Alerts also clear on their own after
+The driver answers with one of two buttons (`POST /api/welfare/driver/:bus/respond`
+with `{ids, response}`, PIN in `X-Driver-Pin`, recorded as `driver:<bus>`):
+
+- **CHECKED, PASSENGER OK** (`response: "ok"`) acknowledges the alert and every open
+  alert of the same kind on this bus, and the console shows a green "Driver: passenger OK" tag.
+- **NEED HELP** (`response: "help"`) leaves the alert open, the cab shows "Help requested",
+  and the console flags the card red with "Driver needs help".
+
+A PIN can only answer its own bus's alerts that are on screen now. The older
+`POST /api/welfare/driver/:bus/ack/:id` (SEEN) route is kept for screens still running
+a cached copy. Alerts also clear on their own after
 `window` minutes, so the driver never has to touch the screen while driving.
 
 ## Hardware

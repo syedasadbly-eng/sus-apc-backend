@@ -45,6 +45,8 @@
     sound_classification: 'Unusual sound on board',
     violence_disruption: 'Altercation, and it was heard too',
     dwell_exceeded: 'Long time on board',
+    overcrowding: 'Standing capacity exceeded',
+    dwell_distress_unresponsive: 'Unresponsive passenger (Fall + Dwell)',
   };
 
   // What the person reading this screen should actually DO. An alert with no
@@ -70,6 +72,8 @@
     // Two detectors agreeing. This is the strongest evidence the camera can
     // offer, so the instruction is unhedged.
     violence_disruption: 'Follow the incident procedure. Two detectors agree.',
+    overcrowding: 'Prepare second vehicle dispatch / notify operator.',
+    dwell_distress_unresponsive: 'Medical priority: check passenger / dispatch ambulance immediately.',
   };
 
   const action = (t) => EVENT_ACTIONS[t] || '';
@@ -78,6 +82,12 @@
   let pollTimer = null;
   let volumeChart = null;
   let lastStatus = null;
+  // Event ids behind the open-alert count, kept so "Clear all" acts on
+  // exactly what the strip is showing.
+  let lastOpenIds = [];
+  // Queue filter: 'all' | 'urgent' | 'unresolved'. Set by the chips above
+  // the Live Incident Queue.
+  let feedFilter = 'all';
 
   // -------------------------------------------------------------------------
   // Helpers
@@ -144,6 +154,14 @@
     const simPanel = document.getElementById('welfareSimPanel');
     if (simPanel) simPanel.hidden = !lastStatus.allow_sim;
 
+    const ov = document.getElementById('welfareOverviewPanel');
+    if (ov) ov.hidden = false;
+    document.getElementById('wOverviewDetails')?.addEventListener('click', () => {
+      document.querySelector('.nav-item[data-view="welfare-signals"]')?.click();
+    });
+    renderOverviewWelfare();
+    setInterval(renderOverviewWelfare, 60000);
+
     hookNavigation();
     wireControls();
     icons();
@@ -196,16 +214,268 @@
         badge.textContent = n;
         badge.hidden = n === 0;
       }
+      // The header bell's red dot was permanently on. It now means
+      // "open welfare alerts" and goes out when there are none.
+      const bell = document.getElementById('headerBellDot');
+      if (bell) bell.hidden = n === 0;
     } catch { /* silent — dev interface must never disrupt the dashboard */ }
   }
 
   function renderView(view) {
-    if (view === 'welfare-console') return renderConsole();
+    if (view === 'welfare-console') { renderOverviewWelfare(); return renderConsole(); }
     if (view === 'welfare-signals') return renderSignals();
     if (view === 'welfare-health') return renderHealth();
     if (view === 'welfare-log') return renderLog();
     if (view === 'welfare-rules') return renderRules();
     if (view === 'welfare-drivers') return renderDrivers();
+  }
+
+  // -------------------------------------------------------------------------
+  // Overview panel — what the welfare layer is watching, on the main dashboard
+  // -------------------------------------------------------------------------
+
+  // One entry per signal, keyed by the name /signals returns. `types` are the
+  // event types that count towards the signal's sparkline, so the tile can
+  // show when it fired, not just how often.
+  const PARAMS = {
+    'Distress':               { group: 'camera', icon: 'person-standing', title: 'Passenger falls',
+      text: 'AI Dome camera detects someone falling', types: ['fall'] },
+    'Aggression':             { group: 'camera', icon: 'siren', title: 'Violence',
+      text: 'AI Dome camera detects violent behaviour', types: ['violence'] },
+    'Violence & Disruption':  { group: 'camera', icon: 'audio-lines', title: 'Violence + loud sound',
+      text: 'Violence and a sound alert within 90 s: the strongest signal', types: ['violence_disruption'] },
+    'Occupancy':              { group: 'passenger', icon: 'users', title: 'Occupancy',
+      text: 'How many people are on board and how full the bus is', types: [] },
+    'Lone Traveller':         { group: 'passenger', icon: 'user', title: 'Lone traveller',
+      text: 'One person alone on board for 30 min, escalated after 20:00', types: ['lone_traveller', 'lone_traveller_late_night'] },
+    'Dwell (proxy)':          { group: 'passenger', icon: 'timer', title: 'Nobody getting off',
+      text: 'People held on board with no one alighting for 20 min', types: ['dwell_no_alighting'] },
+    'End of service':         { group: 'passenger', icon: 'warehouse', title: 'Left on board at depot',
+      text: 'Someone still on board when the bus reaches the depot', types: ['end_of_service_occupancy', 'terminus_occupancy'] },
+    'Stationary with occupants': { group: 'passenger', icon: 'circle-parking', title: 'Parked with people on',
+      text: 'Bus parked for 60 min with people still on board', types: ['stationary_with_occupants'] },
+    'Sensor integrity':       { group: 'system', icon: 'shield-check', title: 'Sensor integrity',
+      text: 'Counters are live and counting correctly. Every rule depends on it',
+      types: ['sensor_stale', 'sensor_offline', 'sensor_fault', 'sensor_suspect', 'data_quality_drift'] },
+  };
+  const GROUPS = [
+    ['camera', 'Camera detection', 'cctv', 'AI Pro Dome on board'],
+    ['system', 'System health', 'activity', 'Can the alerts be trusted'],
+    ['passenger', 'Passenger welfare', 'users', 'From the VS125 passenger counters'],
+  ];
+  const STATUS_WORD = { live: 'Watching', blocked: 'Not yet', disabled: 'Off', camera: 'Awaiting camera' };
+  const BASIS = {
+    measured: ['ok', 'Measured'], modelled: ['warn', 'Estimated'], proxy: ['info', 'Proxy'],
+    unproven: ['muted', 'Unproven'], none: ['muted', 'Not wired'],
+  };
+
+  function dayKeys(n) {
+    const out = [];
+    for (let i = n - 1; i >= 0; i -= 1) {
+      const d = new Date(Date.now() - i * 86400000);
+      out.push(d.toISOString().slice(0, 10));
+    }
+    return out;
+  }
+
+  function sparkBars(counts, cls) {
+    const max = Math.max(1, ...counts);
+    const w = 7; const gap = 3; const h = 26;
+    const bars = counts.map((c, i) => {
+      const bh = c ? Math.max(3, Math.round((c / max) * h)) : 2;
+      return `<rect x="${i * (w + gap)}" y="${h - bh}" width="${w}" height="${bh}" rx="1.5" class="${c ? 'on' : 'off'}"/>`;
+    }).join('');
+    return `<svg class="wo-spark ${cls}" viewBox="0 0 ${counts.length * (w + gap) - gap} ${h}" aria-hidden="true">${bars}</svg>`;
+  }
+
+  function ring(live, total) {
+    const r = 34; const c = 2 * Math.PI * r;
+    const f = total ? live / total : 0;
+    return `<svg class="wo-ring" viewBox="0 0 84 84" aria-hidden="true">
+      <circle cx="42" cy="42" r="${r}" class="track"/>
+      <circle cx="42" cy="42" r="${r}" class="fill" stroke-dasharray="${(c * f).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 42 42)"/>
+    </svg>`;
+  }
+
+  async function renderOverviewWelfare() {
+    const groupsEl = document.getElementById('wOverviewGroups');
+    if (!groupsEl) return;
+    let data; let events = []; let status = lastStatus; let fleet = [];
+    try {
+      const since = new Date(Date.now() - 7 * 86400000).toISOString();
+      [data, events, status, fleet] = await Promise.all([
+        api('/signals'),
+        api(`/events?from=${encodeURIComponent(since)}&limit=1000`).catch(() => []),
+        api('/status').catch(() => lastStatus),
+        api('/fleet-health').catch(() => []),
+      ]);
+    } catch {
+      setText('wOverviewSubtitle', 'Welfare data is unavailable right now');
+      return;
+    }
+    const sig = Array.isArray(data) ? data : (data.signals || []);
+    const sum = Array.isArray(data) ? {} : (data.summary || {});
+    const real = (events || []).filter((e) => e.source !== 'simulated');
+    const days = dayKeys(7);
+
+    // ---- per-type daily buckets ----
+    const byTypeDay = {};
+    const lastByType = {};
+    real.forEach((e) => {
+      const d = String(e.detected_at).slice(0, 10);
+      (byTypeDay[e.event_type] ||= {})[d] = ((byTypeDay[e.event_type] || {})[d] || 0) + 1;
+      if (!lastByType[e.event_type] || e.detected_at > lastByType[e.event_type]) lastByType[e.event_type] = e.detected_at;
+    });
+
+    // ---- hero ----
+    const live = sig.filter((x) => x.status === 'live').length;
+    const notYet = sig.filter((x) => x.status === 'blocked' || x.status === 'camera').length;
+    const off = sig.filter((x) => x.status === 'disabled').length;
+    const alertTypes = new Set(Object.values(PARAMS).flatMap((p) => p.types));
+    const welfareEvents = real.filter((e) => alertTypes.has(e.event_type));
+    const perDay = days.map((d) => welfareEvents.filter((e) => String(e.detected_at).startsWith(d)).length);
+    const today = perDay[perDay.length - 1];
+
+    const cam = status?.camera || {};
+    // Fallback for a service that predates restored_from_db: newest camera
+    // event in the 7-day list, so a redeploy never blanks a working camera.
+    const lastCamEvent = real.filter((e) => e.source === 'camera')
+      .map((e) => e.detected_at).sort().pop() || null;
+    const camLast = cam.last_seen_at || lastCamEvent;
+    const camRestored = Boolean(cam.restored_from_db || (!cam.last_seen_at && lastCamEvent));
+    const camAgeMin = camLast ? (Date.now() - Date.parse(camLast)) / 60000 : null;
+    const camTone = camAgeMin == null ? 'idle' : camAgeMin <= 30 ? 'ok' : camAgeMin <= 24 * 60 ? 'warn' : 'idle';
+    const camWord = camAgeMin == null ? 'No events on record'
+      : camAgeMin <= 30 ? 'Active' : camAgeMin <= 24 * 60 ? 'Quiet' : 'Silent';
+
+    document.getElementById('wOverviewHero').innerHTML = `
+      <div class="wo-hero-card">
+        <div class="wo-ring-wrap">${ring(live, sig.length)}
+          <div class="wo-ring-label"><strong>${live}</strong><span>of ${sig.length}</span></div>
+        </div>
+        <div class="wo-hero-body">
+          <div class="wo-hero-kicker">Coverage</div>
+          <div class="wo-hero-main">${live} signals watching</div>
+          <div class="wo-hero-pills">
+            <span class="wo-pill ok"><i></i>${live} watching</span>
+            ${notYet ? `<span class="wo-pill warn"><i></i>${notYet} not yet</span>` : ''}
+            ${off ? `<span class="wo-pill muted"><i></i>${off} off</span>` : ''}
+          </div>
+        </div>
+      </div>
+      <div class="wo-hero-card">
+        <div class="wo-hero-body grow">
+          <div class="wo-hero-kicker">Welfare events · last 7 days</div>
+          <div class="wo-hero-main"><span class="wo-big">${welfareEvents.length}</span>
+            <span class="wo-muted">${today} today</span></div>
+          <div class="wo-week">
+            ${perDay.map((n, i) => {
+    const max = Math.max(1, ...perDay);
+    const d = new Date(`${days[i]}T12:00:00Z`);
+    return `<div class="wo-week-col" title="${n} on ${d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' })}">
+                <div class="wo-week-bar ${i === perDay.length - 1 ? 'today' : ''}" style="height:${n ? Math.max(8, (n / max) * 100) : 4}%"></div>
+                <span>${d.toLocaleDateString('en-GB', { weekday: 'narrow' })}</span></div>`;
+  }).join('')}
+          </div>
+        </div>
+      </div>
+      <div class="wo-hero-card">
+        <span class="wo-cam-icon tone-${camTone}"><i data-lucide="cctv"></i></span>
+        <div class="wo-hero-body">
+          <div class="wo-hero-kicker">AI Pro Dome camera</div>
+          <div class="wo-hero-main"><span class="wo-dot tone-${camTone}"></span>${esc(camWord)}</div>
+          <div class="wo-muted">${camLast ? `Last event ${esc(timeAgo(camLast))}` : 'Waiting for its first event'}
+            · Bus ${esc(cam.default_bus || '—')}</div>
+          <div class="wo-muted">${camRestored
+    ? 'From saved events · waiting for its next one'
+    : `${Number(cam.accepted || 0)} event${Number(cam.accepted) === 1 ? '' : 's'} received since restart`}</div>
+        </div>
+      </div>`;
+
+    // ---- blockers ----
+    const blk = document.getElementById('wOverviewBlockers');
+    const blockers = sig.filter((x) => x.status !== 'live');
+    if (blk) {
+      blk.hidden = !blockers.length;
+      blk.innerHTML = `<i data-lucide="triangle-alert"></i><div><strong>${blockers.length} signal${blockers.length > 1 ? 's' : ''} not running yet:</strong> `
+        + blockers.map((x) => `${esc((PARAMS[x.signal] || {}).title || x.signal)} <span class="wo-muted">(${x.status === 'disabled' ? 'switched off' : 'waiting on a fix'})</span>`).join(', ')
+        + '. Details are on the dashed tiles below.</div>';
+    }
+
+    // ---- groups ----
+    const inService = (fleet || []).filter((h) => !h.off_shift && !h.never_reported && h.onboard != null);
+    const onboardNow = inService.reduce((n, h) => n + Number(h.onboard || 0), 0);
+
+    // The legend footer is hidden on the Console to cut clutter, so each tag
+    // carries its own meaning on hover instead.
+    const BASIS_HINT = {
+      measured: 'Measured: straight off the sensor or camera',
+      modelled: 'Estimated: modelled passenger count, treat alerts as leads',
+      proxy: 'Proxy: stands in for the real measure',
+      unproven: 'Unproven: not yet seen working on a bus',
+      none: 'Not wired yet',
+    };
+    const tile = (x) => {
+      const p = PARAMS[x.signal] || { group: 'system', icon: 'circle', title: x.signal, text: x.detail || '', types: [] };
+      const isLive = x.status === 'live';
+      const counts = days.map((d) => p.types.reduce((n, t) => n + ((byTypeDay[t] || {})[d] || 0), 0));
+      const last = p.types.map((t) => lastByType[t]).filter(Boolean).sort().pop();
+      const n = x.events == null ? null : Number(x.events);
+      const [bCls, bWord] = BASIS[x.trust] || ['muted', x.trust || ''];
+      const tone = !isLive ? 'off' : p.group;
+      return `
+        <article class="wo-tile tone-${tone}">
+          <div class="wo-tile-top">
+            <span class="wo-tile-icon"><i data-lucide="${p.icon}"></i></span>
+            <span class="wo-status ${isLive ? 'live' : x.status}"><i></i>${esc(STATUS_WORD[x.status] || x.status)}</span>
+          </div>
+          <h3 class="wo-tile-title">${esc(p.title)}</h3>
+          <p class="wo-tile-text">${esc(p.text)}</p>
+          ${!isLive ? `<div class="wo-tile-why"><i data-lucide="info"></i>${esc(x.blocked_by || x.detail || 'Switched off')}</div>` : ''}
+          <div class="wo-tile-foot">
+            <div class="wo-tile-count">
+              ${n == null ? (inService.length
+    ? `<strong>${onboardNow}</strong><span>on board now · ${inService.length} bus${inService.length > 1 ? 'es' : ''}</span>`
+    : '<span class="wo-cont">No bus in service</span>')
+    : `<strong>${n}</strong><span>${n === 1 ? 'event' : 'events'} · 7d</span>`}
+              ${last && isLive ? `<em>last ${esc(timeAgo(last))}</em>` : ''}
+            </div>
+            ${p.types.length && isLive ? sparkBars(counts, p.group) : ''}
+          </div>
+          ${bWord ? `<span class="wo-basis ${bCls}" title="${esc(BASIS_HINT[x.trust] || '')}">${esc(bWord)}</span>` : ''}
+        </article>`;
+    };
+
+    groupsEl.innerHTML = GROUPS.map(([key, name, icon, sub]) => {
+      const items = sig.filter((x) => ((PARAMS[x.signal] || {}).group || 'system') === key)
+        .sort((a, c) => (a.status === 'live' ? 0 : 1) - (c.status === 'live' ? 0 : 1));
+      if (!items.length) return '';
+      const liveN = items.filter((x) => x.status === 'live').length;
+      return `
+        <div class="wo-group g-${key}">
+          <div class="wo-group-head">
+            <i data-lucide="${icon}"></i><span class="wo-group-name">${esc(name)}</span>
+            <span class="wo-group-sub">${esc(sub)}</span>
+            <span class="wo-group-count">${liveN}/${items.length} watching</span>
+          </div>
+          <div class="wo-grid">${items.map(tile).join('')}</div>
+        </div>`;
+    }).join('');
+
+    const updated = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    setText('wOverviewSubtitle', `${live} of ${sig.length} signals watching · ${welfareEvents.length} welfare events in 7 days · updated ${updated}`);
+
+    const foot = document.getElementById('wOverviewFoot');
+    if (foot) {
+      foot.innerHTML = [
+        ['ok', 'Measured', 'straight off the sensor or camera'],
+        ['warn', 'Estimated', 'modelled passenger count, treat alerts as leads'],
+        ['info', 'Proxy', 'stands in for the real measure'],
+        ['muted', 'Unproven', 'not yet seen working on a bus'],
+      ].map(([c, w, t]) => `<span class="wo-legend-item"><span class="wo-basis ${c}">${w}</span>${t}</span>`).join('');
+    }
+    void sum;
+    icons();
   }
 
   // -------------------------------------------------------------------------
@@ -382,6 +652,12 @@
       })
       .sort((a, b) => Date.parse(b.detected_at) - Date.parse(a.detected_at));
     const urgent = open.filter((e) => e.severity >= 3);
+    // Clear all covers every alert still waiting to be seen in the queue, not
+    // only the last 24 hours the strip counts. Otherwise yesterday's cards
+    // kept an OPEN tag and an Ack button after "Clear all".
+    lastOpenIds = events.filter((e) => !e.acknowledged).map((e) => e.event_id);
+    const clearBtn = document.getElementById('wClearAllBtn');
+    if (clearBtn) clearBtn.hidden = lastOpenIds.length === 0;
 
     // The headline used to be an if/else chain, so it reported exactly one
     // thing and silently dropped the rest: a paused bus outranked open
@@ -389,6 +665,13 @@
     // now collected worst-first and the leftovers go to the sub-line, so
     // nothing can be hidden by something else being worse.
     const facts = [];
+    // A driver pressing "Need help" is the most serious thing on the page.
+    const helpCalls = realEvents.filter((e) => e.driver_response === 'help' && !e.resolved);
+    if (helpCalls.length) {
+      const buses = [...new Set(helpCalls.map((e) => e.bus_id))];
+      facts.push({ tone: 'bad', main: `Driver needs help on bus ${buses.join(', ')}`,
+        sub: `${label(helpCalls[0].event_type)}, driver asked for help ${timeAgo(helpCalls[0].driver_response_at)}.` });
+    }
     if (!health.length) {
       facts.push({ tone: 'bad', main: 'No buses are reporting', sub: 'Nothing is being watched. Tell engineering.' });
     }
@@ -477,17 +760,35 @@
     }
 
     const dot = document.getElementById('wHeadlineDot');
-    if (dot) dot.className = `welfare-headline-dot ${tone}`;
-    const strip = document.getElementById('wHeadline');
-    if (strip) strip.className = `welfare-headline ${tone}`;
-    setText('wHeadlineMain', main);
-    setText('wHeadlineSub', sub);
+    if (dot) dot.className = `welfare-pulse-dot ${tone}`;
+    const statusCard = document.getElementById('wDeckStatus');
+    if (statusCard) statusCard.className = `welfare-deck-card status-card tone-${tone}`;
+    setText('wHeadlineMain', tone === 'ok' ? 'All Clear' : (urgent.length ? 'Urgent Alert' : 'Attention Required'));
+    setText('wHeadlineSub', main);
+
+    // Update Top Deck 3 KPIs
+    const watched = inService.length - watchable.length;
+    setText('wDeckAlertsVal', open.length);
+    setText('wDeckUrgentMeta', `${urgent.length} critical · ${open.length - urgent.length} notices`);
+    setText('wDeckFleetVal', `${watched} / ${inService.length || health.length}`);
+    setText('wDeckFleetMeta', watchable.length ? `${watchable.length} bus telemetry paused` : 'All saloons connected');
 
     // ---- alert feed ----
+    // The raw feed printed one identical card per detection, so a camera test
+    // run became a wall of 30 "Possible altercation" cards. Repeats of the
+    // same thing on the same bus on the same day are now one row with a
+    // count; the Event Log still has every individual event.
     const feed = document.getElementById('wAlertFeed');
     if (feed) {
-      feed.innerHTML = events.length
-        ? events.map(eventCard).join('')
+      const shown = events.filter((e) => {
+        if (feedFilter === 'urgent') return (e.severity >= 3 || e.driver_response === 'help') && !e.resolved;
+        if (feedFilter === 'unresolved') return !e.resolved;
+        return true;
+      });
+      feed.innerHTML = shown.length
+        ? groupedFeed(shown)
+        : events.length
+        ? `<div class="welfare-empty">${feedFilter === 'urgent' ? 'No urgent alerts waiting.' : 'Nothing unresolved.'} That is what you want to see.</div>`
         : `<div class="welfare-empty">Nothing has happened in the last 7 days. That is what you want to see.${
   testCount && !showTests ? `<div class="welfare-dim" style="margin-top:8px">${testCount} test event${testCount > 1 ? 's' : ''} hidden — see Rules &amp; Testing.</div>` : ''
 }</div>`;
@@ -502,6 +803,111 @@
     }
 
     icons();
+  }
+
+  const EVENT_ICONS = {
+    fall: 'person-standing', violence: 'siren', violence_disruption: 'megaphone',
+    sound_classification: 'audio-waveform', lone_traveller: 'user', lone_traveller_late_night: 'moon', overcrowding: 'users', dwell_distress_unresponsive: 'heart-pulse',
+    end_of_service_occupancy: 'warehouse', terminus_occupancy: 'map-pin', stationary_with_occupants: 'circle-parking',
+    dwell_no_alighting: 'timer', sensor_stale: 'wifi-low', sensor_offline: 'wifi-off', sensor_recovered: 'wifi',
+    shift_ended: 'moon-star', sensor_fault: 'triangle-alert', sensor_suspect: 'scan-eye', data_quality_drift: 'activity',
+  };
+
+  function dayLabel(iso) {
+    const d = new Date(iso); const today = new Date();
+    const y = new Date(); y.setDate(today.getDate() - 1);
+    if (d.toDateString() === today.toDateString()) return 'Today';
+    if (d.toDateString() === y.toDateString()) return 'Yesterday';
+    return d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
+  }
+
+  function groupedFeed(events) {
+    const days = [];
+    const byDay = new Map();
+    for (const e of events) {        // arrives newest first
+      const day = new Date(e.detected_at).toDateString();
+      if (!byDay.has(day)) { byDay.set(day, { label: dayLabel(e.detected_at), groups: new Map() }); days.push(byDay.get(day)); }
+      const key = `${e.bus_id}|${e.event_type}|${e.source === 'simulated'}`;
+      const g = byDay.get(day).groups;
+      if (!g.has(key)) g.set(key, { first: e, items: [] });
+      g.get(key).items.push(e);
+    }
+    return days.map((d) => `
+      <div class="wc-day">${esc(d.label)}</div>
+      ${[...d.groups.values()].map(alertRow).join('')}`).join('');
+  }
+
+  function alertRow(g) {
+    const e = g.first;
+    const n = g.items.length;
+    const unseen = g.items.filter((x) => !x.acknowledged).length;
+    const unres = g.items.filter((x) => !x.resolved).length;
+    const sev = SEV[Math.max(...g.items.map((x) => x.severity))] || SEV[1];
+    const act = action(e.event_type);
+    const test = e.source === 'simulated' ? '<span class="exec-chip sim">TEST</span>' : '';
+    const ageSec = (Date.now() - Date.parse(e.detected_at)) / 1000;
+    const isSlaBreach = (e.severity >= 4 && unseen > 0 && ageSec > 300);
+    const slaBadge = isSlaBreach ? '<span class="exec-sla-badge">SLA BREACH</span>' : '';
+    // Driver's answer from the cab screen. "Needs help" outranks "OK" if a
+    // group has both, because it is the one control has to act on.
+    const help = g.items.find((x) => x.driver_response === 'help' && !x.resolved);
+    const okd = g.items.find((x) => x.driver_response === 'ok');
+    const driverBadge = help
+      ? `<span class="exec-driver-badge help">DRIVER NEEDS HELP · ${esc(fmtClock(help.driver_response_at))}</span>`
+      : okd ? `<span class="exec-driver-badge ok">DRIVER: PASSENGER OK · ${esc(fmtClock(okd.driver_response_at))}</span>` : '';
+    
+    // Status text
+    let statusBadge = '<span class="exec-status-pill open">OPEN</span>';
+    if (unres === 0) {
+      statusBadge = '<span class="exec-status-pill resolved"><i data-lucide="check-check"></i> RESOLVED</span>';
+    } else if (unseen === 0) {
+      statusBadge = '<span class="exec-status-pill acked"><i data-lucide="eye"></i> ACKNOWLEDGED</span>';
+    }
+
+    const sevTag = e.severity === 4 ? 'CRITICAL' : (e.severity === 3 ? 'ALERT' : 'NOTICE');
+
+    return `
+      <div class="exec-alert-card ${sev.cls}${unres === 0 ? ' is-resolved' : ''}${help ? ' driver-help' : ''}" data-event-id="${esc(e.event_id)}">
+        <div class="exec-alert-left">
+          <div class="exec-alert-icon-box ${sev.cls}">
+            <i data-lucide="${EVENT_ICONS[e.event_type] || 'bell'}"></i>
+          </div>
+        </div>
+        <div class="exec-alert-content">
+          <div class="exec-alert-header">
+            <div class="exec-alert-title-row">
+              <span class="exec-bus-badge">Bus ${esc(e.bus_id)}</span>
+              <span class="exec-alert-heading">${esc(label(e.event_type))}</span>
+              ${test}
+              ${n > 1 ? `<span class="exec-counter-badge">×${n}</span>` : ''}
+              ${slaBadge}
+            </div>
+            <div class="exec-alert-timing">
+              <span class="exec-time-ago">${esc(timeAgo(e.detected_at))}</span>
+              <span class="exec-time-clock">${esc(fmtClock(e.detected_at))}</span>
+            </div>
+          </div>
+          <div class="exec-alert-guidance">
+            <i data-lucide="shield-check" class="guidance-icon"></i>
+            <span>${esc(act || e.reason || 'Assess passenger condition.')}</span>
+          </div>
+          <div class="exec-alert-footer">
+            <div class="exec-alert-state-wrap">
+              <span class="exec-sev-tag ${sev.cls}">${sevTag}</span>
+              ${statusBadge}
+              ${driverBadge}
+            </div>
+            <div class="exec-card-actions">
+              ${unseen > 0 ? `<button type="button" class="exec-btn exec-btn-ack" data-ids="${esc(g.items.filter((x) => !x.acknowledged).map((x) => x.event_id).join(','))}" onclick="window.welfareAckEvent(this.dataset.ids)"><i data-lucide="check"></i> Ack${n > 1 ? ' all' : ''}</button>` : ''}
+              ${unres > 0 ? `<button type="button" class="exec-btn exec-btn-resolve" data-ids="${esc(g.items.filter((x) => !x.resolved).map((x) => x.event_id).join(','))}" onclick="window.welfareResolveEvent(this.dataset.ids)"><i data-lucide="shield"></i> Resolve${n > 1 ? ' all' : ''}</button>` : ''}
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function fmtClock(iso) {
+    try { return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); } catch { return ''; }
   }
 
   // Operator-facing. Leads with the bus and what to do; the rule name, use
@@ -562,7 +968,7 @@
       sub = `${faults.join(', ')}.`;
     } else {
       headline = 'All normal';
-      sub = 'Nothing needs attention on this bus.';
+      sub = '';
     }
 
     const seen = h.last_seen_sec_ago == null ? 'unknown'
@@ -577,19 +983,43 @@
     const rows = [['On board', onboard], ['Last update', seen]];
     if (h.lone_for_sec != null) rows.push(['Alone for', `${Math.round(h.lone_for_sec / 60)} min`]);
 
+    const cap = 16;
+    const aboardVal = typeof h.onboard === 'number' ? h.onboard : 0;
+    const pct = Math.min(100, Math.round((aboardVal / cap) * 100));
+
     return `
-      <div class="welfare-vcard ${cls}">
-        <div class="welfare-vcard-head">
-          <span class="welfare-vcard-bus">Bus ${esc(h.bus_id)}</span>
-          <span class="welfare-health-pill ${cls}">${esc(headline)}</span>
+      <div class="exec-vcard ${cls}">
+        <div class="exec-vcard-header">
+          <div class="exec-vcard-identity">
+            <div class="bus-icon-wrap"><i data-lucide="bus"></i></div>
+            <div>
+              <div class="exec-vcard-title">Bus ${esc(h.bus_id)}</div>
+              <div class="exec-vcard-route">${esc(h.route || 'Downtown Loop')}</div>
+            </div>
+          </div>
+          <span class="exec-vcard-status-tag ${cls}">${esc(headline)}</span>
         </div>
-        <div class="welfare-vcard-sub">${esc(sub)}</div>
-        <dl class="welfare-kv">
-          ${rows.map(([k, v]) => {
-      const cell = (v && typeof v === 'object' && typeof v.html === 'string') ? v.html : esc(v);
-      return `<div><dt>${esc(k)}</dt><dd>${cell}</dd></div>`;
-    }).join('')}
-        </dl>
+
+        <div class="exec-occupancy-block">
+          <div class="occupancy-labels">
+            <span class="occ-title">Saloon Occupancy</span>
+            <span class="occ-count"><strong>${aboardVal}</strong> / ${cap} pax (${pct}%)</span>
+          </div>
+          <div class="exec-progress-bar">
+            <div class="exec-progress-fill ${pct >= 100 ? 'over' : (pct >= 75 ? 'warn' : 'ok')}" style="width: ${pct}%"></div>
+          </div>
+        </div>
+
+        <div class="exec-vcard-stats-grid">
+          <div class="vcard-stat-cell">
+            <span class="stat-lbl">Telemetry Ping</span>
+            <span class="stat-val">${esc(seen)}</span>
+          </div>
+          <div class="vcard-stat-cell">
+            <span class="stat-lbl">GPS Position</span>
+            <span class="stat-val ${h.gps_valid ? 'text-ok' : 'text-faint'}">${h.gps_valid ? 'Active Fix' : 'Fallback'}</span>
+          </div>
+        </div>
       </div>`;
   }
 
@@ -1235,6 +1665,14 @@
 
   function wireControls() {
     document.getElementById('wRefreshBtn')?.addEventListener('click', refreshNow);
+    document.querySelectorAll('#wFeedFilterBar .feed-filter-btn').forEach((b) => {
+      b.addEventListener('click', () => {
+        feedFilter = b.dataset.filter || 'all';
+        document.querySelectorAll('#wFeedFilterBar .feed-filter-btn')
+          .forEach((x) => x.classList.toggle('active', x === b));
+        renderConsole();
+      });
+    });
     document.getElementById('wLogSeverity')?.addEventListener('change', renderLog);
     document.getElementById('wLogBus')?.addEventListener('change', renderLog);
 
@@ -1294,4 +1732,71 @@
   } else {
     bootstrap();
   }
+
+
+  // Global actions for inline card interaction
+  // Ack / Resolve on a card act on every event the card stands for. They
+  // used to send only the first id of a grouped card and then call a function
+  // that did not exist, so the counts and red dots never went down.
+  const toIds = (v) => (Array.isArray(v) ? v : String(v || '').split(',')).filter(Boolean);
+
+  async function bulk(action, ids, extra) {
+    const res = await fetch(`/api/welfare/events/${action}-many`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids, ...extra }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  }
+
+  window.welfareAckEvent = async function(v) {
+    const ids = toIds(v);
+    if (!ids.length) return;
+    try {
+      await bulk('ack', ids, { by: 'operator-console' });
+      await refreshNow();
+    } catch (err) {
+      alert('Could not acknowledge: ' + err.message);
+    }
+  };
+
+  window.welfareResolveEvent = async function(v) {
+    const ids = toIds(v);
+    if (!ids.length) return;
+    const notes = prompt('Resolution note:', 'Passenger assisted; incident cleared.');
+    if (!notes) return;
+    try {
+      await bulk('resolve', ids, { by: 'operator', notes });
+      await refreshNow();
+    } catch (err) {
+      alert('Could not resolve: ' + err.message);
+    }
+  };
+
+  // "Clear all": acknowledges every open alert the strip is counting. They
+  // stay in the queue and the Event Log as acknowledged; nothing is deleted.
+  window.welfareClearAll = async function() {
+    const ids = lastOpenIds.slice();
+    if (!ids.length) return;
+    if (!confirm(`Acknowledge all ${ids.length} open alert${ids.length === 1 ? '' : 's'}?\n\nThis clears the red counts and OPEN tags. The alerts stay in the Event Log.`)) return;
+    try {
+      await bulk('ack', ids, { by: 'operator-console (clear all)' });
+      await refreshNow();
+    } catch (err) {
+      alert('Could not clear alerts: ' + err.message);
+    }
+  };
+
+  // Wire diagnostics toggle button
+  document.addEventListener('DOMContentLoaded', () => {
+    const diagBtn = document.getElementById('wToggleDiagnosticBtn');
+    const diagPanel = document.getElementById('welfareOverviewPanel');
+    if (diagBtn && diagPanel) {
+      diagBtn.addEventListener('click', () => {
+        diagPanel.hidden = !diagPanel.hidden;
+        diagBtn.classList.toggle('active', !diagPanel.hidden);
+      });
+    }
+  });
 }());

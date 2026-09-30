@@ -42,6 +42,8 @@
 <!-- MQTT.js for browser WebSocket MQTT connection -->
 <script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
 
+<link rel="preconnect" href="https://api.fontshare.com">
+<link rel="stylesheet" href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@500,700,800&f[]=satoshi@400,500,700&display=swap">
 <link rel="stylesheet" href="./base.css">
 <link rel="stylesheet" href="./style.css">
 </head>
@@ -299,9 +301,10 @@
       </div>
       <div class="live-badge" id="liveBadge" style="display:none">LIVE</div>
       <div class="header-time" id="headerTime">--:--:--</div>
-      <button class="btn-icon tooltip" data-tooltip="Notifications" aria-label="Notifications">
+      <button class="btn-icon tooltip" data-tooltip="Welfare alerts" aria-label="Welfare alerts" id="headerBellBtn"
+        onclick="document.querySelector('.nav-item[data-view=&quot;welfare-console&quot;]')?.click()">
         <i data-lucide="bell"></i>
-        <span class="badge"></span>
+        <span class="badge" id="headerBellDot" hidden></span>
       </button>
       <div class="export-dropdown" id="globalExport">
         <button class="btn btn-secondary" id="exportBtn">
@@ -1015,6 +1018,11 @@
       </div>
 
       <div class="report-grid">
+        <div class="report-card" data-report="welfare-incident-audit">
+          <div class="report-icon red" style="background:rgba(212,32,44,0.15);color:#d4202c"><i data-lucide="shield-alert"></i></div>
+          <div class="report-name">Welfare & Safeguarding Audit</div>
+          <div class="report-desc">Official BGH/TfGM-ready incident audit report covering passenger falls, lone traveller alerts, overcrowding, response times, and 5-min SLA resolution tracking.</div>
+        </div>
         <div class="report-card" data-report="monthly-value-summary">
           <div class="report-icon amber"><i data-lucide="award"></i></div>
           <div class="report-name">Monthly Value Summary</div>
@@ -1065,6 +1073,7 @@
             <div class="filter-group">
               <span class="filter-label">Report Type</span>
               <select class="filter-select" id="reportType">
+                <option>Welfare & Safeguarding Audit</option>
                 <option>Monthly Value Summary</option>
                 <option>Daily Summary</option>
                 <option>Weekly Analysis</option>
@@ -1213,51 +1222,125 @@
 
     <!-- ===== WELFARE CONSOLE ===== -->
     <div class="view" id="view-welfare-console">
-      <!-- One answer to one question: does anything need attention right now. -->
-      <div class="welfare-headline" id="wHeadline">
-        <div class="welfare-headline-dot" id="wHeadlineDot"></div>
-        <div>
-          <div class="welfare-headline-main" id="wHeadlineMain">Checking…</div>
-          <div class="welfare-headline-sub" id="wHeadlineSub">&nbsp;</div>
-          <!-- Without this, "quiet because all is well" and "the pipeline is
-               dead" look identical on a screen whose event feed can legitimately
-               sit still for hours. -->
-          <div class="welfare-freshness" id="wFreshness">&nbsp;</div>
+      <!-- Executive Top Deck: Clean 3-Metric KPI & Live System Pulse -->
+      <div class="welfare-deck">
+        <div class="welfare-deck-card status-card" id="wDeckStatus">
+          <div class="welfare-deck-icon-wrap">
+            <div class="welfare-pulse-dot" id="wHeadlineDot"></div>
+            <i data-lucide="activity" class="deck-icon"></i>
+          </div>
+          <div class="welfare-deck-info">
+            <span class="deck-label">Fleet Safety Status</span>
+            <div class="deck-val" id="wHeadlineMain">Monitoring Active</div>
+            <div class="deck-meta" id="wHeadlineSub">All systems nominal</div>
+          </div>
         </div>
-        <span class="dev-tag" id="welfareModeTag">checking…</span>
+
+        <div class="welfare-deck-card" id="wDeckAlerts">
+          <div class="welfare-deck-icon-wrap alert-wrap">
+            <i data-lucide="shield-alert" class="deck-icon alert-icon"></i>
+          </div>
+          <div class="welfare-deck-info">
+            <span class="deck-label">Active Incidents</span>
+            <div class="deck-val alert-val" id="wDeckAlertsVal">0</div>
+            <div class="deck-meta" id="wDeckUrgentMeta">0 critical escalations</div>
+          </div>
+        </div>
+
+        <div class="welfare-deck-card" id="wDeckFleet">
+          <div class="welfare-deck-icon-wrap fleet-wrap">
+            <i data-lucide="bus" class="deck-icon fleet-icon"></i>
+          </div>
+          <div class="welfare-deck-info">
+            <span class="deck-label">Monitored Fleet</span>
+            <div class="deck-val fleet-val" id="wDeckFleetVal">2 / 2</div>
+            <div class="deck-meta" id="wDeckFleetMeta">100% telemetry online</div>
+          </div>
+        </div>
+
+        <div class="welfare-deck-actions">
+          <div class="deck-time" id="wFreshness">Syncing...</div>
+          <div class="deck-btns">
+            <span class="dev-tag" id="welfareModeTag">Camera Active</span>
+            <button class="btn btn-sm wc-clear-all" id="wClearAllBtn" type="button" hidden onclick="window.welfareClearAll()" title="Acknowledge every open alert">
+              <i data-lucide="check-check" style="width:13px;height:13px"></i> Clear all
+            </button>
+            <button class="btn btn-secondary btn-sm" id="wRefreshBtn" type="button" title="Refresh Live Feeds">
+              <i data-lucide="refresh-cw" style="width:13px;height:13px"></i> Refresh
+            </button>
+            <button class="btn btn-secondary btn-sm" id="wToggleDiagnosticBtn" type="button" title="Toggle Monitoring Diagnostics">
+              <i data-lucide="sliders" style="width:13px;height:13px"></i> Diagnostics
+            </button>
+          </div>
+        </div>
       </div>
 
-      <div class="chart-grid cols-2">
-        <div class="chart-panel">
-          <div class="chart-header">
-            <div>
-              <div class="chart-title">What has happened</div>
-              <div class="chart-subtitle">Newest first, updates every 15 seconds</div>
+      <!-- Main Operational Grid: Active Incidents (Left) & Live Fleet Saloons (Right) -->
+      <div class="wc-grid">
+        <section class="wc-panel" aria-labelledby="wFeedTitle">
+          <header class="wc-panel-head">
+            <div class="panel-head-left">
+              <i data-lucide="bell-ring" class="head-icon"></i>
+              <div>
+                <h2 class="wc-panel-title" id="wFeedTitle">Live Incident Queue</h2>
+                <div class="wc-panel-sub">Real-time alerts with one-click resolution</div>
+              </div>
             </div>
-            <div class="chart-actions">
-              <button class="btn btn-sm" id="wRefreshBtn">
-                <i data-lucide="refresh-cw"></i> Refresh
-              </button>
+            <div class="feed-filters" id="wFeedFilterBar">
+              <button class="feed-filter-btn active" data-filter="all">All</button>
+              <button class="feed-filter-btn" data-filter="urgent">Urgent</button>
+              <button class="feed-filter-btn" data-filter="unresolved">Unresolved</button>
             </div>
+          </header>
+          <div class="wc-feed" id="wAlertFeed">
+            <div class="welfare-empty">Scanning for telemetry events...</div>
           </div>
-          <div class="chart-body welfare-feed" id="wAlertFeed">
-            <div class="welfare-empty">Waiting for events.</div>
-          </div>
-        </div>
+        </section>
 
-        <div class="chart-panel">
-          <div class="chart-header">
-            <div>
-              <div class="chart-title">Buses right now</div>
-              <div class="chart-subtitle">One line per vehicle</div>
+        <section class="wc-panel" aria-labelledby="wBusTitle">
+          <header class="wc-panel-head">
+            <div class="panel-head-left">
+              <i data-lucide="layout-grid" class="head-icon"></i>
+              <div>
+                <h2 class="wc-panel-title" id="wBusTitle">Fleet Saloon Status</h2>
+                <div class="wc-panel-sub">Real-time onboard loads & sensor pings</div>
+              </div>
             </div>
+            <a href="driver.html?bus=515" target="_blank" class="cab-link" title="Open Driver Alert Display">
+              <i data-lucide="external-link" style="width:13px;height:13px"></i> Driver View
+            </a>
+          </header>
+          <div class="wc-buses" id="wVehicleCards">
+            <div class="welfare-empty">Loading fleet telemetry...</div>
           </div>
-          <div class="chart-body welfare-feed" id="wVehicleCards">
-            <div class="welfare-empty">No vehicles reporting.</div>
-          </div>
-        </div>
+        </section>
       </div>
 
+      <!-- Collapsible Technical Diagnostics Drawer (Hidden by default, toggled via Diagnostics button) -->
+      <section class="welfare-overview" id="welfareOverviewPanel" hidden aria-labelledby="wOverviewTitle">
+        <header class="wo-head">
+          <div class="wo-head-left">
+            <span class="wo-head-icon"><i data-lucide="cpu"></i></span>
+            <div>
+              <h2 class="wo-title" id="wOverviewTitle">Telemetry &amp; Sensor Architecture</h2>
+              <div class="wo-subtitle" id="wOverviewSubtitle">Edge Sensor Health &amp; AI Dome Diagnostics</div>
+            </div>
+          </div>
+          <button class="wo-link" id="wOverviewDetails" type="button">
+            Full Signal Matrix <i data-lucide="arrow-right"></i>
+          </button>
+        </header>
+
+        <div class="wo-hero" id="wOverviewHero">
+          <div class="wo-hero-card wo-skeleton"></div>
+          <div class="wo-hero-card wo-skeleton"></div>
+          <div class="wo-hero-card wo-skeleton"></div>
+        </div>
+
+        <div class="wo-blockers" id="wOverviewBlockers" hidden></div>
+        <div class="wo-groups" id="wOverviewGroups"></div>
+        <footer class="wo-legend" id="wOverviewFoot"></footer>
+      </section>
     </div>
 
     <!-- ===== SIGNAL DELIVERY ===== -->
