@@ -85,6 +85,9 @@
   // Event ids behind the open-alert count, kept so "Clear all" acts on
   // exactly what the strip is showing.
   let lastOpenIds = [];
+  // Queue filter: 'all' | 'urgent' | 'unresolved'. Set by the chips above
+  // the Live Incident Queue.
+  let feedFilter = 'all';
 
   // -------------------------------------------------------------------------
   // Helpers
@@ -649,9 +652,12 @@
       })
       .sort((a, b) => Date.parse(b.detected_at) - Date.parse(a.detected_at));
     const urgent = open.filter((e) => e.severity >= 3);
-    lastOpenIds = open.map((e) => e.event_id);
+    // Clear all covers every alert still waiting to be seen in the queue, not
+    // only the last 24 hours the strip counts. Otherwise yesterday's cards
+    // kept an OPEN tag and an Ack button after "Clear all".
+    lastOpenIds = events.filter((e) => !e.acknowledged).map((e) => e.event_id);
     const clearBtn = document.getElementById('wClearAllBtn');
-    if (clearBtn) clearBtn.hidden = open.length === 0;
+    if (clearBtn) clearBtn.hidden = lastOpenIds.length === 0;
 
     // The headline used to be an if/else chain, so it reported exactly one
     // thing and silently dropped the rest: a paused bus outranked open
@@ -767,8 +773,15 @@
     // count; the Event Log still has every individual event.
     const feed = document.getElementById('wAlertFeed');
     if (feed) {
-      feed.innerHTML = events.length
-        ? groupedFeed(events)
+      const shown = events.filter((e) => {
+        if (feedFilter === 'urgent') return e.severity >= 3 && !e.resolved;
+        if (feedFilter === 'unresolved') return !e.resolved;
+        return true;
+      });
+      feed.innerHTML = shown.length
+        ? groupedFeed(shown)
+        : events.length
+        ? `<div class="welfare-empty">${feedFilter === 'urgent' ? 'No urgent alerts waiting.' : 'Nothing unresolved.'} That is what you want to see.</div>`
         : `<div class="welfare-empty">Nothing has happened in the last 7 days. That is what you want to see.${
   testCount && !showTests ? `<div class="welfare-dim" style="margin-top:8px">${testCount} test event${testCount > 1 ? 's' : ''} hidden — see Rules &amp; Testing.</div>` : ''
 }</div>`;
@@ -1637,6 +1650,14 @@
 
   function wireControls() {
     document.getElementById('wRefreshBtn')?.addEventListener('click', refreshNow);
+    document.querySelectorAll('#wFeedFilterBar .feed-filter-btn').forEach((b) => {
+      b.addEventListener('click', () => {
+        feedFilter = b.dataset.filter || 'all';
+        document.querySelectorAll('#wFeedFilterBar .feed-filter-btn')
+          .forEach((x) => x.classList.toggle('active', x === b));
+        renderConsole();
+      });
+    });
     document.getElementById('wLogSeverity')?.addEventListener('change', renderLog);
     document.getElementById('wLogBus')?.addEventListener('change', renderLog);
 
@@ -1743,7 +1764,7 @@
   window.welfareClearAll = async function() {
     const ids = lastOpenIds.slice();
     if (!ids.length) return;
-    if (!confirm(`Acknowledge all ${ids.length} open alert${ids.length === 1 ? '' : 's'}?\n\nThis clears the red counts. The alerts stay in the Event Log.`)) return;
+    if (!confirm(`Acknowledge all ${ids.length} open alert${ids.length === 1 ? '' : 's'}?\n\nThis clears the red counts and OPEN tags. The alerts stay in the Event Log.`)) return;
     try {
       await bulk('ack', ids, { by: 'operator-console (clear all)' });
       await refreshNow();
