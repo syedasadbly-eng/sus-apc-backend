@@ -19,7 +19,9 @@
     3. Only alerts a driver can act on. Sensor health, count drift and a
        sound on its own go to the control-room console, never the cab.
     4. Nothing requires a touch while moving. Alerts clear themselves after
-       ALERT_WINDOW_MIN; the "Seen" button is for when the bus is stopped.
+       ALERT_WINDOW_MIN; the answer buttons are for when the bus is stopped.
+       "Checked, passenger OK" closes the alert on this screen and tells
+       control. "Need help" keeps it open and flags it red in the console.
     5. Never show "All clear" when we cannot see. Lost connection and paused
        monitoring have their own grey state.
     6. No external scripts or fonts: cab connectivity is patchy, so this file
@@ -104,6 +106,24 @@
   .seen:active { transform: translateY(4px); box-shadow: 0 2px 0 rgba(0,0,0,0.35); }
   .state-warn .seen { background: #111; color: var(--warn); }
   .seen[hidden] { display: none; }
+  /* Driver answer buttons: two big targets, readable at arm's length. */
+  .answers { display: flex; gap: clamp(10px, 2vw, 24px); }
+  .answers[hidden] { display: none; }
+  .answer {
+    min-height: clamp(64px, 13vh, 120px); min-width: clamp(170px, 24vw, 340px);
+    border: 4px solid #fff; border-radius: 18px; cursor: pointer; padding: 0 18px;
+    font: inherit; font-size: clamp(20px, 4.2vh, 40px); font-weight: 900; letter-spacing: 0.02em; line-height: 1.05;
+    box-shadow: 0 6px 0 rgba(0,0,0,0.35);
+  }
+  .answer:active { transform: translateY(4px); box-shadow: 0 2px 0 rgba(0,0,0,0.35); }
+  .answer:disabled { opacity: 0.6; }
+  .answer.ok   { background: var(--ok); color: #fff; }
+  .answer.help { background: #fff; color: var(--bad); }
+  .state-warn .answer { border-color: #111; }
+  .state-warn .answer.help { background: #111; color: var(--warn); }
+  .help-sent { display: inline-block; background: #fff; color: var(--bad); font-weight: 900;
+               padding: 4px 14px; border-radius: 8px; letter-spacing: 0.04em; }
+  .state-warn .help-sent { background: #111; color: var(--warn); }
   .brand { opacity: 0.55; font-size: 0.85em; }
 
   /* ---- start overlay (browsers need one tap before audio / fullscreen / wake lock) ---- */
@@ -150,7 +170,10 @@
 
   <footer class="bottom">
     <span class="more" id="more"><span class="brand">Smart Urban Sensing</span></span>
-    <button class="seen" id="seenBtn" type="button" hidden>SEEN</button>
+    <div class="answers" id="answers" hidden>
+      <button class="answer ok" id="okBtn" type="button">CHECKED,<br>PASSENGER OK</button>
+      <button class="answer help" id="helpBtn" type="button">NEED<br>HELP</button>
+    </div>
   </footer>
 </main>
 
@@ -201,6 +224,7 @@
   let lastAlertId = null;
   let current = null;
   let busHealth = null;
+  let lastActive = [];
 
   // ---------------- data ----------------
   async function get(path) {
@@ -224,6 +248,7 @@
         .filter((e) => Date.now() - Date.parse(e.detected_at) <= WINDOW_MIN * 60000)
         .sort((a, b) => (RANK[DRIVER[b.event_type].tone] - RANK[DRIVER[a.event_type].tone])
                         || (Date.parse(b.detected_at) - Date.parse(a.detected_at)));
+      lastActive = active;
       render(active);
     } catch {
       render(null);
@@ -249,8 +274,17 @@
       const mins = Math.max(0, Math.round((Date.now() - Date.parse(e.detected_at)) / 60000));
       $('meta').innerHTML = (e.source === 'simulated' ? '<span class="test-tag">TEST</span>' : '')
         + (mins < 1 ? 'Just now' : `${mins} min ago`);
-      $('more').textContent = active.length > 1 ? `+${active.length - 1} more alert${active.length > 2 ? 's' : ''}` : '';
-      $('seenBtn').hidden = false;
+      const same = active.filter((x) => x.event_type === e.event_type);
+      const others = active.length - same.length;
+      $('more').textContent = others > 0 ? `+${others} more alert${others > 1 ? 's' : ''}` : '';
+      const helpSent = same.some((x) => x.driver_response === 'help');
+      if (helpSent) {
+        $('headline').textContent = 'Help requested';
+        $('action').textContent = 'Control has been told. Stay safe. Tap OK once it is sorted.';
+        $('meta').innerHTML = '<span class="help-sent">CONTROL NOTIFIED</span> ' + $('meta').innerHTML;
+      }
+      $('helpBtn').hidden = helpSent;
+      $('answers').hidden = false;
       if (e.event_id !== lastAlertId) {
         lastAlertId = e.event_id;
         if (!shownIds.has(e.event_id)) {
@@ -263,7 +297,7 @@
     }
 
     current = null; lastAlertId = null;
-    $('seenBtn').hidden = true;
+    $('answers').hidden = true;
     $('more').innerHTML = '<span class="brand">Smart Urban Sensing</span>';
     $('meta').innerHTML = '&nbsp;';
 
@@ -290,17 +324,20 @@
     $('action').textContent = 'Welfare monitoring is on.';
   }
 
-  async function acknowledge() {
+  // The camera sends bursts ("Possible fall" x7 in a minute). One answer
+  // covers every open alert of the same kind on this bus, so the driver is
+  // not asked the same question seven times.
+  async function answer(response) {
     if (!current) return;
-    const id = current.event_id;
-    $('seenBtn').disabled = true;
+    const ids = lastActive.filter((x) => x.event_type === current.event_type).map((x) => x.event_id);
+    ['okBtn', 'helpBtn'].forEach((b) => { $(b).disabled = true; });
     try {
-      await fetch(`${API}/events/${encodeURIComponent(id)}/ack`, {
+      await fetch(`${API}/events/driver-response`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ by: `driver:${BUS}` }),
+        body: JSON.stringify({ ids, response, bus: BUS }),
       });
     } catch { /* next poll will show it again; better than hiding it */ }
-    $('seenBtn').disabled = false;
+    ['okBtn', 'helpBtn'].forEach((b) => { $(b).disabled = false; });
     poll();
   }
 
@@ -353,7 +390,8 @@
 
   if (!BUS) { $('busInput').hidden = false; $('startMsg').textContent = 'Enter the bus number, then tap start.'; }
   $('startBtn').addEventListener('click', start);
-  $('seenBtn').addEventListener('click', acknowledge);
+  $('okBtn').addEventListener('click', () => answer('ok'));
+  $('helpBtn').addEventListener('click', () => answer('help'));
   $('muteBtn').addEventListener('click', () => {
     soundOn = !soundOn; store.set('sus-driver-sound', soundOn ? '1' : '0'); paintMute();
   });

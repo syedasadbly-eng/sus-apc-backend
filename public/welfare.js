@@ -665,6 +665,13 @@
     // now collected worst-first and the leftovers go to the sub-line, so
     // nothing can be hidden by something else being worse.
     const facts = [];
+    // A driver pressing "Need help" is the most serious thing on the page.
+    const helpCalls = realEvents.filter((e) => e.driver_response === 'help' && !e.resolved);
+    if (helpCalls.length) {
+      const buses = [...new Set(helpCalls.map((e) => e.bus_id))];
+      facts.push({ tone: 'bad', main: `Driver needs help on bus ${buses.join(', ')}`,
+        sub: `${label(helpCalls[0].event_type)}, driver asked for help ${timeAgo(helpCalls[0].driver_response_at)}.` });
+    }
     if (!health.length) {
       facts.push({ tone: 'bad', main: 'No buses are reporting', sub: 'Nothing is being watched. Tell engineering.' });
     }
@@ -774,7 +781,7 @@
     const feed = document.getElementById('wAlertFeed');
     if (feed) {
       const shown = events.filter((e) => {
-        if (feedFilter === 'urgent') return e.severity >= 3 && !e.resolved;
+        if (feedFilter === 'urgent') return (e.severity >= 3 || e.driver_response === 'help') && !e.resolved;
         if (feedFilter === 'unresolved') return !e.resolved;
         return true;
       });
@@ -841,6 +848,13 @@
     const ageSec = (Date.now() - Date.parse(e.detected_at)) / 1000;
     const isSlaBreach = (e.severity >= 4 && unseen > 0 && ageSec > 300);
     const slaBadge = isSlaBreach ? '<span class="exec-sla-badge">SLA BREACH</span>' : '';
+    // Driver's answer from the cab screen. "Needs help" outranks "OK" if a
+    // group has both, because it is the one control has to act on.
+    const help = g.items.find((x) => x.driver_response === 'help' && !x.resolved);
+    const okd = g.items.find((x) => x.driver_response === 'ok');
+    const driverBadge = help
+      ? `<span class="exec-driver-badge help">DRIVER NEEDS HELP · ${esc(fmtClock(help.driver_response_at))}</span>`
+      : okd ? `<span class="exec-driver-badge ok">DRIVER: PASSENGER OK · ${esc(fmtClock(okd.driver_response_at))}</span>` : '';
     
     // Status text
     let statusBadge = '<span class="exec-status-pill open">OPEN</span>';
@@ -853,7 +867,7 @@
     const sevTag = e.severity === 4 ? 'CRITICAL' : (e.severity === 3 ? 'ALERT' : 'NOTICE');
 
     return `
-      <div class="exec-alert-card ${sev.cls}${unres === 0 ? ' is-resolved' : ''}" data-event-id="${esc(e.event_id)}">
+      <div class="exec-alert-card ${sev.cls}${unres === 0 ? ' is-resolved' : ''}${help ? ' driver-help' : ''}" data-event-id="${esc(e.event_id)}">
         <div class="exec-alert-left">
           <div class="exec-alert-icon-box ${sev.cls}">
             <i data-lucide="${EVENT_ICONS[e.event_type] || 'bell'}"></i>
@@ -881,6 +895,7 @@
             <div class="exec-alert-state-wrap">
               <span class="exec-sev-tag ${sev.cls}">${sevTag}</span>
               ${statusBadge}
+              ${driverBadge}
             </div>
             <div class="exec-card-actions">
               ${unseen > 0 ? `<button type="button" class="exec-btn exec-btn-ack" data-ids="${esc(g.items.filter((x) => !x.acknowledged).map((x) => x.event_id).join(','))}" onclick="window.welfareAckEvent(this.dataset.ids)"><i data-lucide="check"></i> Ack${n > 1 ? ' all' : ''}</button>` : ''}
