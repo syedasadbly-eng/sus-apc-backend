@@ -2161,6 +2161,8 @@ async function loadRidershipData() {
     renderRidershipChartsFromLive(viewMode, fromDate, now);
   }
 
+  // Ridership vs Weather panel (public/weather.js) — same window and bus filter.
+  if (window.SUSWeather) window.SUSWeather.loadRidership(from, to, busId);
 }
 
 /** Yearly view: shows Jan-Dec totals for one selected calendar year. KPIs
@@ -2234,6 +2236,9 @@ async function loadYearlyRidershipData(busId) {
     months.forEach((m, i) => { m.days_count = seenByMonth[i].size; });
     renderRidershipChartsYearly(months, year);
   }
+
+  // Ridership vs Weather panel (public/weather.js) for the whole year.
+  if (window.SUSWeather) window.SUSWeather.loadRidership(from, to, busId);
 }
 
 /** Render the Ridership Trend + Boardings vs Alightings charts for the Yearly

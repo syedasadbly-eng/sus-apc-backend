@@ -367,6 +367,9 @@
         </div>
       </div>
 
+      <!-- Outside weather (Open-Meteo) — filled by weather.js -->
+      <div class="weather-strip" id="weatherStripOverview" hidden aria-live="polite"></div>
+
       <!-- Hourly Passenger Flow (moved above the GPS map) -->
       <div class="chart-grid">
         <div class="chart-panel">
@@ -730,6 +733,22 @@
           </div>
           <div class="chart-body chart-body-companion">
             <canvas id="chartDayOfWeek" class="chart-companion-canvas"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Ridership vs Weather — filled by weather.js from /api/weather/ridership -->
+      <div class="chart-grid" style="margin-top:var(--space-5)" id="ridershipWeatherSection">
+        <div class="chart-panel ridership-companion">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Ridership vs Weather</div>
+              <div class="chart-subtitle" id="ridershipWeatherSubtitle">Daily boardings against outside temperature and rain/snow &middot; Rochester, MN</div>
+            </div>
+          </div>
+          <div class="wx-compare" id="ridershipWeatherSummary"></div>
+          <div class="chart-body chart-body-companion">
+            <canvas id="chartRidershipWeather" class="chart-companion-canvas"></canvas>
           </div>
         </div>
       </div>
@@ -1275,6 +1294,9 @@
         </div>
       </div>
 
+      <!-- Outside weather (Open-Meteo) — filled by weather.js -->
+      <div class="weather-strip" id="weatherStripWelfare" hidden aria-live="polite"></div>
+
       <!-- Main Operational Grid: Active Incidents (Left) & Live Fleet Saloons (Right) -->
       <div class="wc-grid">
         <section class="wc-panel" aria-labelledby="wFeedTitle">
@@ -1612,6 +1634,7 @@
   </main>
 </div>
 
+<script src="./weather.js"></script>
 <script src="./app.js"></script>
 <script src="./welfare.js"></script>
 

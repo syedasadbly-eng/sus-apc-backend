@@ -15,6 +15,9 @@ const mqtt = require('mqtt');
 const welfare = require('./welfare');
 // Per-door count logging. Inert unless FEATURE_WELFARE=true.
 const doorlog = require('./welfare/doorlog');
+// Outside weather (Open-Meteo). Additive: one new table, /api/weather/* routes.
+// Set FEATURE_WEATHER=false to switch off.
+const weather = require('./weather');
 
 // ============================================
 // CONFIGURATION
@@ -1179,6 +1182,17 @@ app.use(express.json());
 // Welfare development interface — mounts /api/welfare and creates the
 // welfare_events table. Returns null and does nothing when the flag is off.
 welfare.initWelfare(app, db, { topicMode: MQTT_CONFIG.topic, capacity: BUS_CAPACITY });
+
+// Outside weather for the service area — /api/weather/current, /hourly,
+// /daily and /ridership. Wrapped so a weather fault can never stop the server.
+try {
+  weather.initWeather(app, db, {
+    lat: DEPOT_FALLBACK.lat, lng: DEPOT_FALLBACK.lng, label: 'Rochester, MN (Mayo Clinic)',
+    timezone: DISPLAY_TZ, displayDateStr,
+  });
+} catch (err) {
+  console.error('[WEATHER] init failed:', err.message);
+}
 
 // Serve static dashboard files from public/ folder
 app.use(express.static(path.join(__dirname, 'public')));
