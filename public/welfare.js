@@ -239,9 +239,9 @@
   // show when it fired, not just how often.
   const PARAMS = {
     'Distress':               { group: 'camera', icon: 'person-standing', title: 'Passenger falls',
-      text: 'AI Dome camera detects someone falling', types: ['fall'] },
+      text: 'AI Pro Dome sensor detects someone falling', types: ['fall'] },
     'Aggression':             { group: 'camera', icon: 'siren', title: 'Violence',
-      text: 'AI Dome camera detects violent behaviour', types: ['violence'] },
+      text: 'AI Pro Dome sensor detects violent behaviour', types: ['violence'] },
     'Violence & Disruption':  { group: 'camera', icon: 'audio-lines', title: 'Violence + loud sound',
       text: 'Violence and a sound alert within 90 s: the strongest signal', types: ['violence_disruption'] },
     'Occupancy':              { group: 'passenger', icon: 'users', title: 'Occupancy',
@@ -382,7 +382,7 @@
       <div class="wo-hero-card">
         <span class="wo-cam-icon tone-${camTone}"><i data-lucide="cctv"></i></span>
         <div class="wo-hero-body">
-          <div class="wo-hero-kicker">AI Pro Dome camera</div>
+          <div class="wo-hero-kicker">AI Pro Dome sensor</div>
           <div class="wo-hero-main"><span class="wo-dot tone-${camTone}"></span>${esc(camWord)}</div>
           <div class="wo-muted">${camLast ? `Last event ${esc(timeAgo(camLast))}` : 'Waiting for its first event'}
             · Bus ${esc(cam.default_bus || '—')}</div>
