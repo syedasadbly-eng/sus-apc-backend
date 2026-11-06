@@ -622,3 +622,17 @@ sus-backend-deploy/
 ## License
 
 Proprietary — Smart Urban Sensing Ltd.
+
+## Outside weather (Open-Meteo)
+
+Weather strip on the Dashboard and Welfare Console, plus a "Ridership vs Weather" panel on the Ridership page. Code: `weather/index.js` (server) and `public/weather.js` (browser). Additive: one new table, `weather_hourly`, keyed to match `hourly_summary` (DISPLAY_TZ date + UTC hour).
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `FEATURE_WEATHER` | on | `false` switches weather off completely |
+| `WEATHER_LAT` / `WEATHER_LNG` / `WEATHER_LABEL` | Mayo Clinic downtown | Service-area point |
+| `WEATHER_POLL_MIN` | 15 | Current-conditions refresh (minutes) |
+| `WEATHER_BACKFILL_DAYS` | 366 | History filled back to the first passenger day, capped |
+| `WEATHER_API_KEY` | — | Open-Meteo commercial key (free API is non-commercial) |
+
+Routes: `/api/weather/current`, `/api/weather/hourly?date=`, `/api/weather/daily?from&to`, `/api/weather/ridership?from&to&bus_id`.
