@@ -636,3 +636,11 @@ Weather strip on the Dashboard and Welfare Console, plus a "Ridership vs Weather
 | `WEATHER_API_KEY` | — | Open-Meteo commercial key (free API is non-commercial) |
 
 Routes: `/api/weather/current`, `/api/weather/hourly?date=`, `/api/weather/daily?from&to`, `/api/weather/ridership?from&to&bus_id`.
+
+## Demo mode
+
+A separate demo service can run the same dashboard on generated sample data
+(balanced ~99% boardings/alightings, 400 days of history, live-moving buses and
+scripted welfare incidents such as falls, loud noise and altercations). It never
+connects to the live MQTT feed. Set `DEMO_MODE=true` with its own `DB_PATH`
+volume — full setup in [demo/DEMO.md](demo/DEMO.md).

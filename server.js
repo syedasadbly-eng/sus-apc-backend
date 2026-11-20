@@ -10,6 +10,10 @@ const fs = require('fs');
 const Database = require('better-sqlite3');
 const mqtt = require('mqtt');
 
+// Demo mode — inert unless DEMO_MODE=true. Required FIRST: when enabled it
+// switches MQTT off and sets welfare defaults before those modules read env.
+const demo = require('./demo');
+
 // Welfare development module — inert unless FEATURE_WELFARE=true.
 // Additive only: one new table, no change to any existing query path.
 const welfare = require('./welfare');
@@ -1070,6 +1074,10 @@ function connectMqtt() {
   // Dev safety valve. Defaults to enabled, so production behaviour is unchanged.
   // Set MQTT_ENABLED=false when running a local or branch instance so it does not
   // subscribe to the live Mayo feed and write a second copy of the data.
+  if (demo.ENABLED) {
+    console.log('[MQTT] Demo mode — live broker connection disabled');
+    return;
+  }
   if (process.env.MQTT_ENABLED === 'false') {
     console.log('[MQTT] Disabled via MQTT_ENABLED=false — no broker connection');
     return;
@@ -1193,6 +1201,24 @@ try {
 } catch (err) {
   console.error('[WEATHER] init failed:', err.message);
 }
+
+// Demo-mode flag for the browser. Loaded by index.html before app.js so the
+// dashboard knows not to open its own connection to the live MQTT broker.
+// Always served: on a normal service it just says { enabled: false }.
+app.get('/demo-config.js', (req, res) => {
+  res.type('application/javascript').set('Cache-Control', 'no-store');
+  res.send(`window.SUS_DEMO = ${JSON.stringify(demo.clientConfig())};`);
+});
+app.get('/api/demo/status', (req, res) => res.json(demo.clientConfig()));
+// Demo only: raise an incident on demand during a live presentation.
+//   POST /api/demo/incident?type=fall&bus=515   (optional &token= if DEMO_ADMIN_TOKEN is set)
+app.post('/api/demo/incident', (req, res) => {
+  if (!demo.isActive()) return res.status(404).json({ error: 'Demo mode is not enabled on this service' });
+  const token = process.env.DEMO_ADMIN_TOKEN;
+  if (token && (req.query.token || req.get('x-demo-token')) !== token) return res.status(401).json({ error: 'Bad token' });
+  const out = demo.triggerIncident((req.body && req.body.type) || req.query.type, (req.body && req.body.bus) || req.query.bus);
+  res.status(out.error ? 400 : 200).json(out);
+});
 
 // Serve static dashboard files from public/ folder
 app.use(express.static(path.join(__dirname, 'public')));
@@ -1790,6 +1816,25 @@ app.post('/api/reset-counter/:busId', (req, res) => {
   res.json({ success: true, busId, onboard: 0, resetAt: new Date().toISOString() });
 });
 
+// Demo-mode depot reset. Same effect as /api/reset-counter, but the marker row
+// carries the cleared tally in evt_out so the startup onboard recompute (which
+// replays evt_in/evt_out) also lands on 0. Counts nothing: boardings and
+// alightings stay 0 and stop '-' is excluded from every stop query.
+function demoResetOnboard(busId) {
+  const prev = busRunningOnboard[busId] || 0;
+  busRunningOnboard[busId] = 0;
+  if (liveDevices[busId]) { liveDevices[busId].onboard = 0; liveDevices[busId].lastReset = new Date().toISOString(); }
+  const now = new Date();
+  const isoTs = now.toISOString();
+  upsertBusState.run({ bus_id: busId, running_onboard: 0, updated_at: isoTs });
+  insertRecord.run({
+    timestamp: isoTs, date: displayDateStr(now), hour: now.getUTCHours(), bus_id: busId,
+    route: busId, stop: '-', boardings: 0, alightings: 0, evt_in: 0, evt_out: prev + 2,
+    onboard: 0, occupancy: 0, lat: 0, lng: 0, speed: 0, msg_type: 'RESET', stop_source: 'none', stop_dist_m: 0,
+  });
+  console.log(`[DEMO] Depot reset for ${busId} (cleared ${prev})`);
+}
+
 // POST /api/admin/backfill-history-locations — re-snap stale Minneapolis-era
 // rows to their scheduled route position based on timestamp. Idempotent.
 app.post('/api/admin/backfill-history-locations', (req, res) => {
@@ -2060,6 +2105,19 @@ app.listen(PORT, () => {
   console.log(`[SERVER] API Health: http://localhost:${PORT}/api/health`);
   console.log('[SERVER] Delta-based counting with multi-door merge enabled');
 
+  // Demo mode: write any missing sample history BEFORE the repairs below,
+  // which rebuild hourly/daily summaries and the onboard tally from records.
+  if (demo.ENABLED) {
+    try {
+      if (demo.init({
+        db, handleMessage, displayDateStr, displayTz: DISPLAY_TZ, capacity: BUS_CAPACITY,
+        stopRegistry: STOP_REGISTRY, resetOnboard: demoResetOnboard, welfare,
+      })) demo.catchUp();
+    } catch (err) {
+      console.error('[DEMO] init failed:', err.message);
+    }
+  }
+
   // NOTE: Previously this block deleted ALL records (including the current day)
   // on every server start — a one-time migration hack for the delta-counting
   // change. It was wiping counts on every redeploy/restart, so it has been
@@ -2244,6 +2302,7 @@ app.listen(PORT, () => {
 
   connectMqtt();
   scheduleMidnightReset();
+  if (demo.isActive()) demo.start();
 });
 
 // Graceful shutdown

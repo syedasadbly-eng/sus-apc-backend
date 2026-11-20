@@ -104,6 +104,43 @@ let configStore = {
   },
 };
 
+// ============================================
+// DEMO MODE (window.SUS_DEMO from /demo-config.js)
+// ============================================
+// On a demo service the server generates sample data itself and the browser
+// must never open its own connection to the live broker. Blank the broker
+// settings so even the Settings > Connect button cannot reach it.
+const DEMO = (typeof window !== 'undefined' && window.SUS_DEMO && window.SUS_DEMO.enabled) ? window.SUS_DEMO : null;
+if (DEMO) {
+  configStore.mqtt = { host: '', port: 0, username: '', password: '', useTls: true, path: '/mqtt', topic: 'bus/#' };
+}
+
+function startDemoFeed() {
+  // Present as connected: the server-side simulator is the feed.
+  mqttState.connected = true;
+  isLiveMode = true;
+  updateConnectionUI('connected');
+  const label = document.getElementById('connLabel');
+  if (label && DEMO.badge) label.textContent = 'Demo feed';
+  if (DEMO.badge && !document.getElementById('demoBadge')) {
+    const live = document.getElementById('liveBadge');
+    if (live && live.parentNode) {
+      const chip = document.createElement('div');
+      chip.id = 'demoBadge';
+      chip.className = 'demo-badge';
+      chip.title = 'This dashboard is showing generated sample data, not a live client feed';
+      chip.textContent = 'DEMO DATA';
+      live.parentNode.insertBefore(chip, live.nextSibling);
+    }
+  }
+  const poll = () => {
+    seedBusPositionsFromAPI().then(() => { try { updateLiveKPIs(); } catch (e) { /* view not ready */ } });
+  };
+  poll();
+  setInterval(poll, 5000);
+  setInterval(() => seedKPIsFromAPI(), 15000);
+}
+
 let mqttState = {
   client: null,
   connected: false,
@@ -974,6 +1011,14 @@ function initLoginGate() {
   const dashboard = document.getElementById('dashboard');
   if (!loginForm) return;
 
+  // Demo services can be opened without the password (DEMO_OPEN_ACCESS=true).
+  if (DEMO && DEMO.openAccess) {
+    loginScreen.classList.add('hidden');
+    dashboard.style.display = '';
+    initDashboard();
+    return;
+  }
+
   loginForm.addEventListener('submit', (e) => {
     e.preventDefault();
     const pwd = document.getElementById('loginPassword').value;
@@ -1139,6 +1184,11 @@ function initDashboard() {
   // Refresh server-resolved bus positions (scheduled-stop fallback) so the
   // map advances buses along their routes even without MQTT.
   setInterval(() => seedBusPositionsFromAPI(), 20000);
+
+  if (DEMO) {
+    startDemoFeed();
+    return;
+  }
 
   // Auto-connect to MQTT broker if credentials are pre-configured
   if (configStore.mqtt.host) {
