@@ -344,30 +344,35 @@
     <div class="view active dashboard-premium" id="view-overview">
       <div class="kpi-grid">
         <div class="kpi-card blue">
-          <div class="kpi-label">Total Passengers Today</div>
+          <span class="kpi-icon" aria-hidden="true"><i data-lucide="users"></i></span>
+          <div class="kpi-label">Passengers Today</div>
           <div class="kpi-value" id="kpi-total-passengers">—</div>
           <div class="kpi-delta" id="kpi-total-delta"></div>
           <div class="kpi-sub">live via MQTT</div>
         </div>
         <div class="kpi-card green">
+          <span class="kpi-icon" aria-hidden="true"><i data-lucide="bus"></i></span>
           <div class="kpi-label">Active Buses</div>
           <div class="kpi-value" id="kpi-active-buses">—</div>
           <div class="kpi-delta" id="kpi-buses-delta"></div>
           <div class="kpi-sub" id="kpi-fleet-sub">Waiting for MQTT data</div>
         </div>
         <div class="kpi-card amber">
+          <span class="kpi-icon" aria-hidden="true"><i data-lucide="gauge"></i></span>
           <div class="kpi-label">Avg Occupancy</div>
           <div class="kpi-value" id="kpi-avg-occupancy">—</div>
           <div class="kpi-delta" id="kpi-occ-delta"></div>
           <div class="kpi-sub">target: 65%</div>
         </div>
         <div class="kpi-card cyan">
+          <span class="kpi-icon" aria-hidden="true"><i data-lucide="user-check"></i></span>
           <div class="kpi-label">Current Onboard</div>
           <div class="kpi-value" id="kpi-onboard">—</div>
           <div class="kpi-delta" id="kpi-onboard-delta"></div>
           <div class="kpi-sub" id="kpi-onboard-sub">live occupancy</div>
         </div>
         <div class="kpi-card pink">
+          <span class="kpi-icon" aria-hidden="true"><i data-lucide="log-out"></i></span>
           <div class="kpi-label">Alightings Today</div>
           <div class="kpi-value" id="kpi-alightings">—</div>
           <div class="kpi-delta"></div>

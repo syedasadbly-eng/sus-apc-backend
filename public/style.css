@@ -4074,3 +4074,14 @@ html.demo-nolabel-map .leaflet-control-attribution a, .leaflet-control-attributi
 .occ-ring { height: 170px; width: 170px; }
 .occ-body { grid-template-columns: 170px 1fr; gap: 24px; }
 .dashboard-premium .occ-ring-pct { font-size: 40px !important; }
+
+/* Dashboard headline boxes: icon badge + wider 5-up layout */
+#view-overview .kpi-icon {
+  position: absolute; top: 54px; right: 18px; width: 44px; height: 44px; border-radius: 12px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,0.08); color: #fff;
+}
+#view-overview .kpi-icon svg { width: 21px; height: 21px; stroke-width: 2.2; }
+#view-overview .kpi-card .kpi-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#view-overview .kpi-card .kpi-value { padding-right: 56px; }
+@media (min-width: 1280px) { #view-overview .kpi-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
