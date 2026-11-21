@@ -162,7 +162,7 @@ if (DEMO_WHITE_LABEL) {
 // removed, so no town, street or building names appear on the map. Free for
 // commercial use, no key; attribution "© OpenMapTiles © OpenStreetMap".
 // Live dashboard keeps its existing raster tiles.
-const DEMO_MAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/positron';   // clean white base map
+const DEMO_MAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';   // detailed street map, Google-style colours (free, no key)
 let _demoMapLibs = null;
 function loadDemoMapLibs() {
   if (_demoMapLibs) return _demoMapLibs;
@@ -175,6 +175,27 @@ function loadDemoMapLibs() {
     .then((style) => {
       // Hide street/area names only while the demo sits on the pilot client's city.
       if (DEMO_WHITE_LABEL && !(DEMO && DEMO.mapLabels)) style.layers = style.layers.filter((l) => l.type !== 'symbol');
+      // Google-like look: drop small POI icons, transit icons (they clash with
+      // our bus stops) and 3D buildings; soften land, water and parks.
+      const DROP = new Set(['poi_r20', 'poi_r7', 'poi_transit', 'building-3d']);
+      style.layers = style.layers.filter((l) => !DROP.has(l.id));
+      const paint = (id, prop, val) => { const l = style.layers.find((x) => x.id === id); if (l) { l.paint = l.paint || {}; l.paint[prop] = val; } };
+      paint('background', 'background-color', '#f5f3ef');
+      paint('water', 'fill-color', '#aadaff');
+      paint('park', 'fill-color', '#c8e6c9');
+      paint('landcover_grass', 'fill-color', '#d4ecd0');
+      paint('landcover_wood', 'fill-color', '#c3e2bf');
+      paint('landuse_residential', 'fill-color', '#efece6');
+      paint('building', 'fill-color', '#e8e4dd');
+      // Google-style roads: white streets with soft grey edges, gold motorways,
+      // so the coloured bus routes stand out clearly on top.
+      style.layers.forEach((l) => {
+        if (l.type !== 'line' || !/^(road|bridge|tunnel)_/.test(l.id)) return;
+        l.paint = l.paint || {};
+        if (/rail|path|pedestrian|arrow|area/.test(l.id)) return;
+        if (/motorway/.test(l.id)) l.paint['line-color'] = /casing/.test(l.id) ? '#e3b84f' : '#fbd977';
+        else l.paint['line-color'] = /casing/.test(l.id) ? '#d6d0c6' : '#ffffff';
+      });
       return style;
     });
   return _demoMapLibs;
