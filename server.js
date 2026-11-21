@@ -1634,13 +1634,16 @@ app.get('/api/records', (req, res) => {
 // --- Hourly data (for charts) ---
 
 app.get('/api/hourly', (req, res) => {
-  const { date, bus_id } = req.query;
+  const { date, from, to, bus_id } = req.query;
   let sql = 'SELECT * FROM hourly_summary WHERE 1=1';
   const params = {};
 
   if (date) {
     sql += ' AND date = @date';
     params.date = date;
+  } else if (from && to) {
+    sql += ' AND date BETWEEN @from AND @to';
+    params.from = from; params.to = to;
   }
   if (bus_id) {
     sql += ' AND bus_id = @bus_id';

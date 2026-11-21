@@ -702,20 +702,65 @@
       <!-- HERO: Ridership Trend, full-width -->
       <div class="chart-grid">
         <div class="chart-panel chart-panel-feature ridership-hero">
-          <div class="chart-header">
+          <div class="chart-header rid-hero-head">
             <div>
               <div class="chart-title chart-title-lg" id="ridershipTrendTitle">Ridership Trend</div>
               <div class="chart-subtitle" id="ridershipTrendSubtitle">Boardings over time</div>
             </div>
+            <div class="rid-legend" id="ridTrendLegend"></div>
           </div>
+          <div class="rid-chips" id="ridTrendChips"></div>
           <div class="chart-body chart-body-feature">
             <canvas id="chartRidershipTrend" class="chart-feature-canvas"></canvas>
           </div>
         </div>
       </div>
 
-      <!-- Second row: two large companion charts -->
+      <!-- Busiest times: day x hour -->
+      <div class="chart-grid" style="margin-top:var(--space-5)">
+        <div class="chart-panel ridership-companion">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Busiest Times</div>
+              <div class="chart-subtitle" id="ridHeatSubtitle">Average boardings by day and hour</div>
+            </div>
+            <div class="rid-heat-scale"><span>Quiet</span><span class="rid-heat-grad"></span><span>Busy</span></div>
+          </div>
+          <div class="chart-body" style="height:330px">
+            <canvas id="chartRidHeat"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Route share + day of week -->
       <div class="chart-grid cols-2 ridership-row-2" style="margin-top:var(--space-5)">
+        <div class="chart-panel ridership-companion">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Route Share</div>
+              <div class="chart-subtitle" id="ridShareSubtitle">Boardings by route &middot; change vs previous period</div>
+            </div>
+          </div>
+          <div class="chart-body rid-share-body">
+            <div class="rid-share-chart"><canvas id="chartRouteShare"></canvas><div class="rid-share-centre" id="ridShareCentre"></div></div>
+            <div class="rid-share-list" id="ridShareList"></div>
+          </div>
+        </div>
+        <div class="chart-panel ridership-companion">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Ridership by Day of Week</div>
+              <div class="chart-subtitle" id="ridDowSubtitle">Average boardings per day</div>
+            </div>
+          </div>
+          <div class="chart-body chart-body-companion">
+            <canvas id="chartDayOfWeek" class="chart-companion-canvas"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Boardings vs Alightings -->
+      <div class="chart-grid" style="margin-top:var(--space-5)">
         <div class="chart-panel ridership-companion">
           <div class="chart-header">
             <div>
@@ -723,19 +768,8 @@
               <div class="chart-subtitle" id="boardAlightSubtitle">Daily balance across the selected period</div>
             </div>
           </div>
-          <div class="chart-body chart-body-companion">
-            <canvas id="chartBoardAlightRidership" class="chart-companion-canvas"></canvas>
-          </div>
-        </div>
-        <div class="chart-panel ridership-companion">
-          <div class="chart-header">
-            <div>
-              <div class="chart-title">Ridership by Day of Week</div>
-              <div class="chart-subtitle">Average boardings per day</div>
-            </div>
-          </div>
-          <div class="chart-body chart-body-companion">
-            <canvas id="chartDayOfWeek" class="chart-companion-canvas"></canvas>
+          <div class="chart-body" style="height:280px">
+            <canvas id="chartBoardAlightRidership"></canvas>
           </div>
         </div>
       </div>
