@@ -27,6 +27,7 @@
    Environment:
      FEATURE_WEATHER        'false' to disable (default on)
      WEATHER_LAT/WEATHER_LNG/WEATHER_LABEL  service-area point (default: caller)
+     WEATHER_UNITS          'metric' shows °C and mm first (UK); default 'imperial' (°F first)
      WEATHER_POLL_MIN       current-conditions refresh, minutes (default 15)
      WEATHER_BACKFILL_DAYS  max history to fill on start, days (default 366)
      WEATHER_API_KEY        Open-Meteo commercial key (optional)
@@ -199,9 +200,28 @@ function initWeather(app, db, opts) {
     lat: Number(process.env.WEATHER_LAT) || opts.lat,
     lng: Number(process.env.WEATHER_LNG) || opts.lng,
     label: process.env.WEATHER_LABEL || opts.label,
+    units: String(process.env.WEATHER_UNITS || opts.units || 'imperial').toLowerCase() === 'metric' ? 'metric' : 'imperial',
   };
   const displayDateStr = opts.displayDateStr;
   const store = createStore(db);
+
+  // If the service-area point moved, the stored history is for the old place:
+  // clear it so the backfill refills it for the new location.
+  try {
+    db.exec('CREATE TABLE IF NOT EXISTS weather_meta (key TEXT PRIMARY KEY, value TEXT)');
+    const here = loc.lat.toFixed(3) + ',' + loc.lng.toFixed(3);
+    // No saved location yet: the history (if any) was collected at the
+    // default point, so a configured WEATHER_LAT/LNG elsewhere means "moved".
+    const saved = db.prepare("SELECT value FROM weather_meta WHERE key = 'location'").get();
+    const prev = saved || { value: Number(opts.lat).toFixed(3) + ',' + Number(opts.lng).toFixed(3) };
+    if (prev.value !== here) {
+      const n = db.prepare('DELETE FROM weather_hourly').run().changes;
+      console.log(`[WEATHER] Location changed (${prev.value} -> ${here}); cleared ${n} stored hours`);
+    }
+    db.prepare("INSERT INTO weather_meta (key, value) VALUES ('location', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(here);
+  } catch (err) {
+    console.warn('[WEATHER] location check failed:', err.message);
+  }
   const writeMany = db.transaction((rows) => { for (const r of rows) store.upsert.run(r); });
 
   let current = null;       // last good current-conditions payload
