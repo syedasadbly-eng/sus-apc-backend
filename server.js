@@ -1261,6 +1261,20 @@ app.get('/api/live', (req, res) => {
       routeName = resolved.routeName || null;
       nextStopName = resolved.nextStopName || null;
     }
+    // Demo: current / next stop come from the simulator's timetable.
+    let tripState = null;
+    if (demo.isActive()) {
+      const st = demo.busStatus(busId);
+      if (st) {
+        tripState = st.state;
+        nextStopName = st.nextStop || null;
+        gpsLabel = st.state === 'en_route' ? ('En route from ' + st.stop)
+          : st.state === 'layover' ? ('Layover at ' + st.stop)
+          : st.state === 'off_service' ? ('Off service at ' + st.stop)
+          : st.stop;
+      }
+      if (!routeName && BUS_ROUTE_LOOKUP[busId]) routeName = BUS_ROUTE_LOOKUP[busId].routeName;
+    }
     return {
       busId,
       lineIn: dev.totalIn,       lastEventIn: dev.lastEventIn || 0,       lastEventOut: dev.lastEventOut || 0,
@@ -1275,6 +1289,7 @@ app.get('/api/live', (req, res) => {
       stopId,
       routeName,
       nextStopName,
+      tripState,
       speed: dev.speed || 0,
       status: ageSeconds < 300 ? 'active' : 'idle',
       sensorStatus: ageSeconds < 300 ? 'Online' : ageSeconds < 600 ? 'Degraded' : 'Offline',

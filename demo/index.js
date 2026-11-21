@@ -31,6 +31,7 @@
 'use strict';
 
 const ENABLED = process.env.DEMO_MODE === 'true';
+const DEMO_CITY = String(process.env.DEMO_CITY || '').toLowerCase();
 
 // Applied at require time, BEFORE welfare/engine.js reads its config. server.js
 // requires this module first for exactly that reason.
@@ -619,6 +620,28 @@ function positionAt(busId, plan, now) {
   return { lat: a.lat + (b.lat - a.lat) * f + jitter, lng: a.lng + (b.lng - a.lng) * f - jitter, speed, inService: true };
 }
 
+// Where a bus is on its timetable right now, for map popups and labels:
+// { state: 'at_stop' | 'en_route' | 'layover' | 'off_service', stop, nextStop, routeName }
+function busStatus(busId, now = Date.now()) {
+  if (!active || !ctx || !STOPS[busId]) return null;
+  const clean = (n) => String(n || '').replace(/\s*\((return|rtn)\)\s*$/i, '').trim();
+  const plan = planDay(busId, ctx.displayDateStr(), ctx.capacity);
+  const vs = plan.visits;
+  const first = STOPS[busId][0];
+  if (!vs.length || now < vs[0].ts - 5 * 60000 || now > plan.resetTs) {
+    return { state: 'off_service', stop: clean(first && first.name), nextStop: vs.length && now < vs[0].ts ? clean(vs[0].name) : null };
+  }
+  let i = 0;
+  while (i < vs.length - 1 && vs[i + 1].ts <= now) i++;
+  const a = vs[i], b = vs[Math.min(i + 1, vs.length - 1)];
+  if (now < a.ts) return { state: 'at_stop', stop: clean(a.name), nextStop: clean(b.name) };
+  const same = Math.abs(a.lat - b.lat) < 0.0003 && Math.abs(a.lng - b.lng) < 0.0003;
+  if (a === b) return { state: 'at_stop', stop: clean(a.name), nextStop: null };
+  if (same) return { state: 'layover', stop: clean(a.name), nextStop: clean((vs[i + 2] || b).name) };
+  if (now <= a.ts + 45000) return { state: 'at_stop', stop: clean(a.name), nextStop: clean(b.name) };
+  return { state: 'en_route', stop: clean(a.name), nextStop: clean(b.name) };
+}
+
 // Point at fraction f (0..1) of the way along a [[lat,lng],...] path, by distance.
 function pointAlong(path, f) {
   const d = (p, q) => Math.hypot((q[0] - p[0]) * 111320, (q[1] - p[1]) * 111320 * Math.cos(p[0] * Math.PI / 180));
@@ -775,7 +798,9 @@ function whiteLabelMiddleware(req, res, next) {
 function clientConfig() {
   // `enabled` follows the env flag, not whether the simulator started: if the
   // demo refused to run, the browser must still stay off the live broker.
-  return { enabled: ENABLED, running: active, badge: CFG.badge, openAccess: CFG.openAccess, whiteLabel: ENABLED && CFG.whiteLabel };
+  // mapLabels: keep street/area names on the map when the demo runs in its own
+  // city (DEMO_CITY), since they no longer point at the pilot client.
+  return { enabled: ENABLED, running: active, badge: CFG.badge, openAccess: CFG.openAccess, whiteLabel: ENABLED && CFG.whiteLabel, mapLabels: ENABLED && (!CFG.whiteLabel || !!DEMO_CITY) };
 }
 
 module.exports = {
@@ -786,6 +811,7 @@ module.exports = {
   start,
   clientConfig,
   triggerIncident,
+  busStatus,
   scrubText,
   scrubDeep,
   whiteLabelMiddleware,
