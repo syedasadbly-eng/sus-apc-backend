@@ -1749,7 +1749,7 @@ app.get('/api/ridership/yearly', (req, res) => {
 // --- Summary (aggregated stats for a period) ---
 
 app.get('/api/summary', (req, res) => {
-  const { period = 'today', to: toOverride } = req.query;
+  const { period = 'today', to: toOverride, bus_id: busId } = req.query;
   const now = new Date();
   let fromDate;
 
@@ -1789,20 +1789,20 @@ app.get('/api/summary', (req, res) => {
       COUNT(DISTINCT bus_id) as bus_count,
       COUNT(DISTINCT date) as days_count,
       COALESCE(AVG(avg_occupancy), 0) as avg_occupancy
-    FROM daily_summary WHERE date >= @from AND date <= @to
-  `).get({ from: fromDate, to: toDate });
+    FROM daily_summary WHERE date >= @from AND date <= @to${busId ? ' AND bus_id = @bus' : ''}
+  `).get({ from: fromDate, to: toDate, bus: busId || null });
 
   const peakHour = db.prepare(`
     SELECT hour, SUM(boardings) as total
-    FROM hourly_summary WHERE date >= @from AND date <= @to
+    FROM hourly_summary WHERE date >= @from AND date <= @to${busId ? ' AND bus_id = @bus' : ''}
     GROUP BY hour ORDER BY total DESC LIMIT 1
-  `).get({ from: fromDate, to: toDate });
+  `).get({ from: fromDate, to: toDate, bus: busId || null });
 
   const dailyBreakdown = db.prepare(`
     SELECT date, SUM(total_in) as boardings, SUM(total_out) as alightings, AVG(avg_occupancy) as avg_occ
-    FROM daily_summary WHERE date >= @from AND date <= @to
+    FROM daily_summary WHERE date >= @from AND date <= @to${busId ? ' AND bus_id = @bus' : ''}
     GROUP BY date ORDER BY date
-  `).all({ from: fromDate, to: toDate });
+  `).all({ from: fromDate, to: toDate, bus: busId || null });
 
   res.json({
     period: { from: fromDate, to: toDate },

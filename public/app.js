@@ -2935,7 +2935,10 @@ function renderRidershipHero(allRows, viewMode, fromDate, now, windowDays) {
   let best = null, worst = null;
   full.forEach((dt) => { const v = byDate[dt] || 0; if (!best || v > best.v) best = { dt, v }; if (v > 0 && (!worst || v < worst.v)) worst = { dt, v }; });
   const chips = [];
-  chips.push(`<div class="rid-chip"><div class="rid-chip-lbl">Average per day</div><div class="rid-chip-val">${curAvg.toLocaleString()} ${ridDelta(ridPct(curAvg, prevAvg))}</div><div class="rid-chip-sub">vs ${prevAvg.toLocaleString()} previous ${windowDays} days</div></div>`);
+  // Only compare when the previous period was (almost) fully counted.
+  const prevCovered = prevFull.filter((dt) => (byDate[dt] || 0) > 0).length;
+  const prevOk = prevFull.length > 0 && prevCovered >= prevFull.length * 0.8;
+  chips.push(`<div class="rid-chip"><div class="rid-chip-lbl">Average per day</div><div class="rid-chip-val">${curAvg.toLocaleString()} ${prevOk ? ridDelta(ridPct(curAvg, prevAvg)) : ''}</div><div class="rid-chip-sub">${prevOk ? `vs ${prevAvg.toLocaleString()} previous ${windowDays} days` : 'no full previous period to compare'}</div></div>`);
   if (best && best.v > 0) chips.push(`<div class="rid-chip"><div class="rid-chip-lbl">Busiest day</div><div class="rid-chip-val">${best.v.toLocaleString()}</div><div class="rid-chip-sub">${ridFmtDate(best.dt)}</div></div>`);
   if (worst) chips.push(`<div class="rid-chip"><div class="rid-chip-lbl">Quietest day</div><div class="rid-chip-val">${worst.v.toLocaleString()}</div><div class="rid-chip-sub">${ridFmtDate(worst.dt)}</div></div>`);
   if (partialIdx >= 0) chips.push(`<div class="rid-chip rid-chip-live"><div class="rid-chip-lbl"><span class="rid-live-dot"></span>Today so far</div><div class="rid-chip-val">${(byDate[to] || 0).toLocaleString()}</div><div class="rid-chip-sub">day in progress</div></div>`);
@@ -3038,6 +3041,9 @@ function renderRouteShare(allRows, from, to, windowDays, noPrev) {
     if (r.date >= from && r.date <= to) cur[b] = (cur[b] || 0) + (r.total_in || 0);
     else if (r.date >= prevFrom && r.date <= prevTo) prev[b] = (prev[b] || 0) + (r.total_in || 0);
   });
+  // Skip the "vs previous" arrows when the previous period wasn't (almost) fully counted.
+  const prevDays = new Set(allRows.filter((r) => r.date >= prevFrom && r.date <= prevTo && (r.total_in || 0) > 0).map((r) => r.date)).size;
+  if (prevDays < windowDays * 0.8) noPrev = true;
   const buses = Object.keys(cur).sort((a, b) => cur[b] - cur[a]);
   const total = buses.reduce((a, b) => a + cur[b], 0);
   ch.data.labels = buses.map((b) => 'Bus ' + b);
@@ -3064,13 +3070,18 @@ function renderRouteShare(allRows, from, to, windowDays, noPrev) {
 function ridSetAvgKpi(dailyRows, from, to) {
   const today = displayDateStr();
   const end = to >= today ? (() => { const d = new Date(today + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - 1); return d.toISOString().slice(0, 10); })() : to;
+  // Start counting from the first day that has data, so a period that begins
+  // before counting started (e.g. a new install) isn't averaged over empty days.
+  const firstData = (dailyRows || []).filter((r) => r.date >= from && (r.total_in || 0) > 0).reduce((m, r) => (m && m < r.date ? m : r.date), null);
+  // Only shift when counting clearly began later (over a week in), not for a quiet first day.
+  const start = firstData && firstData > from && (new Date(firstData) - new Date(from)) > 7 * 86400000 ? firstData : from;
   let days = 0;
-  for (const d = new Date(from + 'T12:00:00Z'); d.toISOString().slice(0, 10) <= end; d.setUTCDate(d.getUTCDate() + 1)) days++;
+  for (const d = new Date(start + 'T12:00:00Z'); d.toISOString().slice(0, 10) <= end; d.setUTCDate(d.getUTCDate() + 1)) days++;
   const sum = (dailyRows || []).filter((r) => r.date >= from && r.date <= end).reduce((a, r) => a + (r.total_in || 0), 0);
   const avg = days ? Math.round(sum / days) : 0;
   setKPI('ridership-kpi-avg', avg.toLocaleString());
   const sub = document.getElementById('ridership-kpi-avg-sub');
-  if (sub) sub.textContent = days ? 'over ' + days + ' finished day' + (days === 1 ? '' : 's') + (end !== to ? ' (today excluded)' : '') : 'no finished days yet';
+  if (sub) sub.textContent = days ? 'over ' + days + ' finished day' + (days === 1 ? '' : 's') + (start !== from ? ' since counting began' : '') + (end !== to ? ' (today excluded)' : '') : 'no finished days yet';
 }
 
 function ridHighlightBusiestDay(dowAvg) {
@@ -3159,7 +3170,7 @@ async function loadRidershipData() {
   const windowDays = Math.max(1, Math.round((now - fromDate) / 86400000) + 1);
 
   // Fetch summary KPIs from API; fall back to live MQTT data
-  const summary = await apiFetch('/api/summary', { period: from });
+  const summary = await apiFetch('/api/summary', { period: from, bus_id: busId && busId !== 'all' ? busId : null });
   if (summary && summary.totals) {
     const t = summary.totals;
     setKPI('ridership-kpi-total', t.total_boardings > 0 ? t.total_boardings.toLocaleString() : '0');
@@ -3171,7 +3182,7 @@ async function loadRidershipData() {
     if (ph && ph.total > 0) {
       setKPI('ridership-kpi-peak', `${String(utcHourToDisplayHour(ph.hour)).padStart(2,'0')}:00`);
       const peakSub = document.getElementById('ridership-kpi-peak-sub');
-      if (peakSub) peakSub.textContent = `${ph.total} boardings at peak`;
+      if (peakSub) peakSub.textContent = `${ph.total.toLocaleString()} boardings at peak`;
     } else {
       setKPI('ridership-kpi-peak', '\u2014');
     }
@@ -3229,7 +3240,7 @@ async function loadYearlyRidershipData(busId) {
   const windowDays = Math.max(1, Math.round((new Date(to + 'T00:00:00Z') - new Date(from + 'T00:00:00Z')) / 86400000) + 1);
 
   // --- KPIs ---
-  const summary = await apiFetch('/api/summary', { period: from, to });
+  const summary = await apiFetch('/api/summary', { period: from, to, bus_id: busId && busId !== 'all' ? busId : null });
   if (summary && summary.totals) {
     const t = summary.totals;
     setKPI('ridership-kpi-total', t.total_boardings > 0 ? t.total_boardings.toLocaleString() : '0');
