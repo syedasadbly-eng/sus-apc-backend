@@ -80,6 +80,8 @@ const CFG = {
   missIn: Number(process.env.DEMO_MISS_BOARD || 0),
   // Mean minutes between welfare incidents during service.
   welfareEveryMin: Number(process.env.DEMO_WELFARE_EVERY_MIN || 30),
+  // Minutes a bus waits at its terminus between loops.
+  layoverMin: Number(process.env.DEMO_LAYOVER_MIN || 3),
   tickMs: 5000,
   gpsEveryMs: 20000,
   badge: process.env.DEMO_BADGE !== 'false',
@@ -259,8 +261,19 @@ function planDay(busId, dateStr, capacity) {
   let onboard = 0;   // true passengers aboard
   let tally = 0;     // what the server's clamped running tally will read
   const nVisits = Math.floor((endMin - startMin) / stepMin);
+  // Leg timings within one loop. The hop from the last stop back to the first
+  // is a terminus layover (same place), so keep it short and give the time to
+  // the driving legs; the number of visits per day is unchanged.
+  const loop = LOOP_MIN[busId];
+  const n = stops.length;
+  const near = (p, q) => p && q && Math.abs(p.lat - q.lat) < 0.0003 && Math.abs(p.lng - q.lng) < 0.0003;
+  const layoverLeg = n > 2 && near(stops[n - 1], stops[0]);
+  const layMin = layoverLeg ? Math.min(CFG.layoverMin, stepMin) : stepMin;
+  const legMin = layoverLeg ? (loop - layMin) / (n - 1) : stepMin;
+  const offset = [];
+  for (let k = 0, t = 0; k < n; k++) { offset.push(t); t += legMin; }
   for (let i = 0; i <= nVisits; i++) {
-    const minute = startMin + i * stepMin + (rng() - 0.5) * 1.5;
+    const minute = startMin + Math.floor(i / n) * loop + offset[i % n] + (rng() - 0.5) * 1.5;
     const ts = localToUtcMs(dateStr, minute);
     const stopIdx = i % stops.length;
     const spec = bus.stops[stopIdx] || { weight: 1, role: 'mid' };
