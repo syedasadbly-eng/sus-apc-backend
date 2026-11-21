@@ -3855,3 +3855,15 @@ html.demo-nolabel-map .leaflet-control-attribution a { color: #8b93a7; }
 .rs-stop-head { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-4); }
 .rs-stop-name { font-size: 1.25rem; font-weight: 700; color: var(--color-text); }
 .rs-back { border: 1px solid var(--color-border, rgba(255,255,255,0.12)); }
+
+/* Map name labels (demo road routes): stop names and bus destinations */
+.leaflet-tooltip.stop-name-label {
+  background: rgba(15,17,23,0.82); color: #e6e7ef; border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 6px; padding: 2px 7px; font: 600 11px/1.3 Inter, system-ui, sans-serif; box-shadow: none; white-space: nowrap;
+}
+.leaflet-tooltip.stop-name-label::before { display: none; }
+.leaflet-tooltip.bus-dest-label {
+  background: #3b82f6; color: #fff; border: 0; border-radius: 10px; padding: 2px 8px;
+  font: 600 11px/1.3 Inter, system-ui, sans-serif; box-shadow: 0 2px 6px rgba(0,0,0,0.35); white-space: nowrap;
+}
+.leaflet-tooltip.bus-dest-label::before { border-top-color: #3b82f6; }

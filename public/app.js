@@ -172,7 +172,11 @@ function loadDemoMapLibs() {
   _demoMapLibs = addJs('https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js')
     .then(() => addJs('https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.0.22/leaflet-maplibre-gl.js'))
     .then(() => fetch(DEMO_MAP_STYLE_URL).then((r) => r.json()))
-    .then((style) => { style.layers = style.layers.filter((l) => l.type !== 'symbol'); return style; });
+    .then((style) => {
+      // Hide street/area names only while the demo sits on the pilot client's city.
+      if (!(DEMO && DEMO.mapLabels)) style.layers = style.layers.filter((l) => l.type !== 'symbol');
+      return style;
+    });
   return _demoMapLibs;
 }
 function addBaseLayer(map, url, opts) {
@@ -912,10 +916,26 @@ async function renderStopsOnMap(map, mapKey) {
         iconSize: isTerminal ? [14, 14] : [10, 10],
         iconAnchor: isTerminal ? [7, 7] : [5, 5],
       });
+      const isReturn = /\((return|rtn)\)\s*$/i.test(s.name || '');
+      const showName = line.roads && !isReturn; // demo: name every stop on the map
       const m = L.marker([s.lat, s.lng], { icon: dotIcon }).addTo(map)
-        .bindTooltip(`<strong>${s.name}</strong><br><span style="opacity:0.7">Route ${routeKey}</span>`, { direction: 'top', offset: [0, -6] });
+        .bindTooltip(showName
+          ? `<strong>${escapeHtml(s.name)}</strong> <span style="opacity:0.7">· ${routeKey}</span>`
+          : `<strong>${s.name}</strong><br><span style="opacity:0.7">Route ${routeKey}</span>`,
+          showName ? { permanent: true, direction: 'right', offset: [8, 0], className: 'stop-name-label' } : { direction: 'top', offset: [0, -6] });
       stopMarkers[mapKey].push(m);
     });
+  }
+  // Demo road routes: frame both whole routes once, so every stop is in view.
+  if (DEMO && !mapAutoFitted[mapKey + ':routes']) {
+    const lines = stopMarkers[mapKey].filter((l) => l instanceof L.Polyline);
+    if (lines.length) {
+      const b = lines[0].getBounds();
+      lines.forEach((l) => b.extend(l.getBounds()));
+      mapAutoFitted[mapKey + ':routes'] = true;
+      mapAutoFitted[mapKey] = true; // the bus auto-fit must not zoom back in
+      setTimeout(() => { try { map.invalidateSize(); map.fitBounds(b, { padding: [40, 40], maxZoom: 15 }); } catch (e) { /* noop */ } }, 150);
+    }
   }
 }
 
@@ -1054,12 +1074,24 @@ function updateMapBusMarkers(map, mapKey) {
           </div>
         </div>
       `);
+    if (DEMO && bus.nextStopName && mapKey === 'liveMap') {
+      const dest = String(bus.nextStopName).replace(/\s*\((return|rtn)\)\s*$/i, '');
+      marker.bindTooltip(`&rarr; ${escapeHtml(dest)}`, { permanent: true, direction: 'top', offset: [0, -18], className: 'bus-dest-label' });
+    }
     mapMarkers[mapKey].push(marker);
   });
 
   // Auto-centre on the live bus the first time we have a real position.
   if (!mapAutoFitted[mapKey] && plotted.length > 0) {
     const bounds = L.latLngBounds(plotted.map(b => [b.lat, b.lng]));
+    // Demo road routes: frame the whole routes so every stop is in view.
+    const lines = (stopMarkers[mapKey] || []).filter((l) => l instanceof L.Polyline);
+    if (DEMO && lines.length) {
+      lines.forEach((l) => bounds.extend(l.getBounds()));
+      map.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
+      mapAutoFitted[mapKey] = true;
+      return;
+    }
     if (plotted.length === 1) {
       map.setView([plotted[0].lat, plotted[0].lng], 14);
     } else {
@@ -2057,7 +2089,13 @@ function initLiveMap() {
   setTimeout(() => map.invalidateSize(), 100);
   document.getElementById('centerMapBtn').addEventListener('click', () => {
     const active = BUS_POSITIONS.filter(b => b.lat !== 0 && b.lng !== 0);
-    if (active.length > 0) { map.fitBounds(L.latLngBounds(active.map(b => [b.lat, b.lng])), { padding: [50, 50] }); return; }
+    const lines = DEMO ? (stopMarkers.liveMap || []).filter((l) => l instanceof L.Polyline) : [];
+    if (active.length > 0 || lines.length) {
+      const b = active.length ? L.latLngBounds(active.map(x => [x.lat, x.lng])) : lines[0].getBounds();
+      lines.forEach((l) => b.extend(l.getBounds()));
+      map.fitBounds(b, { padding: [50, 50], maxZoom: 15 });
+      return;
+    }
     map.setView(MAP_DEFAULT_CENTER, 12);
   });
 }
@@ -3364,8 +3402,14 @@ function renderRouteMap() {
       const g = byKey[key] || { boardings: 0, alightings: 0 };
       const r = 6 + Math.sqrt((g.boardings || 0) / routeMax) * 18;
       const marker = L.circleMarker([st.lat, st.lng], { radius: r, color: col.hex, weight: 2, fillColor: col.hex, fillOpacity: 0.55 });
-      marker.bindTooltip('<b>' + escapeHtml(rsStopLabel(st.name)) + '</b><br>Route ' + escapeHtml(rk)
-        + '<br>On ' + (g.boardings || 0).toLocaleString() + ' \u00b7 Off ' + (g.alightings || 0).toLocaleString(), { direction: 'top' });
+      if (line.roads) {
+        // Demo: name always visible next to the circle.
+        marker.bindTooltip(escapeHtml(rsStopLabel(st.name)) + ' <span style="opacity:0.7">\u00b7 ' + (g.boardings || 0).toLocaleString() + ' on</span>',
+          { permanent: true, direction: 'right', offset: [r, 0], className: 'stop-name-label' });
+      } else {
+        marker.bindTooltip('<b>' + escapeHtml(rsStopLabel(st.name)) + '</b><br>Route ' + escapeHtml(rk)
+          + '<br>On ' + (g.boardings || 0).toLocaleString() + ' \u00b7 Off ' + (g.alightings || 0).toLocaleString(), { direction: 'top' });
+      }
       marker.on('click', () => rsSelectStop(key));
       marker.addTo(ROUTE_MAP_LAYER);
       allLatLngs.push([st.lat, st.lng]);
