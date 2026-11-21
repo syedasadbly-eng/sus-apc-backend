@@ -110,6 +110,8 @@ let configStore = {
 // On a demo service the server generates sample data itself and the browser
 // must never open its own connection to the live broker. Blank the broker
 // settings so even the Settings > Connect button cannot reach it.
+// Dashboard clock time zone follows the server's DISPLAY_TZ (default US Central).
+const APP_TZ = (typeof window !== 'undefined' && window.SUS_DEMO && window.SUS_DEMO.tz) || 'America/Chicago';
 const DEMO = (typeof window !== 'undefined' && window.SUS_DEMO && window.SUS_DEMO.enabled) ? window.SUS_DEMO : null;
 if (DEMO) {
   configStore.mqtt = { host: '', port: 0, username: '', password: '', useTls: true, path: '/mqtt', topic: 'bus/#' };
@@ -143,6 +145,12 @@ function demoScrubTree(root) {
   els.forEach((el) => ['title', 'placeholder', 'alt', 'aria-label'].forEach((a) => {
     const v = el.getAttribute(a); if (v && /mayo/i.test(v)) el.setAttribute(a, demoScrub(v));
   }));
+}
+if (DEMO) {
+  const relabel = () => document.querySelectorAll('.kpi-sub').forEach((el) => {
+    if (el.textContent.trim() === 'live via MQTT') el.textContent = 'demo feed';
+  });
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', relabel); else relabel();
 }
 if (DEMO_WHITE_LABEL) {
   document.documentElement.classList.add('demo-white-label');
@@ -1326,7 +1334,7 @@ function initView(view) {
 // ============================================
 
 function initClock() {
-  function update() { document.getElementById('headerTime').textContent = new Date().toLocaleTimeString('en-US', { timeZone: 'America/Chicago', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }); }
+  function update() { document.getElementById('headerTime').textContent = new Date().toLocaleTimeString('en-US', { timeZone: APP_TZ, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }); }
   update(); setInterval(update, 1000);
 }
 
@@ -1428,7 +1436,7 @@ function initHourlyFlowChart() {
 }
 
 // Display timezone for the whole dashboard (matches the header clock).
-const DISPLAY_TZ = 'America/Chicago';
+const DISPLAY_TZ = APP_TZ;
 
 // Calendar date (YYYY-MM-DD) in DISPLAY_TZ. The backend buckets days by this same
 // zone, so the frontend must ask for dates in Central time — not UTC — or it will
@@ -2522,7 +2530,7 @@ function renderRidershipChartsFromLive(viewMode, fromDate, now) {
   const hours = Array.from({length: 24}, (_, i) => `${String(i).padStart(2, '0')}:00`);
   const boardings = hours.map(h => hourlyBuckets[h] ? hourlyBuckets[h].boardings : 0);
   const alightings = hours.map(h => hourlyBuckets[h] ? hourlyBuckets[h].alightings : 0);
-  const todayLabel = now.toLocaleDateString('en-US', { timeZone: 'America/Chicago', weekday: 'short', day: 'numeric', month: 'short' });
+  const todayLabel = now.toLocaleDateString('en-US', { timeZone: APP_TZ, weekday: 'short', day: 'numeric', month: 'short' });
 
   // Trend chart — show hourly breakdown for today
   charts.ridershipTrend.data.labels = hours;
@@ -3397,7 +3405,7 @@ function updateFleetKPIs() {
   if (onlineEl) onlineEl.textContent = BUS_POSITIONS.length > 0 ? activeCount : '\u2014';
   if (idleEl) idleEl.textContent = BUS_POSITIONS.length > 0 ? idleCount : '\u2014';
   if (maintEl) maintEl.textContent = BUS_POSITIONS.length > 0 ? maintCount : '\u2014';
-  if (subEl) subEl.textContent = BUS_POSITIONS.length > 0 ? `${BUS_POSITIONS.length} vehicles \u2014 live via MQTT` : 'Waiting for MQTT data';
+  if (subEl) subEl.textContent = BUS_POSITIONS.length > 0 ? `${BUS_POSITIONS.length} vehicles \u2014 ${DEMO ? 'demo feed' : 'live via MQTT'}` : (DEMO ? 'Starting demo feed' : 'Waiting for MQTT data');
 }
 
 function renderFleetTable(search) {
