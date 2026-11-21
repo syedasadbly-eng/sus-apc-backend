@@ -2239,6 +2239,69 @@ function updateHourlyFlowChart(period) {
 // LIVE MAP
 // ============================================
 
+// ----- Footfall layer on the Live Map (demo road routes) -------------------
+// Toggle button in the live filter bar; shows today's boardings + alightings
+// per stop as street-level heat beneath the moving buses. Refreshes every
+// minute while on and hides in History mode.
+const LIVE_FF = { on: false, layer: null, timer: null, weights: {}, total: 0, registry: null };
+
+async function liveFootfallLoad() {
+  const today = displayDateStr();
+  const payload = await apiFetch('/api/stops/boardings', { from: today, to: today });
+  const w = {}; let total = 0;
+  ((payload && payload.stops) || []).forEach((st) => {
+    const k = rsKey(st.route, st.stop);
+    const n = (st.boardings || 0) + (st.alightings || 0);
+    w[k] = (w[k] || 0) + n; total += n;
+  });
+  LIVE_FF.weights = w; LIVE_FF.total = total;
+}
+
+function liveFootfallDraw() {
+  const map = maps.liveMap;
+  if (!map) return;
+  if (LIVE_FF.layer) { map.removeLayer(LIVE_FF.layer); LIVE_FF.layer = null; }
+  const legend = document.getElementById('liveFootfallLegend');
+  const show = LIVE_FF.on && HISTORY.mode !== 'history' && LIVE_FF.registry;
+  if (legend) legend.hidden = !show;
+  if (!show) return;
+  const { points } = ffHeatPoints(map, LIVE_FF.registry, Object.keys(LIVE_FF.registry), LIVE_FF.weights);
+  LIVE_FF.layer = L.heatLayer(points, ffHeatOptions(map)).addTo(map);
+  const lbl = document.getElementById('liveFootfallTotal');
+  if (lbl) lbl.textContent = LIVE_FF.total.toLocaleString() + ' people today';
+}
+
+async function liveFootfallToggle(force) {
+  LIVE_FF.on = typeof force === 'boolean' ? force : !LIVE_FF.on;
+  const btn = document.getElementById('liveFootfallBtn');
+  if (btn) { btn.classList.toggle('active', LIVE_FF.on); btn.setAttribute('aria-pressed', String(LIVE_FF.on)); }
+  clearInterval(LIVE_FF.timer); LIVE_FF.timer = null;
+  if (LIVE_FF.on) {
+    await liveFootfallLoad();
+    LIVE_FF.timer = setInterval(async () => { await liveFootfallLoad(); liveFootfallDraw(); }, 60000);
+  }
+  liveFootfallDraw();
+}
+
+async function initLiveFootfall(map) {
+  const btn = document.getElementById('liveFootfallBtn');
+  if (!btn || typeof L.heatLayer !== 'function') return;
+  const reg = await loadStopRegistry();
+  const hasRoads = reg && Object.values(reg).some((r) => routeLinePoints(r).roads);
+  if (!hasRoads) return;              // live service: keep the button hidden
+  LIVE_FF.registry = reg;
+  btn.hidden = false;
+  btn.addEventListener('click', () => liveFootfallToggle());
+  map.on('zoomend', () => { if (LIVE_FF.on) liveFootfallDraw(); });
+  const mapEl = document.getElementById('liveMapFull');
+  if (mapEl && !document.getElementById('liveFootfallLegend')) {
+    const lg = document.createElement('div');
+    lg.id = 'liveFootfallLegend'; lg.className = 'ff-legend ff-legend-live'; lg.hidden = true;
+    lg.innerHTML = '<strong>Footfall</strong><span id="liveFootfallTotal"></span><span>Fewer</span><span class="ff-legend-grad"></span><span>More</span>';
+    mapEl.appendChild(lg);
+  }
+}
+
 function initLiveMap() {
   if (maps.liveMap) return;
   const map = L.map('liveMapFull', { zoomControl: true, attributionControl: false }).setView(MAP_DEFAULT_CENTER, 12);
@@ -2247,6 +2310,7 @@ function initLiveMap() {
   updateMapBusMarkers(map, 'liveMap');
   maps.liveMap = map;
   setTimeout(() => map.invalidateSize(), 100);
+  initLiveFootfall(map);
   document.getElementById('centerMapBtn').addEventListener('click', () => {
     const active = BUS_POSITIONS.filter(b => b.lat !== 0 && b.lng !== 0);
     const lines = DEMO ? (stopMarkers.liveMap || []).filter((l) => l instanceof L.Polyline) : [];
@@ -3633,19 +3697,52 @@ function initFootfallMap() {
   if (t) t.addEventListener('change', () => { FF.time = t.value || 'all'; rsRenderFootfall(); });
 }
 
-function ffMetresPerPx() {
-  const z = FOOTFALL_MAP ? FOOTFALL_MAP.getZoom() : 14;
+function ffMetresPerPx(map) {
+  const m = map || FOOTFALL_MAP;
+  const z = m ? m.getZoom() : 14;
   return 156543.03 * Math.cos(53.48 * Math.PI / 180) / Math.pow(2, z);
 }
-function ffRadiusPx() { return Math.max(18, Math.min(60, Math.round(70 / ffMetresPerPx()))); }
+function ffRadiusPx(map) { return Math.max(18, Math.min(60, Math.round(70 / ffMetresPerPx(map)))); }
 
-function ffHeatOptions() {
+function ffHeatOptions(map) {
   // Grow the blob with zoom so it stays street-sized (~120 m) on screen.
-  const z = FOOTFALL_MAP ? FOOTFALL_MAP.getZoom() : 14;
-  const radius = ffRadiusPx();
+  const m = map || FOOTFALL_MAP;
+  const z = m ? m.getZoom() : 14;
+  const radius = ffRadiusPx(m);
   // maxZoom = current zoom stops leaflet.heat fading intensity when zoomed out.
   return { radius, blur: Math.round(radius * 0.8), maxZoom: z, max: 1, minOpacity: 0.2,
     gradient: { 0.15: '#1e3a8a', 0.3: '#2563eb', 0.45: '#22d3ee', 0.62: '#facc15', 0.8: '#f97316', 1.0: '#dc2626' } };
+}
+
+// Heat points for a set of routes: each stop's footfall at the stop and
+// spread along the road either side (fading over ~200 m). Shared by the
+// Routes & Stops panel and the Live Map layer.
+function ffHeatPoints(map, registry, routeKeys, w) {
+  const maxW = Math.max(1, ...Object.values(w));
+  const points = []; const stopsSeen = new Map(); const bounds = [];
+  routeKeys.forEach((rk) => {
+    const route = registry[rk]; if (!route) return;
+    // Sample the road at ~half a heat radius so overlap (and colour) is
+    // the same at every zoom level.
+    const step = Math.max(8, Math.min(150, ffMetresPerPx(map) * ffRadiusPx(map) * 0.5));
+    const road = ffDensify(routeLinePoints(route).pts, step);
+    const mine = new Map();
+    (route.stops || []).forEach((st) => {
+      const key = rsKey(rk, st.name);
+      if (!stopsSeen.has(key)) { stopsSeen.set(key, { st, rk }); mine.set(key, st); }
+    });
+    mine.forEach((st, key) => {
+      const f = (w[key] || 0) / maxW;
+      if (f <= 0) return;
+      points.push([st.lat, st.lng, f * 0.4]);
+      road.forEach((p) => {
+        const dm = Math.hypot((p[0] - st.lat) * 111320, (p[1] - st.lng) * 111320 * Math.cos(st.lat * Math.PI / 180));
+        if (dm <= 220) points.push([p[0], p[1], f * Math.exp(-Math.pow(dm / 110, 2)) * 0.2]);
+      });
+    });
+    road.forEach((p) => bounds.push(p));
+  });
+  return { points, stopsSeen, bounds };
 }
 
 function rsRenderFootfall() {
@@ -3659,33 +3756,10 @@ function rsRenderFootfall() {
   if (!FOOTFALL_MAP) return;
 
   const w = ffWeights();
-  const maxW = Math.max(1, ...Object.values(w));
-  const points = []; const stopsSeen = new Map(); const bounds = [];
-  routesToShow.forEach((rk) => {
-    const route = STOPS_REGISTRY[rk]; if (!route) return;
-    // Sample the road at ~half a heat radius so overlap (and colour) is
-    // the same at every zoom level.
-    const step = Math.max(8, Math.min(150, ffMetresPerPx() * ffRadiusPx() * 0.5));
-    const road = ffDensify(routeLinePoints(route).pts, step);
-    (route.stops || []).forEach((st) => {
-      const key = rsKey(rk, st.name);
-      if (!stopsSeen.has(key)) stopsSeen.set(key, { st, rk });
-    });
-    stopsSeen.forEach(({ st, rk: r2 }, key) => {
-      if (r2 !== rk) return;
-      const f = (w[key] || 0) / maxW;
-      if (f <= 0) return;
-      points.push([st.lat, st.lng, f * 0.4]);
-      road.forEach((p) => {
-        const dm = Math.hypot((p[0] - st.lat) * 111320, (p[1] - st.lng) * 111320 * Math.cos(st.lat * Math.PI / 180));
-        if (dm <= 220) points.push([p[0], p[1], f * Math.exp(-Math.pow(dm / 110, 2)) * 0.2]);
-      });
-    });
-    road.forEach((p) => bounds.push(p));
-  });
+  const { points, stopsSeen, bounds } = ffHeatPoints(FOOTFALL_MAP, STOPS_REGISTRY, routesToShow, w);
 
   if (FOOTFALL_HEAT) { FOOTFALL_MAP.removeLayer(FOOTFALL_HEAT); FOOTFALL_HEAT = null; }
-  FOOTFALL_HEAT = L.heatLayer(points, ffHeatOptions()).addTo(FOOTFALL_MAP);
+  FOOTFALL_HEAT = L.heatLayer(points, ffHeatOptions(FOOTFALL_MAP)).addTo(FOOTFALL_MAP);
 
   // Stop labels with the counted number
   FOOTFALL_LABELS.clearLayers();
@@ -5001,9 +5075,11 @@ function initHistoryControls() {
         histBar.style.display = 'none';
         scrubber.style.display = 'none';
         clearHistoryLayers();
+        liveFootfallDraw();
       } else {
         liveBar.style.display = 'none';
         histBar.style.display = 'flex';
+        liveFootfallDraw();
         // auto-load on first switch
         loadHistory();
       }
