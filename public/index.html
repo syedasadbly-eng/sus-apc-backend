@@ -458,13 +458,17 @@
               <div class="chart-title">Live Occupancy</div>
               <div class="chart-subtitle" id="occGaugeSub">Current load vs capacity</div>
             </div>
+            <div class="occ-key"><span><i class="ok"></i>Comfortable</span><span><i class="busy"></i>Busy 50%+</span><span><i class="full"></i>Near full 80%+</span></div>
           </div>
-          <div class="chart-body" style="position:relative">
-            <canvas id="chartOccGauge" height="260"></canvas>
-            <div id="occGaugeCenter" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-60%);text-align:center;pointer-events:none">
-              <div id="occGaugeValue" style="font-size:34px;font-weight:700;color:#e4e5ed;line-height:1">—</div>
-              <div id="occGaugeLabel" style="font-size:11px;color:#8b8ea5;margin-top:4px;letter-spacing:.04em;text-transform:uppercase">onboard</div>
+          <div class="chart-body occ-body">
+            <div class="occ-ring">
+              <canvas id="chartOccGauge"></canvas>
+              <div class="occ-ring-centre">
+                <div class="occ-ring-pct" id="occGaugePct">—</div>
+                <div class="occ-ring-cap" id="occRingCap">— onboard</div>
+              </div>
             </div>
+            <div class="occ-list" id="occBusList"></div>
           </div>
         </div>
         <div class="chart-panel">
@@ -476,6 +480,43 @@
           </div>
           <div class="chart-body">
             <canvas id="chartCumulativeLoad" height="260"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Today at a glance: professional white tables -->
+      <div class="dash-tables" id="fleetTablesAnchor" style="margin-top:var(--space-4)">
+        <div class="pro-table-card">
+          <div class="pro-table-head">
+            <div>
+              <div class="pro-table-title">Live Fleet Status</div>
+              <div class="pro-table-sub" id="proFleetSub">Updated every few seconds</div>
+            </div>
+          </div>
+          <div class="pro-table-wrap">
+            <table class="pro-table" id="proFleetTable">
+              <thead><tr>
+                <th>Bus</th><th>Route</th><th>Status</th><th class="num">Onboard</th><th style="width:22%">Occupancy</th><th>Next stop</th><th class="num">Boarded today</th><th class="num">Alighted today</th><th class="num">Last update</th>
+              </tr></thead>
+              <tbody><tr><td colspan="9" class="pro-empty">Waiting for fleet data…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="pro-table-card" style="margin-top:var(--space-4)">
+          <div class="pro-table-head">
+            <div>
+              <div class="pro-table-title">Stop Activity Today</div>
+              <div class="pro-table-sub" id="proStopSub">Boardings and alightings at each stop, both directions combined</div>
+            </div>
+          </div>
+          <div class="pro-table-wrap">
+            <table class="pro-table" id="proStopTable">
+              <thead><tr>
+                <th style="width:42px">#</th><th>Stop</th><th>Route</th><th class="num">Boardings</th><th class="num">Alightings</th><th class="num">Total</th><th style="width:20%">Share of passengers</th><th class="num">Busiest hour</th>
+              </tr></thead>
+              <tbody><tr><td colspan="8" class="pro-empty">Loading…</td></tr></tbody>
+              <tfoot></tfoot>
+            </table>
           </div>
         </div>
       </div>

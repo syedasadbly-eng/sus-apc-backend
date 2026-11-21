@@ -2147,10 +2147,10 @@ function initOverviewAnalyticsCharts() {
       type: 'doughnut',
       data: {
         labels: ['Onboard', 'Free seats'],
-        datasets: [{ data: [0, CONFIG.busCapacity], backgroundColor: ['#3b82f6', 'rgba(255,255,255,0.06)'], borderWidth: 0, circumference: 180, rotation: 270 }],
+        datasets: [{ data: [0, CONFIG.busCapacity], backgroundColor: ['#10b981', 'rgba(255,255,255,0.07)'], borderWidth: 0, borderRadius: 8 }],
       },
       options: {
-        responsive: true, maintainAspectRatio: true, cutout: '74%',
+        responsive: true, maintainAspectRatio: false, cutout: '78%', animation: { duration: 600 },
         plugins: { legend: { display: false }, tooltip: { ...tooltipDefaults() } },
       },
     });
@@ -2164,12 +2164,14 @@ function initOverviewAnalyticsCharts() {
       data: {
         labels: Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2, '0')}:00`),
         datasets: [
-          { label: 'Onboard', data: new Array(24).fill(null), borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.12)', borderWidth: 2, fill: true, tension: 0.35, pointRadius: 0, spanGaps: true },
-          { label: 'Capacity', data: new Array(24).fill(CONFIG.busCapacity), borderColor: '#ef4444', borderDash: [8, 4], borderWidth: 1.5, pointRadius: 0, fill: false },
+          { label: 'Onboard', data: new Array(24).fill(null), borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.12)', borderWidth: 2, fill: true, tension: 0.35, pointRadius: 0, pointStyle: false, spanGaps: true },
+          { label: 'Capacity', data: new Array(24).fill(CONFIG.busCapacity), borderColor: '#ef4444', borderDash: [8, 4], borderWidth: 1.5, pointRadius: 0, pointStyle: false, fill: false },
         ],
       },
       options: { ...chartDefaults('Onboard'), scales: { ...chartDefaults('Onboard').scales, y: { ...chartDefaults('Onboard').scales.y, beginAtZero: true, suggestedMax: CONFIG.busCapacity } } },
     });
+    // Lines have no point markers, so show plain line swatches in the legend.
+    try { const lg = charts.cumulativeLoad.options.plugins.legend; lg.labels = { ...(lg.labels || {}), usePointStyle: false, boxWidth: 18, boxHeight: 3 }; charts.cumulativeLoad.update('none'); } catch (e) { /* noop */ }
   }
 
   // 3) Net Passenger Flow by Hour — boardings minus alightings per hour.
@@ -2316,25 +2318,123 @@ function initOverviewAnalyticsCharts() {
   initStopBoardingsHome();
   refreshStopBoardingsHome();
   setInterval(() => refreshStopBoardingsHome(), 30000);
+  refreshProTables(); setInterval(() => refreshProTables(), 30000);
 }
 
 // Update the live gauge from current fleet occupancy (called on every MQTT tick).
+function occBand(pct) { return pct >= 80 ? 'full' : pct >= 50 ? 'busy' : 'ok'; }
+const OCC_COL = { ok: '#10b981', busy: '#f59e0b', full: '#ef4444' };
+
 function updateOverviewAnalytics() {
+  const buses = BUS_POSITIONS.filter((b) => b.status === 'active' || b.status === 'idle');
+  const onboard = buses.reduce((s, b) => s + (b.passengers || 0), 0);
+  const cap = buses.reduce((s, b) => s + (b.capacity || CONFIG.busCapacity), 0) || CONFIG.busCapacity;
+  const free = Math.max(0, cap - onboard);
+  const pct = cap > 0 ? Math.round((onboard / cap) * 100) : 0;
   if (charts.occGauge) {
-    const onboard = BUS_POSITIONS.reduce((s, b) => s + (b.passengers || 0), 0);
-    const cap = BUS_POSITIONS.reduce((s, b) => s + (b.capacity || CONFIG.busCapacity), 0) || CONFIG.busCapacity;
-    const free = Math.max(0, cap - onboard);
-    const pct = cap > 0 ? Math.round((onboard / cap) * 100) : 0;
-    // Colour shifts green -> amber -> red as the bus fills.
-    const fill = pct >= 90 ? '#ef4444' : pct >= 70 ? '#f59e0b' : pct >= 40 ? '#3b82f6' : '#10b981';
     charts.occGauge.data.datasets[0].data = [onboard, free];
-    charts.occGauge.data.datasets[0].backgroundColor = [fill, 'rgba(255,255,255,0.06)'];
+    charts.occGauge.data.datasets[0].backgroundColor = [OCC_COL[occBand(pct)], 'rgba(255,255,255,0.07)'];
     charts.occGauge.update('none');
-    const valEl = document.getElementById('occGaugeValue');
-    const subEl = document.getElementById('occGaugeSub');
-    if (valEl) valEl.textContent = `${onboard}/${cap}`;
-    if (subEl) subEl.textContent = `${pct}% full · ${free} seats free`;
   }
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  set('occGaugePct', pct + '%');
+  set('occRingCap', onboard + ' of ' + cap + ' seats');
+  set('occGaugeSub', buses.length + ' bus' + (buses.length === 1 ? '' : 'es') + ' in service \u00b7 ' + free + ' seats free');
+  const list = document.getElementById('occBusList');
+  if (list) {
+    list.innerHTML = buses.length ? buses.map((b) => {
+      const c = b.capacity || CONFIG.busCapacity; const p = c ? Math.round(((b.passengers || 0) / c) * 100) : 0; const band = occBand(p);
+      const route = fleetRouteText(b).split(' \u00b7 ')[0];
+      const next = b.nextStopName ? rsStopLabel(String(b.nextStopName)) : '';
+      return `<div class="occ-row">
+        <div class="occ-row-top"><span class="occ-bus" style="background:${b.routeColor || '#3b82f6'}">${escapeHtml(String(b.id).slice(-3))}</span>
+          <div class="occ-row-name"><b>${route || 'Bus ' + escapeHtml(b.id)}</b><span>${next ? '\u2192 ' + escapeHtml(next) : (b.status === 'idle' ? 'Idle' : 'In service')}</span></div>
+          <div class="occ-row-val"><b>${b.passengers || 0}<small>/${c}</small></b><span class="occ-pill ${band}">${p}%</span></div></div>
+        <div class="occ-bar"><i class="${band}" style="width:${Math.min(100, p)}%"></i><em style="left:50%"></em><em style="left:80%"></em></div>
+      </div>`;
+    }).join('') : '<div class="occ-empty">No buses reporting yet</div>';
+  }
+  try { renderProFleetTable(); } catch (e) { /* table not on page */ }
+}
+
+// ----- Professional white tables (Dashboard) ---------------------------
+let PRO_TODAY = { byBus: {}, stops: [], hourly: [], t: 0 };
+async function refreshProTables() {
+  const today = displayDateStr();
+  const [daily, stops, hourly] = await Promise.all([
+    apiFetch('/api/daily', { from: today, to: today }),
+    apiFetch('/api/stops/boardings', { from: today, to: today }),
+    apiFetch('/api/stops/hourly', { from: today, to: today }),
+  ]);
+  const byBus = {};
+  ((daily && daily.daily) || []).forEach((r) => { byBus[String(r.bus_id)] = { in: r.total_in || 0, out: r.total_out || 0 }; });
+  PRO_TODAY = { byBus, stops: (stops && stops.stops) || [], hourly: (hourly && hourly.rows) || [], t: Date.now() };
+  renderProFleetTable();
+  renderProStopTable();
+}
+
+function renderProFleetTable() {
+  const tb = document.querySelector('#proFleetTable tbody'); if (!tb) return;
+  const buses = BUS_POSITIONS.slice().sort((a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }));
+  if (!buses.length) { tb.innerHTML = '<tr><td colspan="9" class="pro-empty">Waiting for fleet data\u2026</td></tr>'; return; }
+  tb.innerHTML = buses.map((b) => {
+    const c = b.capacity || CONFIG.busCapacity; const p = c ? Math.round(((b.passengers || 0) / c) * 100) : 0; const band = occBand(p);
+    const t = PRO_TODAY.byBus[String(b.id)] || { in: b.lineIn || 0, out: b.lineOut || 0 };
+    const status = b.status === 'active' ? '<span class="pro-status live">In service</span>' : b.status === 'idle' ? '<span class="pro-status idle">Idle</span>' : '<span class="pro-status off">Offline</span>';
+    const route = fleetRouteText(b).split(' \u00b7 ')[0] || '\u2014';
+    const next = b.nextStopName ? escapeHtml(rsStopLabel(String(b.nextStopName))) : '<span class="pro-muted">\u2014</span>';
+    return `<tr>
+      <td><span class="pro-bus" style="background:${b.routeColor || '#2563eb'}">${escapeHtml(String(b.id))}</span></td>
+      <td class="pro-strong">${route}</td>
+      <td>${status}</td>
+      <td class="num pro-strong">${b.passengers || 0}<span class="pro-muted"> / ${c}</span></td>
+      <td><div class="pro-bar"><i class="${band}" style="width:${Math.min(100, p)}%"></i></div><span class="pro-bar-lbl ${band}">${p}%</span></td>
+      <td>${next}</td>
+      <td class="num">${t.in.toLocaleString()}</td>
+      <td class="num">${t.out.toLocaleString()}</td>
+      <td class="num pro-muted">${escapeHtml(b.lastUpdate || '\u2014')}</td>
+    </tr>`;
+  }).join('');
+  const sub = document.getElementById('proFleetSub');
+  if (sub) sub.textContent = buses.filter((b) => b.status === 'active').length + ' of ' + buses.length + ' buses in service \u00b7 updates every few seconds';
+}
+
+function renderProStopTable() {
+  const tb = document.querySelector('#proStopTable tbody'); const tf = document.querySelector('#proStopTable tfoot'); if (!tb) return;
+  const groups = {};
+  PRO_TODAY.stops.forEach((st) => {
+    if (!st.stop || st.stop === '-') return;
+    const k = rsKey(st.route, st.stop);
+    if (!groups[k]) groups[k] = { key: k, route: String(st.route), name: rsStopLabel(st.stop), b: 0, a: 0, hours: {} };
+    groups[k].b += st.boardings || 0; groups[k].a += st.alightings || 0;
+  });
+  PRO_TODAY.hourly.forEach((r) => {
+    const g = groups[rsKey(r.route, r.stop)]; if (!g) return;
+    const h = utcHourToDisplayHour(r.hour); g.hours[h] = (g.hours[h] || 0) + (r.boardings || 0) + (r.alightings || 0);
+  });
+  const rows = Object.values(groups).sort((x, y) => (y.b + y.a) - (x.b + x.a));
+  const total = rows.reduce((s, g) => s + g.b + g.a, 0);
+  if (!rows.length) { tb.innerHTML = '<tr><td colspan="8" class="pro-empty">No stop activity recorded yet today</td></tr>'; if (tf) tf.innerHTML = ''; return; }
+  const max = Math.max(...rows.map((g) => g.b + g.a));
+  tb.innerHTML = rows.map((g, i) => {
+    const t = g.b + g.a; const share = total ? Math.round((t / total) * 100) : 0;
+    const hb = Object.entries(g.hours).sort((a, b) => b[1] - a[1])[0];
+    const col = (typeof mapRouteHex === 'function') ? mapRouteHex(g.route) : '#2563eb';
+    return `<tr>
+      <td><span class="pro-rank${i < 3 ? ' top' : ''}">${i + 1}</span></td>
+      <td class="pro-strong">${escapeHtml(g.name)}</td>
+      <td><span class="pro-route" style="--rc:${col}">${escapeHtml(g.route)}</span></td>
+      <td class="num">${g.b.toLocaleString()}</td>
+      <td class="num">${g.a.toLocaleString()}</td>
+      <td class="num pro-strong">${t.toLocaleString()}</td>
+      <td><div class="pro-bar"><i class="share" style="width:${max ? Math.round((t / max) * 100) : 0}%"></i></div><span class="pro-bar-lbl">${share}%</span></td>
+      <td class="num">${hb ? String(hb[0]).padStart(2, '0') + ':00' : '\u2014'}</td>
+    </tr>`;
+  }).join('');
+  const tb2 = rows.reduce((s, g) => s + g.b, 0), ta2 = rows.reduce((s, g) => s + g.a, 0);
+  if (tf) tf.innerHTML = `<tr><td></td><td>Total</td><td></td><td class="num">${tb2.toLocaleString()}</td><td class="num">${ta2.toLocaleString()}</td><td class="num">${total.toLocaleString()}</td><td>100%</td><td></td></tr>`;
+  const sub = document.getElementById('proStopSub');
+  if (sub) sub.textContent = rows.length + ' stops \u00b7 ' + total.toLocaleString() + ' passengers today \u00b7 both directions combined';
 }
 
 // Pull today's hourly data from the API and render the net-flow bars and the
