@@ -78,6 +78,13 @@
 
   const action = (t) => EVENT_ACTIONS[t] || '';
 
+  // Demo services (window.SUS_DEMO) name the sound class the simulator uses.
+  // Production keeps the deliberately vague label above until a real camera
+  // payload confirms which class fired.
+  if (window.SUS_DEMO && window.SUS_DEMO.enabled) {
+    EVENT_LABELS.sound_classification = 'Loud noise on board';
+  }
+
   let enabled = false;
   let pollTimer = null;
   let volumeChart = null;
@@ -994,7 +1001,7 @@
             <div class="bus-icon-wrap"><i data-lucide="bus"></i></div>
             <div>
               <div class="exec-vcard-title">Bus ${esc(h.bus_id)}</div>
-              <div class="exec-vcard-route">${esc(h.route || 'Downtown Loop')}</div>
+              <div class="exec-vcard-route">${esc((h.route && !/^\d+$/.test(String(h.route)) ? h.route : null) || ({ '515': 'Downtown Loop', '419': 'NW Parking Shuttle' })[String(h.bus_id)] || '')}</div>
             </div>
           </div>
           <span class="exec-vcard-status-tag ${cls}">${esc(headline)}</span>

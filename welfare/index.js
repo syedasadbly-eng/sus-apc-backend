@@ -594,4 +594,29 @@ function observe(o) {
   }
 }
 
-module.exports = { initWelfare, observe, isEnabled: () => Boolean(engine), ENABLED };
+/* Demo mode only (demo/index.js). Writes a scripted incident by the same path
+   the camera ingest uses: store, live feed, counters, alert event. */
+function demoStore() { return store; }
+function demoCameraSeen(at) {
+  try {
+    const st = camera._internal && camera._internal.state;
+    if (st && at) { st.lastSeenAt = at; st.lastEventAt = at; }
+  } catch (_) { /* cosmetic */ }
+}
+function demoInject(row) {
+  if (!engine || !store) return false;
+  try { store.insert(row); } catch (err) { console.error('[welfare] demo insert failed:', err.message); return false; }
+  engine.counters[row.event_type] = (engine.counters[row.event_type] ?? 0) + 1;
+  engine.recent.unshift(row);
+  if (engine.recent.length > engine.recentLimit) engine.recent.length = engine.recentLimit;
+  if (row.source === 'camera') {
+    try {
+      const st = camera._internal && camera._internal.state;
+      if (st) { st.lastSeenAt = row.detected_at; st.lastEventAt = row.detected_at; st.accepted += 1; }
+    } catch (_) { /* camera status is cosmetic here */ }
+  }
+  try { engine.emit(row.severity >= 3 ? 'alert' : 'log', row); } catch (_) { /* listeners only log */ }
+  return true;
+}
+
+module.exports = { initWelfare, observe, isEnabled: () => Boolean(engine), ENABLED, demoStore, demoInject, demoCameraSeen };
