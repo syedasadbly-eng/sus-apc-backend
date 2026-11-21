@@ -3825,3 +3825,33 @@ html, body {
 /* Demo white-label: hide the pilot client's logo (DEMO_WHITE_LABEL, default on) */
 html.demo-white-label .login-cobrand,
 html.demo-white-label .sidebar-cobrand { display: none !important; }
+
+/* Demo label-free map: the vector style is already dark, so drop the
+   invert filter used for the live raster tiles. */
+html.demo-nolabel-map .leaflet-tile-pane,
+html.demo-nolabel-map #routeMap .leaflet-tile { filter: none; }
+html.demo-nolabel-map .leaflet-control-attribution { background: rgba(15,17,23,0.7); color: #8b93a7; font-size: 10px; }
+html.demo-nolabel-map .leaflet-control-attribution a { color: #8b93a7; }
+
+/* ============================================
+   Routes & Stops (simplified + per-stop analysis)
+   ============================================ */
+#view-routes [hidden] { display: none !important; }
+.rs-filters { flex-wrap: wrap; row-gap: var(--space-2); }
+.rs-filters .filter-select { min-width: 200px; }
+.rs-filters label.filter-label { cursor: default; }
+.rs-filters .period-tab { border: 0; background: transparent; font-family: inherit; }
+.rs-filters .period-tab.active { background: var(--color-primary); color: #fff; }
+.rs-kpi-text { font-size: 1.05rem !important; line-height: 1.3; font-weight: 600; }
+#stopLeaderTable .rs-row { cursor: pointer; }
+#stopLeaderTable .rs-row:hover td, #stopLeaderTable .rs-row:focus td { background: rgba(255,255,255,0.04); }
+#stopLeaderTable .rs-row:focus { outline: 2px solid var(--color-primary); outline-offset: -2px; }
+.rs-share { display: inline-block; width: 64px; height: 6px; margin-right: 8px; vertical-align: middle; border-radius: 3px; background: rgba(255,255,255,0.08); overflow: hidden; }
+.rs-share > span { display: block; height: 100%; background: rgba(255,255,255,0.75); border-radius: 3px; }
+.rs-details > summary { list-style: none; cursor: pointer; }
+.rs-details > summary::-webkit-details-marker { display: none; }
+.rs-details > summary::after { content: 'Show'; margin-left: auto; font-size: var(--text-xs); color: var(--color-text-muted); }
+.rs-details[open] > summary::after { content: 'Hide'; }
+.rs-stop-head { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-4); }
+.rs-stop-name { font-size: 1.25rem; font-weight: 700; color: var(--color-text); }
+.rs-back { border: 1px solid var(--color-border, rgba(255,255,255,0.12)); }

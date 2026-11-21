@@ -1438,6 +1438,33 @@ app.get('/api/stops/hourly', (req, res) => {
   }
 });
 
+// Per-stop, per-day boardings/alightings (Routes & Stops per-stop analysis).
+//   GET /api/stops/daily?from=YYYY-MM-DD&to=YYYY-MM-DD[&bus_id=515]
+// One row per (route, stop, date). Window capped at 400 days.
+app.get('/api/stops/daily', (req, res) => {
+  try {
+    const { from, to, bus_id } = req.query;
+    const re = /^\d{4}-\d{2}-\d{2}$/;
+    const today = displayDateStr();
+    const f = re.test(from || '') ? from : today;
+    let t = re.test(to || '') ? to : today;
+    if (t < f) t = f;
+    if ((Date.parse(t) - Date.parse(f)) / 86400000 > 400) return res.status(400).json({ error: 'Window too large (max 400 days)' });
+    let where = " WHERE stop != '-' AND date BETWEEN @from AND @to ";
+    const params = { from: f, to: t };
+    if (bus_id) { where += ' AND bus_id = @bus_id'; params.bus_id = bus_id; }
+    const rows = db.prepare(`
+      SELECT route, stop, date, SUM(evt_in) AS boardings, SUM(evt_out) AS alightings
+      FROM records ${where}
+      GROUP BY route, stop, date
+      ORDER BY date, route, stop
+    `).all(params);
+    res.json({ filters: { from: f, to: t, bus_id: bus_id || null }, rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Historical GPS breadcrumbs for the Live Map playback view.
 // Returns one row per recorded GPS sample, filtered by date range / bus.
 //   GET /api/history-locations?from=YYYY-MM-DD&to=YYYY-MM-DD
