@@ -66,6 +66,9 @@ const CFG = {
   gpsEveryMs: 20000,
   badge: process.env.DEMO_BADGE !== 'false',
   openAccess: process.env.DEMO_OPEN_ACCESS === 'true',
+  // White-label: hide the pilot client's name and logo (on by default).
+  // Set DEMO_WHITE_LABEL=false to keep the client branding.
+  whiteLabel: process.env.DEMO_WHITE_LABEL !== 'false',
 };
 
 const BUSES = {
@@ -304,7 +307,7 @@ const WELFARE_TYPES = [
     reason: (r) => `Single occupant for ${5 + Math.floor(r() * 8)} min` },
 ];
 const RESOLUTION_NOTES = {
-  fall: ['Driver attended — passenger helped to seat, no injury', 'Passenger assisted at stop by Mayo staff', 'Driver checked, passenger OK'],
+  fall: ['Driver attended — passenger helped to seat, no injury', 'Passenger assisted at stop by site staff', 'Driver checked, passenger OK'],
   sound_classification: ['Live view checked — raised voices, no incident', 'Passenger phone call, no action needed', 'Dropped bag, no incident'],
   violence: ['Driver de-escalated, passengers separated', 'Security met the bus at next stop', 'Incident logged, CCTV clip saved'],
   violence_disruption: ['Security met the bus at next stop — incident report filed', 'Driver held at stop, police informed, resolved on scene'],
@@ -696,10 +699,56 @@ function triggerIncident(kind, busId) {
   return { created: inc.row };
 }
 
+// ---------------------------------------------------------------------------
+// White-label text scrub. Removes the pilot client's name from any string the
+// demo service sends to a browser (stop names, route names, weather label,
+// welfare notes). Ordered so phrases collapse cleanly, e.g.
+//   'Rochester, MN (Mayo Clinic)'      -> 'Rochester, MN'
+//   'Gonda Building (Mayo Downtown)'   -> 'Gonda Building (Downtown)'
+//   'Mayo NW Patient Parking Shuttle'  -> 'NW Patient Parking Shuttle'
+// ---------------------------------------------------------------------------
+const SCRUB_RULES = [
+  [/\s*\(\s*Mayo\s+Clinic\s*\)/gi, ''],
+  [/\(\s*Mayo\s+/gi, '('],
+  [/\bMayo\s+Clinic\s+Rochester\b/gi, 'Rochester'],
+  [/\bMayo\s+Clinic['’]s\b/gi, 'the'],
+  [/\bMayo['’]s\b/gi, 'the'],
+  [/\bat\s+Mayo\s+Clinic\b/gi, 'on site'],
+  [/\bMayo\s+Clinic\s+/gi, ''],
+  [/\bMayo\s+Clinic\b/gi, 'Client'],
+  [/\bMayo\s+/gi, ''],
+  [/\s*\bMayo\b/gi, ''],
+  [/https?:\/\/[^\s"']*mayoclinic\.org[^\s"']*/gi, ''],
+];
+function scrubText(str) {
+  if (typeof str !== 'string' || !/mayo/i.test(str)) return str;
+  let out = str;
+  for (const [re, rep] of SCRUB_RULES) out = out.replace(re, rep);
+  return out;
+}
+function scrubDeep(v, depth = 0) {
+  if (depth > 12 || v == null) return v;
+  if (typeof v === 'string') return scrubText(v);
+  if (Array.isArray(v)) return v.map((x) => scrubDeep(x, depth + 1));
+  if (typeof v === 'object' && !(v instanceof Date) && !Buffer.isBuffer(v)) {
+    const o = {};
+    for (const k of Object.keys(v)) o[k] = scrubDeep(v[k], depth + 1);
+    return o;
+  }
+  return v;
+}
+// Express middleware: every res.json() on a white-label demo is scrubbed.
+function whiteLabelMiddleware(req, res, next) {
+  if (!ENABLED || !CFG.whiteLabel) return next();
+  const orig = res.json.bind(res);
+  res.json = (body) => orig(scrubDeep(body));
+  next();
+}
+
 function clientConfig() {
   // `enabled` follows the env flag, not whether the simulator started: if the
   // demo refused to run, the browser must still stay off the live broker.
-  return { enabled: ENABLED, running: active, badge: CFG.badge, openAccess: CFG.openAccess };
+  return { enabled: ENABLED, running: active, badge: CFG.badge, openAccess: CFG.openAccess, whiteLabel: ENABLED && CFG.whiteLabel };
 }
 
 module.exports = {
@@ -710,6 +759,9 @@ module.exports = {
   start,
   clientConfig,
   triggerIncident,
+  scrubText,
+  scrubDeep,
+  whiteLabelMiddleware,
   // exported for the self-test
   _internal: { planDay, welfareDay, localToUtcMs, localParts, addDays, BUSES, STOPS, LOOP_MIN, CFG, setEpoch: (e) => { EPOCH = e; }, setTz: (z) => { TZ = z; } },
 };
