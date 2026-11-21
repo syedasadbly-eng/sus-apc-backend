@@ -203,3 +203,34 @@ html[data-theme="warm"] #view-overview .kpi-card .kpi-sub {
 html[data-theme="warm"] #view-overview .kpi-card .kpi-delta:empty { display: none; }
 html[data-theme="warm"] #view-overview .kpi-card .kpi-value + .kpi-delta:not(:empty) { margin: 6px 0 4px; align-self: flex-start; }
 html[data-theme="warm"] #view-overview .kpi-card::before { height: 4px !important; opacity: 1 !important; background: linear-gradient(90deg, var(--kt-dot), var(--kt-dot2)) !important; }
+
+/* ------------------------------------------------------------------
+   Headline boxes: one uniform premium grey treatment for all five.
+------------------------------------------------------------------- */
+html[data-theme="warm"] #view-overview .kpi-card,
+html[data-theme="warm"] #view-overview .kpi-card.green,
+html[data-theme="warm"] #view-overview .kpi-card.amber,
+html[data-theme="warm"] #view-overview .kpi-card.cyan,
+html[data-theme="warm"] #view-overview .kpi-card.pink {
+  --kt-a: #f3f3f2; --kt-b: #dedcd9; --kt-ink: #1c1b1a; --kt-lbl: #57534e; --kt-dot: #4a4643; --kt-dot2: #1f1d1b;
+}
+html[data-theme="warm"] #view-overview .kpi-card {
+  background:
+    linear-gradient(170deg, #f6f6f5 0%, #e9e8e6 55%, #dcdad6 100%) padding-box,
+    conic-gradient(from var(--wb-angle),
+      var(--wb-base) 0deg, var(--wb-base) 180deg,
+      var(--wb-hi1) 245deg, var(--wb-hi2) 310deg,
+      var(--wb-base) 345deg, var(--wb-base) 360deg) border-box !important;
+  --wb-base: #cfccc7; --wb-hi1: rgba(60,56,52,0.85); --wb-hi2: rgba(255,255,255,0.95);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.9), 0 1px 2px rgba(28,27,26,0.08), 0 12px 26px -16px rgba(28,27,26,0.45) !important;
+}
+html[data-theme="warm"] #view-overview .kpi-card:hover {
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.9), 0 2px 4px rgba(28,27,26,0.08), 0 20px 36px -16px rgba(28,27,26,0.5) !important;
+}
+html[data-theme="warm"] #view-overview .kpi-card::before { height: 3px !important; background: linear-gradient(90deg, #8a857f, #3f3b38 50%, #8a857f) !important; }
+html[data-theme="warm"] #view-overview .kpi-icon {
+  background: linear-gradient(145deg, #4a4643, #1f1d1b);
+  box-shadow: 0 6px 14px -5px rgba(28,27,26,0.55), inset 0 1px 0 rgba(255,255,255,0.18);
+}
+html[data-theme="warm"] #view-overview .kpi-card .kpi-sub { border-top-color: rgba(28,27,26,0.12) !important; color: #57534e !important; }
+html[data-theme="warm"] #view-overview .kpi-card:hover { --wb-base: #c4c0ba; --wb-hi1: rgba(28,27,26,1); --wb-hi2: rgba(255,255,255,1); }
