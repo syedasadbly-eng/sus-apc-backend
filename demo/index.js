@@ -707,25 +707,8 @@ function triggerIncident(kind, busId) {
 //   'Gonda Building (Mayo Downtown)'   -> 'Gonda Building (Downtown)'
 //   'Mayo NW Patient Parking Shuttle'  -> 'NW Patient Parking Shuttle'
 // ---------------------------------------------------------------------------
-const SCRUB_RULES = [
-  [/\s*\(\s*Mayo\s+Clinic\s*\)/gi, ''],
-  [/\(\s*Mayo\s+/gi, '('],
-  [/\bMayo\s+Clinic\s+Rochester\b/gi, 'Rochester'],
-  [/\bMayo\s+Clinic['’]s\b/gi, 'the'],
-  [/\bMayo['’]s\b/gi, 'the'],
-  [/\bat\s+Mayo\s+Clinic\b/gi, 'on site'],
-  [/\bMayo\s+Clinic\s+/gi, ''],
-  [/\bMayo\s+Clinic\b/gi, 'Client'],
-  [/\bMayo\s+/gi, ''],
-  [/\s*\bMayo\b/gi, ''],
-  [/https?:\/\/[^\s"']*mayoclinic\.org[^\s"']*/gi, ''],
-];
-function scrubText(str) {
-  if (typeof str !== 'string' || !/mayo/i.test(str)) return str;
-  let out = str;
-  for (const [re, rep] of SCRUB_RULES) out = out.replace(re, rep);
-  return out;
-}
+const { scrub: sharedScrub } = require('../public/demo-scrub.js');
+function scrubText(str) { return sharedScrub(str); }
 function scrubDeep(v, depth = 0) {
   if (depth > 12 || v == null) return v;
   if (typeof v === 'string') return scrubText(v);

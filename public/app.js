@@ -122,18 +122,8 @@ if (DEMO) {
 // placeholders) and keeps any later-rendered text clean.
 const DEMO_WHITE_LABEL = !!(DEMO && DEMO.whiteLabel);
 function demoScrub(str) {
-  if (!DEMO_WHITE_LABEL || typeof str !== 'string' || !/mayo/i.test(str)) return str;
-  return str
-    .replace(/\s*\(\s*Mayo\s+Clinic\s*\)/gi, '')
-    .replace(/\(\s*Mayo\s+/gi, '(')
-    .replace(/\bMayo\s+Clinic\s+Rochester\b/gi, 'Rochester')
-    .replace(/\bMayo\s+Clinic['’]s\b/gi, 'the')
-    .replace(/\bMayo['’]s\b/gi, 'the')
-    .replace(/\bat\s+Mayo\s+Clinic\b/gi, 'on site')
-    .replace(/\bMayo\s+Clinic\s+/gi, '')
-    .replace(/\bMayo\s+Clinic\b/gi, 'Client')
-    .replace(/\bMayo\s+/gi, '')
-    .replace(/\s*\bMayo\b/gi, '');
+  if (!DEMO_WHITE_LABEL || typeof str !== 'string' || typeof window.SUS_SCRUB !== 'function') return str;
+  return window.SUS_SCRUB(str);
 }
 function demoScrubTree(root) {
   if (!DEMO_WHITE_LABEL || !root) return;
@@ -143,7 +133,7 @@ function demoScrubTree(root) {
   let n; while ((n = walker.nextNode())) { const t = demoScrub(n.nodeValue); if (t !== n.nodeValue) n.nodeValue = t; }
   const els = root.querySelectorAll ? root.querySelectorAll('[title],[placeholder],[alt],[aria-label]') : [];
   els.forEach((el) => ['title', 'placeholder', 'alt', 'aria-label'].forEach((a) => {
-    const v = el.getAttribute(a); if (v && /mayo/i.test(v)) el.setAttribute(a, demoScrub(v));
+    const v = el.getAttribute(a); if (v) { const nv = demoScrub(v); if (nv !== v) el.setAttribute(a, nv); }
   }));
 }
 if (DEMO) {

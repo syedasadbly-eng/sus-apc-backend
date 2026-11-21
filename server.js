@@ -1197,7 +1197,7 @@ welfare.initWelfare(app, db, { topicMode: MQTT_CONFIG.topic, capacity: BUS_CAPAC
 // /daily and /ridership. Wrapped so a weather fault can never stop the server.
 try {
   weather.initWeather(app, db, {
-    lat: DEPOT_FALLBACK.lat, lng: DEPOT_FALLBACK.lng, label: (demo.ENABLED && demo.clientConfig().whiteLabel) ? 'Rochester, MN' : 'Rochester, MN (Mayo Clinic)',
+    lat: DEPOT_FALLBACK.lat, lng: DEPOT_FALLBACK.lng, label: (demo.ENABLED && demo.clientConfig().whiteLabel) ? 'City Centre' : 'Rochester, MN (Mayo Clinic)',
     timezone: DISPLAY_TZ, displayDateStr,
   });
 } catch (err) {
