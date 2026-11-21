@@ -1790,7 +1790,7 @@ function initOverviewMap() {
   });
 }
 
-// One clean route line, e.g. "Downtown Inter-Campus Loop · Main Hospital ↔ Outpatient Centre"
+// One clean route line, e.g. "Oxford Road Hospital Link · Main Hospital ↔ Outpatient Centre"
 // (route and routeName often carry the same text, which doubled it up).
 function fleetRouteText(bus) {
   const raw = String(bus.routeName || bus.route || '');
