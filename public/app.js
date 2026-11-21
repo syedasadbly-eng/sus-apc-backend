@@ -1036,29 +1036,138 @@ function updateLiveMapMarkers() {
 // (and never fight the user's manual pan/zoom afterwards).
 const mapAutoFitted = {};
 
-function updateMapBusMarkers(map, mapKey) {
-  if (mapMarkers[mapKey]) mapMarkers[mapKey].forEach(m => map.removeLayer(m));
-  mapMarkers[mapKey] = [];
+// ----- Smooth bus motion + fading trail ----------------------------------
+// Markers are kept per bus (not rebuilt each poll). When a new position
+// arrives the marker glides to it over the poll interval, following the
+// route's road path when one exists, and leaves a fading coloured trail.
+const BUS_ANIM = {};           // mapKey -> busId -> { marker, trail[], segs[], from, path, t0, dur }
+const BUS_ANIM_MS = 5000;      // matches the demo feed poll / simulator tick
+const TRAIL_MS = 3 * 60 * 1000; // how much history the trail shows
+const TRAIL_SEGS = 6;          // trail drawn as segments of falling opacity
+let busAnimRaf = null;
 
-  const plotted = BUS_POSITIONS.filter(b => (b.status === 'active' || b.status === 'idle') && b.lat !== 0 && b.lng !== 0);
-  plotted.forEach(bus => {
-    const occClass = bus.occupancy > 75 ? 'high-occupancy' : bus.occupancy > 50 ? 'medium-occupancy' : '';
-    const shortId = bus.id.length > 3 ? bus.id.slice(-3) : bus.id;
-    const icon = L.divIcon({
-      className: '',
-      html: `<div class="bus-marker ${occClass}">${shortId}</div>`,
-      iconSize: [32, 32], iconAnchor: [16, 16],
+// Stop registry from either the Routes page or the map loader.
+function busRouteFor(busId) {
+  const reg = STOPS_REGISTRY || STOP_REGISTRY_CACHE;
+  if (!reg) return null;
+  for (const [k, r] of Object.entries(reg)) {
+    if (String(k) === String(busId) || (r.bus_ids || []).map(String).includes(String(busId))) return r;
+  }
+  return null;
+}
+
+function geoDist(a, b) {
+  return Math.hypot((b[0] - a[0]) * 111320, (b[1] - a[1]) * 111320 * Math.cos(a[0] * Math.PI / 180));
+}
+
+// Road path between two points along a route polyline (forward, wrapping
+// the loop). Returns null when the points are not on the route or the hop
+// is implausibly long, in which case we glide in a straight line.
+function busRoadPath(busId, from, to) {
+  const route = busRouteFor(busId);
+  if (!route) return null;
+  const line = routeLinePoints(route);
+  if (!line.roads || line.pts.length < 2) return null;
+  const pts = line.pts;
+  const nearest = (p) => { let bi = 0, bd = Infinity; for (let i = 0; i < pts.length; i++) { const d = geoDist(p, pts[i]); if (d < bd) { bd = d; bi = i; } } return [bi, bd]; };
+  const [i0, d0] = nearest(from), [i1, d1] = nearest(to);
+  if (d0 > 80 || d1 > 80) return null;
+  const out = [from]; let len = 0; let i = i0; let guard = 0;
+  while (i !== i1 && guard++ < pts.length) { i = (i + 1) % pts.length; len += geoDist(out[out.length - 1], pts[i]); out.push(pts[i]); }
+  out.push(to);
+  if (len > 1500) return null;
+  return out;
+}
+
+// On first sight, backfill the trail with the road the bus has just
+// driven (~700 m behind it) so the trail is visible straight away.
+function busBackfillTrail(busId, pos, now) {
+  try {
+    const route = busRouteFor(busId);
+    const line = route && routeLinePoints(route);
+    if (!line || !line.roads) return [[pos[0], pos[1], now]];
+    const pts = line.pts; let bi = 0, bd = Infinity;
+    pts.forEach((p, i) => { const d = geoDist(pos, p); if (d < bd) { bd = d; bi = i; } });
+    if (bd > 80) return [[pos[0], pos[1], now]];
+    const back = [pos]; let len = 0, i = bi;
+    for (let g = 0; g < pts.length && len < 700; g++) { i = (i - 1 + pts.length) % pts.length; len += geoDist(back[back.length - 1], pts[i]); back.push(pts[i]); }
+    const span = TRAIL_MS * 0.9; let acc = 0; const out = [[pos[0], pos[1], now]];
+    for (let k = 1; k < back.length; k++) { acc += geoDist(back[k - 1], back[k]); out.push([back[k][0], back[k][1], now - span * (acc / Math.max(len, 1))]); }
+    return out.reverse();
+  } catch (e) { return [[pos[0], pos[1], now]]; }
+}
+
+function pathPointAt(path, f) {
+  if (path.length < 2) return path[0];
+  const seg = []; let total = 0;
+  for (let i = 1; i < path.length; i++) { const d = geoDist(path[i - 1], path[i]); seg.push(d); total += d; }
+  if (total === 0) return path[path.length - 1];
+  let want = total * Math.max(0, Math.min(1, f));
+  for (let i = 0; i < seg.length; i++) {
+    if (want <= seg[i] || i === seg.length - 1) {
+      const k = seg[i] ? want / seg[i] : 1;
+      return [path[i][0] + (path[i + 1][0] - path[i][0]) * k, path[i][1] + (path[i + 1][1] - path[i][1]) * k];
+    }
+    want -= seg[i];
+  }
+  return path[path.length - 1];
+}
+
+// Bright cyan so the trail stands out against the gold/purple route lines.
+function busTrailColor() { return '#38bdf8'; }
+
+function drawBusTrail(map, st, now) {
+  st.trail = st.trail.filter((p) => now - p[2] <= TRAIL_MS);
+  st.segs.forEach((l) => map.removeLayer(l)); st.segs = [];
+  if (st.trail.length < 2) return;
+  const ll = st.marker.getLatLng();
+  const pts = st.trail.concat([[ll.lat, ll.lng, now]]);
+  const per = Math.ceil(pts.length / TRAIL_SEGS);
+  for (let s = 0; s < TRAIL_SEGS; s++) {
+    const chunk = pts.slice(s * per, Math.min(pts.length, (s + 1) * per + 1));
+    if (chunk.length < 2) continue;
+    const f = (s + 1) / TRAIL_SEGS;          // older -> fainter, thinner
+    // Soft glow underneath, crisp core on top.
+    st.segs.push(L.polyline(chunk.map((p) => [p[0], p[1]]), {
+      color: st.color, weight: 10 + 6 * f, opacity: 0.08 + 0.17 * f, lineCap: 'round', lineJoin: 'round', interactive: false,
+    }).addTo(map));
+    st.segs.push(L.polyline(chunk.map((p) => [p[0], p[1]]), {
+      color: st.color, weight: 3 + 5 * f, opacity: 0.15 + 0.8 * f, lineCap: 'round', lineJoin: 'round', interactive: false, className: 'bus-trail',
+    }).addTo(map));
+  }
+}
+
+function busAnimFrame() {
+  busAnimRaf = null;
+  const now = performance.now(); let moving = false;
+  Object.entries(BUS_ANIM).forEach(([mapKey, buses]) => {
+    const map = maps[mapKey]; if (!map) return;
+    Object.values(buses).forEach((st) => {
+      if (!st.path) return;
+      const f = Math.min(1, (now - st.t0) / st.dur);
+      const p = pathPointAt(st.path, f);
+      st.marker.setLatLng(p);
+      if (now - (st.lastTrail || 0) > 250 || f >= 1) {
+        const last = st.trail[st.trail.length - 1];
+        if (!last || geoDist(last, p) > 4) st.trail.push([p[0], p[1], now]);
+        st.lastTrail = now;
+        drawBusTrail(map, st, now);
+      }
+      if (f >= 1) st.path = null; else moving = true;
     });
-    const gpsLabelMap = { live: 'Live GPS', cached: 'Last known', stop: 'At scheduled stop', static: 'Depot (static)', depot: 'Depot fallback', unknown: 'Unknown' };
-    const gpsLabel = gpsLabelMap[bus.gpsSource] || (bus.gpsValid ? 'Live GPS' : 'No fix');
-    const stopLine = bus.currentStopName
-      ? `<span class="popup-label">Current stop</span><span class="popup-value">${bus.currentStopName}</span>` +
-        (bus.nextStopName ? `<span class="popup-label">Next stop</span><span class="popup-value">${bus.nextStopName}</span>` : '')
-      : '';
-    const routeHeader = bus.routeName ? ` — ${bus.routeName}` : (bus.route ? ' — Route ' + bus.route : '');
-    const marker = L.marker([bus.lat, bus.lng], { icon })
-      .addTo(map)
-      .bindPopup(`
+  });
+  if (moving) busAnimRaf = requestAnimationFrame(busAnimFrame);
+}
+
+function busPopupHtml(bus) {
+  const gpsLabelMap = { live: 'Live GPS', cached: 'Last known', stop: 'At scheduled stop', static: 'Depot (static)', depot: 'Depot fallback', unknown: 'Unknown' };
+  const gpsLabel = gpsLabelMap[bus.gpsSource] || (bus.gpsValid ? 'Live GPS' : 'No fix');
+  const stopLine = bus.currentStopName
+    ? `<span class="popup-label">Current stop</span><span class="popup-value">${bus.currentStopName}</span>` +
+      (bus.nextStopName ? `<span class="popup-label">Next stop</span><span class="popup-value">${bus.nextStopName}</span>` : '')
+    : '';
+  const routeHeader = bus.routeName ? ` — ${bus.routeName}` : (bus.route ? ' — Route ' + bus.route : '');
+  return `
         <div class="bus-popup">
           <h4>${bus.id}${routeHeader}</h4>
           <div class="popup-grid">
@@ -1073,13 +1182,64 @@ function updateMapBusMarkers(map, mapKey) {
             <span class="popup-label">Last Update</span><span class="popup-value">${bus.lastUpdate}</span>
           </div>
         </div>
-      `);
+      `;
+}
+
+function updateMapBusMarkers(map, mapKey) {
+  // A rebuilt map instance starts with fresh markers and trails.
+  if (BUS_ANIM[mapKey] && BUS_ANIM[mapKey].__map !== map) delete BUS_ANIM[mapKey];
+  if (!BUS_ANIM[mapKey]) { BUS_ANIM[mapKey] = {}; Object.defineProperty(BUS_ANIM[mapKey], '__map', { value: map, enumerable: false }); }
+  const state = BUS_ANIM[mapKey];
+  mapMarkers[mapKey] = [];
+
+  const plotted = BUS_POSITIONS.filter(b => (b.status === 'active' || b.status === 'idle') && b.lat !== 0 && b.lng !== 0);
+  const seen = new Set();
+  const now = performance.now();
+  plotted.forEach(bus => {
+    seen.add(bus.id);
+    const occClass = bus.occupancy > 75 ? 'high-occupancy' : bus.occupancy > 50 ? 'medium-occupancy' : '';
+    const shortId = bus.id.length > 3 ? bus.id.slice(-3) : bus.id;
+    const iconHtml = `<div class="bus-marker ${occClass}">${shortId}</div>`;
+    const target = [bus.lat, bus.lng];
+    let st = state[bus.id];
+    if (!st) {
+      const marker = L.marker(target, { icon: L.divIcon({ className: '', html: iconHtml, iconSize: [32, 32], iconAnchor: [16, 16] }), zIndexOffset: 1000 }).addTo(map);
+      st = state[bus.id] = { marker, iconHtml, trail: busBackfillTrail(bus.id, target, now), backfilled: !!busRouteFor(bus.id), segs: [], path: null, color: busTrailColor(bus), target };
+      marker.bindPopup(busPopupHtml(bus));
+      drawBusTrail(map, st, now);
+    } else {
+      if (st.iconHtml !== iconHtml) { st.marker.setIcon(L.divIcon({ className: '', html: iconHtml, iconSize: [32, 32], iconAnchor: [16, 16] })); st.iconHtml = iconHtml; }
+      st.marker.setPopupContent(busPopupHtml(bus));
+      st.color = busTrailColor(bus);
+      if (!st.backfilled && busRouteFor(bus.id)) {
+        const cur = st.marker.getLatLng();
+        const bf = busBackfillTrail(bus.id, [cur.lat, cur.lng], now);
+        if (bf.length > 1) st.trail = bf;
+        st.backfilled = true;
+      }
+      if (!st.target || geoDist(st.target, target) > 1) {
+        const cur = st.marker.getLatLng(); const from = [cur.lat, cur.lng];
+        const hop = geoDist(from, target);
+        if (hop > 3000) { st.marker.setLatLng(target); st.trail = [[target[0], target[1], now]]; st.path = null; }
+        else { st.path = busRoadPath(bus.id, from, target) || [from, target]; st.t0 = now; st.dur = BUS_ANIM_MS; }
+        st.target = target;
+      }
+    }
     if (DEMO && bus.nextStopName && mapKey === 'liveMap') {
       const dest = String(bus.nextStopName).replace(/\s*\((return|rtn)\)\s*$/i, '');
-      marker.bindTooltip(`&rarr; ${escapeHtml(dest)}`, { permanent: true, direction: 'top', offset: [0, -18], className: 'bus-dest-label' });
+      const html = `&rarr; ${escapeHtml(dest)}`;
+      if (!st.marker.getTooltip()) st.marker.bindTooltip(html, { permanent: true, direction: 'top', offset: [0, -18], className: 'bus-dest-label' });
+      else if (st.tipHtml !== html) st.marker.setTooltipContent(html);
+      st.tipHtml = html;
     }
-    mapMarkers[mapKey].push(marker);
+    mapMarkers[mapKey].push(st.marker);
   });
+  // Remove buses that are no longer plotted.
+  Object.keys(state).forEach((id) => {
+    if (seen.has(id)) return;
+    map.removeLayer(state[id].marker); state[id].segs.forEach((l) => map.removeLayer(l)); delete state[id];
+  });
+  if (!busAnimRaf) busAnimRaf = requestAnimationFrame(busAnimFrame);
 
   // Auto-centre on the live bus the first time we have a real position.
   if (!mapAutoFitted[mapKey] && plotted.length > 0) {
@@ -3252,6 +3412,7 @@ function rsRenderOverview() {
   rsSetText('stopLeaderSubtitle', groups.length + ' stops \u00b7 ' + range + ' \u00b7 both directions combined \u00b7 click a row for the per-stop analysis');
 
   renderRouteMap();
+  try { rsRenderFootfall(); } catch (e) { console.warn('Footfall heatmap failed:', e); }
   rsSetText('routeMapSubtitle', 'Circle size = boardings \u00b7 ' + range + ' \u00b7 click a stop to open it');
 
   const det = document.getElementById('stopHourDetails');
@@ -3417,6 +3578,138 @@ function renderRouteMap() {
   });
   if (allLatLngs.length) { try { ROUTE_MAP.fitBounds(L.latLngBounds(allLatLngs), { padding: [28, 28], maxZoom: 15 }); } catch (e) { /* noop */ } }
   setTimeout(() => { try { ROUTE_MAP.invalidateSize(); } catch (e) {} }, 100);
+}
+
+// ----- Street-level footfall heatmap (demo road routes) -------------------
+// Each stop's footfall (boardings, alightings or both, optionally for one
+// part of the day) is drawn at the stop and spread along the road path on
+// either side, fading over ~200 m, so the heat sits on the actual streets.
+let FOOTFALL_MAP = null, FOOTFALL_HEAT = null, FOOTFALL_LABELS = null, FOOTFALL_FITTED = false;
+const FF = { measure: 'both', time: 'all' };
+
+function ffDensify(path, stepM) {
+  const out = [];
+  const d = (p, q) => Math.hypot((q[0] - p[0]) * 111320, (q[1] - p[1]) * 111320 * Math.cos(p[0] * Math.PI / 180));
+  for (let i = 1; i < path.length; i++) {
+    const a = path[i - 1], b = path[i]; const n = Math.max(1, Math.round(d(a, b) / stepM));
+    for (let k = 0; k < n; k++) out.push([a[0] + (b[0] - a[0]) * (k / n), a[1] + (b[1] - a[1]) * (k / n)]);
+  }
+  if (path.length) out.push(path[path.length - 1]);
+  return out;
+}
+
+function ffWeights() {
+  // key -> people, for the chosen measure and time of day
+  const w = {};
+  const pick = (b, a) => (FF.measure === 'on' ? b : FF.measure === 'off' ? a : b + a);
+  if (FF.time === 'all') {
+    RS.groups.forEach((g) => { w[g.key] = pick(g.boardings, g.alightings); });
+  } else {
+    const [h0, h1] = FF.time.split('-').map(Number);
+    RS.hourly.forEach((r) => {
+      const h = utcHourToDisplayHour(r.hour);
+      if (h < h0 || h >= h1) return;
+      const k = rsKey(r.route, r.stop);
+      w[k] = (w[k] || 0) + pick(r.boardings || 0, r.alightings || 0);
+    });
+  }
+  return w;
+}
+
+function initFootfallMap() {
+  const panel = document.getElementById('footfallPanel');
+  const el = document.getElementById('footfallMap');
+  if (!panel || !el || !window.L || FOOTFALL_MAP) return;
+  FOOTFALL_MAP = L.map('footfallMap', { zoomControl: true, attributionControl: false, scrollWheelZoom: false }).setView(MAP_DEFAULT_CENTER, 14);
+  addBaseLayer(FOOTFALL_MAP, 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19, subdomains: 'abcd' });
+  FOOTFALL_LABELS = L.layerGroup().addTo(FOOTFALL_MAP);
+  FOOTFALL_MAP.on('zoomend', () => { if (FOOTFALL_HEAT) rsRenderFootfall(); });
+  document.querySelectorAll('#footfallMeasure [data-ff-measure]').forEach((b) => b.addEventListener('click', () => {
+    FF.measure = b.getAttribute('data-ff-measure');
+    document.querySelectorAll('#footfallMeasure [data-ff-measure]').forEach((x) => x.classList.toggle('active', x === b));
+    rsRenderFootfall();
+  }));
+  const t = document.getElementById('footfallTime');
+  if (t) t.addEventListener('change', () => { FF.time = t.value || 'all'; rsRenderFootfall(); });
+}
+
+function ffMetresPerPx() {
+  const z = FOOTFALL_MAP ? FOOTFALL_MAP.getZoom() : 14;
+  return 156543.03 * Math.cos(53.48 * Math.PI / 180) / Math.pow(2, z);
+}
+function ffRadiusPx() { return Math.max(18, Math.min(60, Math.round(70 / ffMetresPerPx()))); }
+
+function ffHeatOptions() {
+  // Grow the blob with zoom so it stays street-sized (~120 m) on screen.
+  const z = FOOTFALL_MAP ? FOOTFALL_MAP.getZoom() : 14;
+  const radius = ffRadiusPx();
+  // maxZoom = current zoom stops leaflet.heat fading intensity when zoomed out.
+  return { radius, blur: Math.round(radius * 0.8), maxZoom: z, max: 1, minOpacity: 0.2,
+    gradient: { 0.15: '#1e3a8a', 0.3: '#2563eb', 0.45: '#22d3ee', 0.62: '#facc15', 0.8: '#f97316', 1.0: '#dc2626' } };
+}
+
+function rsRenderFootfall() {
+  const panel = document.getElementById('footfallPanel');
+  if (!panel) return;
+  const routesToShow = RS.route === 'all' ? Object.keys(STOPS_REGISTRY || {}) : [rsRouteKeyForBus(RS.route)];
+  const hasRoads = routesToShow.some((rk) => STOPS_REGISTRY[rk] && routeLinePoints(STOPS_REGISTRY[rk]).roads);
+  panel.hidden = !hasRoads || typeof L.heatLayer !== 'function';
+  if (panel.hidden) return;
+  initFootfallMap();
+  if (!FOOTFALL_MAP) return;
+
+  const w = ffWeights();
+  const maxW = Math.max(1, ...Object.values(w));
+  const points = []; const stopsSeen = new Map(); const bounds = [];
+  routesToShow.forEach((rk) => {
+    const route = STOPS_REGISTRY[rk]; if (!route) return;
+    // Sample the road at ~half a heat radius so overlap (and colour) is
+    // the same at every zoom level.
+    const step = Math.max(8, Math.min(150, ffMetresPerPx() * ffRadiusPx() * 0.5));
+    const road = ffDensify(routeLinePoints(route).pts, step);
+    (route.stops || []).forEach((st) => {
+      const key = rsKey(rk, st.name);
+      if (!stopsSeen.has(key)) stopsSeen.set(key, { st, rk });
+    });
+    stopsSeen.forEach(({ st, rk: r2 }, key) => {
+      if (r2 !== rk) return;
+      const f = (w[key] || 0) / maxW;
+      if (f <= 0) return;
+      points.push([st.lat, st.lng, f * 0.4]);
+      road.forEach((p) => {
+        const dm = Math.hypot((p[0] - st.lat) * 111320, (p[1] - st.lng) * 111320 * Math.cos(st.lat * Math.PI / 180));
+        if (dm <= 220) points.push([p[0], p[1], f * Math.exp(-Math.pow(dm / 110, 2)) * 0.2]);
+      });
+    });
+    road.forEach((p) => bounds.push(p));
+  });
+
+  if (FOOTFALL_HEAT) { FOOTFALL_MAP.removeLayer(FOOTFALL_HEAT); FOOTFALL_HEAT = null; }
+  FOOTFALL_HEAT = L.heatLayer(points, ffHeatOptions()).addTo(FOOTFALL_MAP);
+
+  // Stop labels with the counted number
+  FOOTFALL_LABELS.clearLayers();
+  const unit = FF.measure === 'on' ? 'on' : FF.measure === 'off' ? 'off' : 'people';
+  stopsSeen.forEach(({ st }, key) => {
+    const n = w[key] || 0;
+    L.circleMarker([st.lat, st.lng], { radius: 4, color: '#fff', weight: 1.5, fillColor: '#0f1117', fillOpacity: 1 })
+      .bindTooltip(escapeHtml(rsStopLabel(st.name)) + ' <span style="opacity:0.75">\u00b7 ' + n.toLocaleString() + ' ' + unit + '</span>',
+        { permanent: true, direction: 'right', offset: [8, 0], className: 'stop-name-label' })
+      .on('click', () => rsSelectStop(key))
+      .addTo(FOOTFALL_LABELS);
+  });
+
+  const timeLabel = (document.getElementById('footfallTime') || {}).selectedOptions ? document.getElementById('footfallTime').selectedOptions[0].textContent : 'All day';
+  const total = Object.values(w).reduce((a, b) => a + b, 0);
+  rsSetText('footfallSubtitle', total.toLocaleString() + ' ' + (unit === 'people' ? 'boardings + alightings' : unit === 'on' ? 'boardings' : 'alightings')
+    + ' \u00b7 ' + timeLabel + ' \u00b7 ' + rsRangeLabel() + ' \u00b7 click a stop to open it');
+
+  setTimeout(() => {
+    try {
+      FOOTFALL_MAP.invalidateSize();
+      if (!FOOTFALL_FITTED && bounds.length) { FOOTFALL_MAP.fitBounds(L.latLngBounds(bounds), { padding: [16, 16], maxZoom: 16 }); FOOTFALL_FITTED = true; }
+    } catch (e) { /* noop */ }
+  }, 80);
 }
 
 // Builds the Chart.js "matrix" heatmap once. Data is refreshed separately by

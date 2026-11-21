@@ -849,6 +849,34 @@
           </div>
         </div>
 
+        <!-- Street-level footfall heatmap (demo road routes) -->
+        <div class="chart-panel" id="footfallPanel" style="margin-top:var(--space-4)" hidden>
+          <div class="chart-header ff-header">
+            <div>
+              <div class="chart-title">Footfall heatmap</div>
+              <div class="chart-subtitle" id="footfallSubtitle">Passengers at each stop, spread along the streets either side</div>
+            </div>
+            <div class="ff-controls">
+              <div class="period-tabs" id="footfallMeasure" role="tablist" aria-label="What to count">
+                <button type="button" class="period-tab active" data-ff-measure="both">Everyone</button>
+                <button type="button" class="period-tab" data-ff-measure="on">Boardings</button>
+                <button type="button" class="period-tab" data-ff-measure="off">Alightings</button>
+              </div>
+              <select class="filter-select" id="footfallTime" aria-label="Time of day">
+                <option value="all">All day</option>
+                <option value="7-10">Morning peak (07:00–10:00)</option>
+                <option value="10-15">Midday (10:00–15:00)</option>
+                <option value="15-19">Afternoon peak (15:00–19:00)</option>
+                <option value="19-24">Evening (19:00–24:00)</option>
+              </select>
+            </div>
+          </div>
+          <div class="chart-body" style="padding:0;overflow:hidden;border-radius:0 0 12px 12px;position:relative">
+            <div id="footfallMap" style="width:100%;height:480px"></div>
+            <div class="ff-legend"><span>Fewer people</span><span class="ff-legend-grad"></span><span>More people</span></div>
+          </div>
+        </div>
+
         <div class="chart-panel" style="margin-top:var(--space-4)">
           <div class="chart-header">
             <div>
