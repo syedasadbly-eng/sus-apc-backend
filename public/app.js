@@ -2204,7 +2204,8 @@ async function populateBusDropdowns() {
     busList = configStore.gateways.map(gw => gw.label || gw.topic);
   }
   if (busList.length === 0) return;
-  const selectors = ['ridershipRoute', 'compareRoute', 'dataRoute', 'dataBus', 'routeSelect'];
+  // routeSelect (Routes & Stops) builds its own labelled options from the stop registry.
+  const selectors = ['ridershipRoute', 'compareRoute', 'dataRoute', 'dataBus'];
   selectors.forEach(id => {
     const sel = document.getElementById(id);
     if (!sel) return;
@@ -2871,8 +2872,78 @@ const stopBarValueLabels = {
   },
 };
 
+// ----- Routes & Stops state -----------------------------------------------
+// Return-direction visits ("Main Hospital (return)") are combined with the
+// outbound stop so each physical stop appears once.
+const RS = { route: 'all', stop: 'all', preset: '7', from: null, to: null, groups: [], daily: [], hourly: [], wired: false };
+let STOP_DAILY_CHART = null;
+let STOP_HOURLY_CHART = null;
+
+function rsBaseStop(name) {
+  return String(name || '')
+    .replace(/\s*\((return|rtn)\)\s*$/i, '')
+    .replace(/\s*\(\d[^)]*\)/g, '')      // street addresses, e.g. "(200 1st St SW)"
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+function rsKey(route, name) { return String(route) + '|' + rsBaseStop(name); }
+function rsStopLabel(name) { return shortStopName(rsBaseStop(name)); }
+function rsRouteShortName(route) {
+  // "Bus 515 — Downtown Inter-Campus Loop (A ↔ B)" -> "Downtown Inter-Campus Loop"
+  const raw = String((route && route.name) || '');
+  return raw.replace(/^Bus\s+\S+\s*[—–-]\s*/i, '').replace(/\s*\(.*\)\s*$/, '').trim();
+}
+function rsRouteOptions() {
+  const out = [];
+  Object.entries(STOPS_REGISTRY || {}).forEach(([k, r]) => {
+    const busId = (r.bus_ids && r.bus_ids[0]) || k;
+    out.push({ value: String(busId), routeKey: k, label: 'Route ' + k + (rsRouteShortName(r) ? ' \u00b7 ' + rsRouteShortName(r) : '') });
+  });
+  return out.sort((a, b) => a.routeKey.localeCompare(b.routeKey, undefined, { numeric: true }));
+}
+function rsDaysBetween(from, to) {
+  return Math.max(1, Math.round((Date.parse(to + 'T12:00:00Z') - Date.parse(from + 'T12:00:00Z')) / 86400000) + 1);
+}
+function rsDateList(from, to) {
+  const out = []; const d = new Date(from + 'T12:00:00Z'); const end = Date.parse(to + 'T12:00:00Z');
+  while (d.getTime() <= end && out.length < 400) { out.push(d.toISOString().slice(0, 10)); d.setUTCDate(d.getUTCDate() + 1); }
+  return out;
+}
+function rsSetText(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; }
+function rsRangeLabel() {
+  return RS.from === RS.to ? prettyDate(RS.from) : (prettyDate(RS.from) + ' \u2013 ' + prettyDate(RS.to));
+}
+function rsApplyPreset(preset) {
+  RS.preset = preset;
+  const today = displayDateStr();
+  const fromEl = document.getElementById('routeFromDate');
+  const toEl = document.getElementById('routeToDate');
+  if (preset !== 'custom') {
+    const days = parseInt(preset, 10) || 7;
+    const f = new Date(); f.setDate(f.getDate() - (days - 1));
+    RS.from = displayDateStr(f); RS.to = today;
+    if (fromEl) fromEl.value = RS.from;
+    if (toEl) toEl.value = RS.to;
+  } else {
+    let f = (fromEl && fromEl.value) || RS.from || today;
+    let t = (toEl && toEl.value) || RS.to || today;
+    if (t > today) t = today;
+    if (f > t) { const x = f; f = t; t = x; }
+    RS.from = f; RS.to = t;
+    if (fromEl) fromEl.value = f;
+    if (toEl) toEl.value = t;
+  }
+  document.querySelectorAll('#routePresetGroup [data-route-preset]').forEach((b) => {
+    const on = b.getAttribute('data-route-preset') === preset;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+  const custom = document.getElementById('routeCustomRange');
+  if (custom) custom.hidden = preset !== 'custom';
+}
+
 function initRoutes() {
-  // ----- Stop ranking bar chart -----
+  // ----- Passengers by stop bar chart (click a bar to open the stop) -----
   const stopCtx = document.getElementById('chartStopBoardings').getContext('2d');
   charts.stopBoardings = new Chart(stopCtx, {
     type: 'bar',
@@ -2885,8 +2956,14 @@ function initRoutes() {
       indexAxis: 'y',
       responsive: true, maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
-      animation: { duration: 600, easing: 'easeOutQuart' },
+      animation: { duration: 500, easing: 'easeOutQuart' },
       layout: { padding: { right: 48 } },
+      onClick: (evt, els) => {
+        if (!els || !els.length) return;
+        const g = charts.stopBoardings._rsKeys && charts.stopBoardings._rsKeys[els[0].index];
+        if (g) rsSelectStop(g);
+      },
+      onHover: (evt, els) => { if (evt.native && evt.native.target) evt.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
       plugins: {
         legend: { labels: { color: '#dbdce6', font: { size: 12, family: 'Inter', weight: '500' }, padding: 16, usePointStyle: true, pointStyle: 'circle', boxWidth: 10 } },
         tooltip: { ...tooltipDefaults(), padding: 12, callbacks: { label: (c) => ' ' + c.dataset.label + ': ' + Number(c.parsed.x).toLocaleString() } },
@@ -2898,217 +2975,381 @@ function initRoutes() {
     },
   });
 
-  // ----- Stop x Hour heatmap (real Chart.js matrix chart) -----
   initStopHourMatrixChart();
 
   // ----- Leaflet route map -----
   const mapEl = document.getElementById('routeMap');
   if (mapEl && window.L) {
     ROUTE_MAP = L.map('routeMap', { zoomControl: true, attributionControl: false, scrollWheelZoom: false })
-      .setView([44.024, -92.467], 13);
+      .setView(MAP_DEFAULT_CENTER, 13);
     addBaseLayer(ROUTE_MAP, 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
       maxZoom: 19, subdomains: 'abcd',
     });
     ROUTE_MAP_LAYER = L.layerGroup().addTo(ROUTE_MAP);
   }
 
-  // ----- Filters: default range = last 7 days -----
+  // ----- Filters -----
   const today = displayDateStr();
-  const wkAgo = new Date(); wkAgo.setDate(wkAgo.getDate() - 6);
-  const wkAgoStr = displayDateStr(wkAgo);
   const fromEl = document.getElementById('routeFromDate');
   const toEl = document.getElementById('routeToDate');
-  if (fromEl) { fromEl.value = wkAgoStr; fromEl.max = today; fromEl.addEventListener('change', loadRoutesData); }
-  if (toEl) { toEl.value = today; toEl.max = today; toEl.addEventListener('change', loadRoutesData); }
-  const routeSel = document.getElementById('routeSelect');
-  if (routeSel) routeSel.addEventListener('change', loadRoutesData);
+  if (fromEl) fromEl.max = today;
+  if (toEl) toEl.max = today;
+  rsApplyPreset('7');
 
-  // Preset buttons (1d / 7d / 30d)
-  document.querySelectorAll('#routePresetGroup .btn[data-route-preset]').forEach((btn) => {
+  const onCustomDate = () => { rsApplyPreset('custom'); loadRoutesData(); };
+  if (fromEl) fromEl.addEventListener('change', onCustomDate);
+  if (toEl) toEl.addEventListener('change', onCustomDate);
+
+  document.querySelectorAll('#routePresetGroup [data-route-preset]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      const days = parseInt(btn.getAttribute('data-route-preset'), 10) || 7;
-      const t = displayDateStr();
-      const f = new Date(); f.setDate(f.getDate() - (days - 1));
-      const fStr = displayDateStr(f);
-      if (fromEl) fromEl.value = fStr;
-      if (toEl) toEl.value = t;
-      document.querySelectorAll('#routePresetGroup .btn[data-route-preset]').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
+      const p = btn.getAttribute('data-route-preset');
+      rsApplyPreset(p);
+      if (p === 'custom') { if (fromEl) fromEl.focus(); return; }
       loadRoutesData();
     });
   });
-  // Mark 7d active by default
-  const sevenBtn = document.querySelector('#routePresetGroup .btn[data-route-preset="7"]');
-  if (sevenBtn) sevenBtn.classList.add('active');
 
-  // CSV export
+  const routeSel = document.getElementById('routeSelect');
+  if (routeSel) routeSel.addEventListener('change', () => {
+    RS.route = routeSel.value || 'all';
+    // Keep the chosen stop only if it belongs to the new route.
+    if (RS.stop !== 'all' && RS.route !== 'all' && RS.stop.split('|')[0] !== rsRouteKeyForBus(RS.route)) RS.stop = 'all';
+    loadRoutesData();
+  });
+  const stopSel = document.getElementById('routeStopSelect');
+  if (stopSel) stopSel.addEventListener('change', () => { rsSelectStop(stopSel.value || 'all'); });
+
+  const back = document.getElementById('stopDetailBack');
+  if (back) back.addEventListener('click', () => rsSelectStop('all'));
+
+  const tbody = document.getElementById('stopLeaderBody');
+  if (tbody) tbody.addEventListener('click', (e) => {
+    const tr = e.target.closest('tr[data-key]');
+    if (tr) rsSelectStop(tr.getAttribute('data-key'));
+  });
+  if (tbody) tbody.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const tr = e.target.closest('tr[data-key]');
+    if (tr) { e.preventDefault(); rsSelectStop(tr.getAttribute('data-key')); }
+  });
+
+  const det = document.getElementById('stopHourDetails');
+  if (det) det.addEventListener('toggle', () => {
+    if (det.open) { rsRenderHeatmap(); setTimeout(() => { try { STOP_HOUR_CHART && STOP_HOUR_CHART.resize(); } catch (e) {} }, 50); }
+  });
+
   const csvBtn = document.getElementById('routeExportCsv');
   if (csvBtn) csvBtn.addEventListener('click', exportRoutesCsv);
 
+  RS.wired = true;
   loadRoutesData();
 }
 
+function rsRouteKeyForBus(busId) {
+  for (const [k, r] of Object.entries(STOPS_REGISTRY || {})) {
+    if (String(k) === String(busId) || (r.bus_ids || []).map(String).includes(String(busId))) return String(k);
+  }
+  return String(busId);
+}
+
+function rsSelectStop(key) {
+  RS.stop = key || 'all';
+  const stopSel = document.getElementById('routeStopSelect');
+  if (stopSel && stopSel.value !== RS.stop) stopSel.value = RS.stop;
+  rsRender();
+}
+
+function rsPopulateRouteSelect() {
+  const sel = document.getElementById('routeSelect');
+  if (!sel) return;
+  const opts = rsRouteOptions();
+  const want = RS.route;
+  sel.innerHTML = '<option value="all">All routes</option>' + opts.map((o) => '<option value="' + escapeHtml(o.value) + '">' + escapeHtml(o.label) + '</option>').join('');
+  sel.value = opts.some((o) => o.value === want) ? want : 'all';
+  RS.route = sel.value;
+}
+
+function rsPopulateStopSelect() {
+  const sel = document.getElementById('routeStopSelect');
+  if (!sel) return;
+  // Registry order (the order buses drive), then any extra observed stops.
+  const routeKeys = RS.route === 'all' ? Object.keys(STOPS_REGISTRY || {}) : [rsRouteKeyForBus(RS.route)];
+  routeKeys.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  let html = '<option value="all">All stops</option>';
+  const valid = new Set(['all']);
+  routeKeys.forEach((rk) => {
+    const seen = new Set();
+    const items = [];
+    ((STOPS_REGISTRY[rk] && STOPS_REGISTRY[rk].stops) || []).forEach((st) => {
+      const key = rsKey(rk, st.name);
+      if (!seen.has(key)) { seen.add(key); items.push({ key, label: rsStopLabel(st.name) }); }
+    });
+    RS.groups.filter((g) => g.route === rk && !seen.has(g.key)).forEach((g) => { seen.add(g.key); items.push({ key: g.key, label: g.label }); });
+    if (!items.length) return;
+    html += '<optgroup label="Route ' + escapeHtml(rk) + '">' + items.map((i) => { valid.add(i.key); return '<option value="' + escapeHtml(i.key) + '">' + escapeHtml(i.label) + '</option>'; }).join('') + '</optgroup>';
+  });
+  sel.innerHTML = html;
+  if (!valid.has(RS.stop)) RS.stop = 'all';
+  sel.value = RS.stop;
+}
+
 async function loadRoutesData() {
-  const fromEl = document.getElementById('routeFromDate');
-  const toEl = document.getElementById('routeToDate');
-  const routeSel = document.getElementById('routeSelect');
-  const today = displayDateStr();
-  const from = (fromEl && fromEl.value) || today;
-  const to = (toEl && toEl.value) || today;
-  const busSel = (routeSel && routeSel.value) || 'all';
-  const busFilter = busSel === 'all' ? null : busSel;
-
+  if (!RS.from || !RS.to) rsApplyPreset(RS.preset || '7');
   await fetchStopsRegistry();
+  rsPopulateRouteSelect();
 
-  // Per-stop boardings/alightings for the window
-  const params = { from, to };
-  if (busFilter) params.bus_id = busFilter;
-  const payload = await apiFetch('/api/stops/boardings', params);
+  const params = { from: RS.from, to: RS.to };
+  if (RS.route !== 'all') params.bus_id = RS.route;
+  const reqId = (RS._req = (RS._req || 0) + 1);
+  const [payload, daily, hourly] = await Promise.all([
+    apiFetch('/api/stops/boardings', params),
+    apiFetch('/api/stops/daily', params),
+    apiFetch('/api/stops/hourly', params),
+  ]);
+  if (reqId !== RS._req) return; // a newer request superseded this one
   CURRENT_STOPS_PAYLOAD = payload;
 
-  const rawStops = (payload && payload.stops) || [];
-  // Apply route filter client-side too (in case bus_id wasn't honored)
-  const stops = busFilter ? rawStops.filter(s => String(s.route) === String(busFilter)) : rawStops;
+  const rk = RS.route === 'all' ? null : rsRouteKeyForBus(RS.route);
+  const keep = (r) => !rk || String(r.route) === rk;
+  RS.daily = ((daily && daily.rows) || []).filter(keep);
+  RS.hourly = ((hourly && hourly.rows) || []).filter(keep);
 
-  // --- KPI strip ---
-  const totalBoard = stops.reduce((a, s) => a + (s.boardings || 0), 0);
-  const totalAlight = stops.reduce((a, s) => a + (s.alightings || 0), 0);
-  const activeStops = stops.filter(s => (s.boardings || 0) + (s.alightings || 0) > 0).length;
-  const busiest = stops.slice().sort((a, b) => (b.boardings || 0) - (a.boardings || 0))[0];
+  const byKey = {};
+  ((payload && payload.stops) || []).filter(keep).forEach((s) => {
+    const key = rsKey(s.route, s.stop);
+    if (!byKey[key]) byKey[key] = { key, route: String(s.route), label: rsStopLabel(s.stop), boardings: 0, alightings: 0 };
+    byKey[key].boardings += s.boardings || 0;
+    byKey[key].alightings += s.alightings || 0;
+  });
+  RS.groups = Object.values(byKey).sort((a, b) => (b.boardings - a.boardings) || (b.alightings - a.alightings));
 
-  const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
-  const niceRange = (from === to) ? prettyDate(from) : (prettyDate(from) + ' - ' + prettyDate(to));
-  const niceRoute = busFilter ? ('Route ' + busFilter) : 'all routes';
+  rsPopulateStopSelect();
+  rsRender();
+}
 
-  setText('routeKpiBoard', totalBoard.toLocaleString());
-  setText('routeKpiBoardSub', niceRange + ' - ' + niceRoute);
-  setText('routeKpiAlight', totalAlight.toLocaleString());
-  setText('routeKpiAlightSub', niceRange + ' - ' + niceRoute);
-  setText('routeKpiStops', String(activeStops));
-  setText('routeKpiStopsSub', stops.length + ' total observed');
-  setText('routeKpiBusiest', busiest ? shortStopName(busiest.stop) : 'No data');
-  setText('routeKpiBusiestSub', busiest ? (Number(busiest.boardings).toLocaleString() + ' boardings - Route ' + busiest.route) : '--');
+function rsRender() {
+  const overview = document.getElementById('routesOverview');
+  const detail = document.getElementById('stopDetail');
+  const one = RS.stop !== 'all';
+  if (overview) overview.hidden = one;
+  if (detail) detail.hidden = !one;
+  const head = document.getElementById('stopDetailHead');
+  if (head) head.hidden = !one;
+  if (one) rsRenderStopDetail(); else rsRenderOverview();
+}
 
-  // --- Stop ranking bar chart (top 12 by boardings) ---
-  const topN = stops.slice().sort((a, b) => (b.boardings || 0) - (a.boardings || 0)).slice(0, 12);
-  const labels = topN.map(s => shortStopName(s.stop));
-  const boardings = topN.map(s => s.boardings || 0);
-  const alightings = topN.map(s => s.alightings || 0);
-  charts.stopBoardings.data.labels = labels;
-  charts.stopBoardings.data.datasets[0].data = boardings;
-  charts.stopBoardings.data.datasets[1].data = alightings;
-  // Color bars by route (overrides default white if a single route is selected)
-  if (busFilter) {
-    const col = routeColorFor(busFilter);
-    charts.stopBoardings.data.datasets[0].backgroundColor = ROUTE_WHITE;
-    charts.stopBoardings.data.datasets[1].backgroundColor = col.solid;
-  } else {
-    // mixed: keep white/gold defaults
-    charts.stopBoardings.data.datasets[0].backgroundColor = ROUTE_WHITE;
-    charts.stopBoardings.data.datasets[1].backgroundColor = ROUTE_GOLD;
-  }
+function rsRenderOverview() {
+  const groups = RS.groups;
+  const totalBoard = groups.reduce((a, g) => a + g.boardings, 0);
+  const totalAlight = groups.reduce((a, g) => a + g.alightings, 0);
+  const active = groups.filter((g) => g.boardings + g.alightings > 0);
+  const busiest = groups[0];
+  const scope = RS.route === 'all' ? 'all routes' : ('Route ' + rsRouteKeyForBus(RS.route));
+  const range = rsRangeLabel();
+
+  rsSetText('routeKpiBoard', totalBoard.toLocaleString());
+  rsSetText('routeKpiBoardSub', range + ' \u00b7 ' + scope);
+  rsSetText('routeKpiAlight', totalAlight.toLocaleString());
+  rsSetText('routeKpiAlightSub', totalBoard ? (Math.round((totalAlight / totalBoard) * 1000) / 10) + '% of boardings' : range);
+  rsSetText('routeKpi3Label', 'Busiest stop');
+  rsSetText('routeKpiBusiest', busiest && busiest.boardings ? busiest.label : 'No data');
+  rsSetText('routeKpiBusiestSub', busiest && busiest.boardings ? busiest.boardings.toLocaleString() + ' boardings \u00b7 Route ' + busiest.route : '--');
+  rsSetText('routeKpi4Label', 'Stops served');
+  rsSetText('routeKpiStops', String(active.length));
+  rsSetText('routeKpiStopsSub', 'with passengers \u00b7 ' + range);
+
+  // Bar chart: every stop (they are few), busiest first.
+  const top = groups.slice(0, 12);
+  charts.stopBoardings._rsKeys = top.map((g) => g.key);
+  charts.stopBoardings.data.labels = top.map((g) => RS.route === 'all' ? g.label + ' \u00b7 ' + g.route : g.label);
+  charts.stopBoardings.data.datasets[0].data = top.map((g) => g.boardings);
+  charts.stopBoardings.data.datasets[1].data = top.map((g) => g.alightings);
+  charts.stopBoardings.data.datasets[1].backgroundColor = RS.route === 'all' ? ROUTE_GOLD : routeColorFor(rsRouteKeyForBus(RS.route)).solid;
   charts.stopBoardings.update('active');
-  setText('stopRankSubtitle', 'Top ' + topN.length + ' stops - ' + niceRange + ' - ' + niceRoute);
+  rsSetText('stopRankSubtitle', range + ' \u00b7 ' + scope + ' \u00b7 click a bar to open that stop');
 
-  // --- Leaderboard table (all observed stops, ranked) ---
-  renderStopLeaderboard(stops);
-  setText('stopLeaderSubtitle', stops.length + ' stops - ' + niceRange + ' - ' + niceRoute + ' · Net Load = Boardings − Alightings');
+  // Table
+  const tbody = document.getElementById('stopLeaderBody');
+  if (tbody) {
+    if (!groups.length) {
+      tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:#8b8ea5">No passengers counted in this period.</td></tr>';
+    } else {
+      tbody.innerHTML = groups.map((g, i) => {
+        const net = g.boardings - g.alightings;
+        const netColor = net > 0 ? '#4ade80' : (net < 0 ? '#f87171' : '#c9cad8');
+        const share = totalBoard ? Math.round((g.boardings / totalBoard) * 1000) / 10 : 0;
+        return '<tr class="rs-row" data-key="' + escapeHtml(g.key) + '" tabindex="0" title="Open per-stop analysis">'
+          + '<td><span class="stop-rank-pill' + (i < 3 ? ' top' : '') + '">' + (i + 1) + '</span></td>'
+          + '<td style="color:#dbdce6;font-weight:500">' + escapeHtml(g.label) + '</td>'
+          + '<td><span class="route-pill r-' + escapeHtml(g.route) + '">' + escapeHtml(g.route) + '</span></td>'
+          + '<td style="text-align:right;color:#fff;font-weight:600">' + g.boardings.toLocaleString() + '</td>'
+          + '<td style="text-align:right;color:#f0d175">' + g.alightings.toLocaleString() + '</td>'
+          + '<td style="text-align:right;color:' + netColor + ';font-weight:600">' + (net > 0 ? '+' : '') + net.toLocaleString() + '</td>'
+          + '<td style="text-align:right"><span class="rs-share"><span style="width:' + Math.min(100, share) + '%"></span></span>' + share + '%</td>'
+          + '<td style="text-align:right;color:#8b8ea5">View &rarr;</td>'
+          + '</tr>';
+      }).join('');
+    }
+  }
+  rsSetText('stopLeaderSubtitle', groups.length + ' stops \u00b7 ' + range + ' \u00b7 both directions combined \u00b7 click a row for the per-stop analysis');
 
-  // --- Route map ---
-  renderRouteMap(stops, busFilter);
-  setText('routeMapSubtitle', 'Stops sized by boardings - ' + niceRange + ' - ' + niceRoute);
+  renderRouteMap();
+  rsSetText('routeMapSubtitle', 'Circle size = boardings \u00b7 ' + range + ' \u00b7 click a stop to open it');
 
-  // --- Stop x Hour heatmap matrix ---
-  try { await renderStopHourMatrix(from, to, busFilter, topN.slice(0, 10)); } catch (err) { console.warn('Heatmap update failed:', err); }
-  setText('heatmapSubtitle', 'Actual boardings by hour for the top ' + Math.min(10, topN.length) + ' stops - ' + niceRange + ' - ' + niceRoute);
+  const det = document.getElementById('stopHourDetails');
+  if (det && det.open) rsRenderHeatmap();
+}
+
+function rsRenderStopDetail() {
+  const key = RS.stop;
+  const [route] = key.split('|');
+  const g = RS.groups.find((x) => x.key === key) || { key, route, label: key.split('|').slice(1).join('|'), boardings: 0, alightings: 0 };
+  const days = rsDaysBetween(RS.from, RS.to);
+  const range = rsRangeLabel();
+  const routeObj = STOPS_REGISTRY && STOPS_REGISTRY[route];
+
+  rsSetText('stopDetailName', g.label);
+  rsSetText('stopDetailSub', 'Route ' + route + (routeObj && rsRouteShortName(routeObj) ? ' \u00b7 ' + rsRouteShortName(routeObj) : '') + ' \u00b7 ' + range + ' \u00b7 both directions combined');
+
+  // Per-day and per-hour series for this stop
+  const dates = rsDateList(RS.from, RS.to);
+  const perDay = {}; dates.forEach((d) => { perDay[d] = { b: 0, a: 0 }; });
+  RS.daily.forEach((r) => {
+    if (rsKey(r.route, r.stop) !== key) return;
+    if (!perDay[r.date]) perDay[r.date] = { b: 0, a: 0 };
+    perDay[r.date].b += r.boardings || 0;
+    perDay[r.date].a += r.alightings || 0;
+  });
+  const perHour = Array.from({ length: 24 }, () => ({ b: 0, a: 0 }));
+  RS.hourly.forEach((r) => {
+    if (rsKey(r.route, r.stop) !== key) return;
+    const h = utcHourToDisplayHour(r.hour);
+    perHour[h].b += r.boardings || 0;
+    perHour[h].a += r.alightings || 0;
+  });
+  const busiestHour = perHour.reduce((best, v, h) => (v.b > perHour[best].b ? h : best), 0);
+  const activeDays = dates.filter((d) => perDay[d].b + perDay[d].a > 0).length || 0;
+  const net = g.boardings - g.alightings;
+
+  rsSetText('routeKpiBoard', g.boardings.toLocaleString());
+  rsSetText('routeKpiBoardSub', 'got on here \u00b7 ' + range);
+  rsSetText('routeKpiAlight', g.alightings.toLocaleString());
+  rsSetText('routeKpiAlightSub', 'got off here \u00b7 net ' + (net > 0 ? '+' : '') + net.toLocaleString());
+  rsSetText('routeKpi3Label', 'Busiest hour');
+  rsSetText('routeKpiBusiest', perHour[busiestHour].b ? String(busiestHour).padStart(2, '0') + ':00\u2013' + String((busiestHour + 1) % 24).padStart(2, '0') + ':00' : 'No data');
+  rsSetText('routeKpiBusiestSub', perHour[busiestHour].b ? perHour[busiestHour].b.toLocaleString() + ' boardings in that hour' : '--');
+  rsSetText('routeKpi4Label', 'Avg boardings / day');
+  rsSetText('routeKpiStops', activeDays ? (Math.round((g.boardings / activeDays) * 10) / 10).toLocaleString() : '0');
+  rsSetText('routeKpiStopsSub', activeDays + ' of ' + days + ' days with passengers');
+
+  // Daily chart
+  const dLabels = dates.map((d) => prettyDate(d));
+  if (!STOP_DAILY_CHART) {
+    STOP_DAILY_CHART = new Chart(document.getElementById('chartStopDaily').getContext('2d'), {
+      type: 'bar',
+      data: { labels: [], datasets: [
+        { label: 'Boardings', data: [], backgroundColor: ROUTE_WHITE, borderRadius: 4, maxBarThickness: 18 },
+        { label: 'Alightings', data: [], backgroundColor: ROUTE_GOLD, borderRadius: 4, maxBarThickness: 18 },
+      ]},
+      options: {
+        responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { labels: { color: '#dbdce6', usePointStyle: true, pointStyle: 'circle', boxWidth: 10 } }, tooltip: tooltipDefaults() },
+        scales: {
+          x: { grid: { display: false }, ticks: { color: '#c9cad8', maxRotation: 0, autoSkip: true, maxTicksLimit: 10 } },
+          y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#c9cad8', precision: 0 } },
+        },
+      },
+    });
+  }
+  STOP_DAILY_CHART.data.labels = dLabels;
+  STOP_DAILY_CHART.data.datasets[0].data = dates.map((d) => perDay[d].b);
+  STOP_DAILY_CHART.data.datasets[1].data = dates.map((d) => perDay[d].a);
+  STOP_DAILY_CHART.update();
+  rsSetText('stopDailySubtitle', 'Boardings and alightings per day \u00b7 ' + range);
+
+  // Hourly chart: show the service span only (first..last hour with activity)
+  let h0 = perHour.findIndex((v) => v.b + v.a > 0);
+  let h1 = 23 - perHour.slice().reverse().findIndex((v) => v.b + v.a > 0);
+  if (h0 < 0) { h0 = 5; h1 = 23; }
+  const hours = []; for (let h = h0; h <= h1; h++) hours.push(h);
+  const div = activeDays || 1;
+  if (!STOP_HOURLY_CHART) {
+    STOP_HOURLY_CHART = new Chart(document.getElementById('chartStopHourly').getContext('2d'), {
+      type: 'bar',
+      data: { labels: [], datasets: [
+        { label: 'Boardings', data: [], backgroundColor: ROUTE_WHITE, borderRadius: 4, maxBarThickness: 16 },
+        { label: 'Alightings', data: [], backgroundColor: ROUTE_GOLD, borderRadius: 4, maxBarThickness: 16 },
+      ]},
+      options: {
+        responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { labels: { color: '#dbdce6', usePointStyle: true, pointStyle: 'circle', boxWidth: 10 } }, tooltip: { ...tooltipDefaults(), callbacks: { label: (c) => ' ' + c.dataset.label + ': ' + c.parsed.y + ' per day' } } },
+        scales: {
+          x: { grid: { display: false }, ticks: { color: '#c9cad8', maxRotation: 0 } },
+          y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#c9cad8' } },
+        },
+      },
+    });
+  }
+  STOP_HOURLY_CHART.data.labels = hours.map((h) => String(h).padStart(2, '0') + ':00');
+  STOP_HOURLY_CHART.data.datasets[0].data = hours.map((h) => Math.round((perHour[h].b / div) * 10) / 10);
+  STOP_HOURLY_CHART.data.datasets[1].data = hours.map((h) => Math.round((perHour[h].a / div) * 10) / 10);
+  STOP_HOURLY_CHART.update();
+  rsSetText('stopHourlySubtitle', activeDays > 1 ? 'Average per day across ' + activeDays + ' days' : 'Counts by hour');
+
+  // Day-by-day table (newest first)
+  const body = document.getElementById('stopDailyBody');
+  if (body) {
+    body.innerHTML = dates.slice().reverse().map((d) => {
+      const v = perDay[d]; const n = v.b - v.a;
+      const nc = n > 0 ? '#4ade80' : (n < 0 ? '#f87171' : '#c9cad8');
+      return '<tr><td style="color:#dbdce6">' + escapeHtml(prettyDate(d)) + '</td>'
+        + '<td style="text-align:right;color:#fff;font-weight:600">' + v.b.toLocaleString() + '</td>'
+        + '<td style="text-align:right;color:#f0d175">' + v.a.toLocaleString() + '</td>'
+        + '<td style="text-align:right;color:' + nc + '">' + (n > 0 ? '+' : '') + n.toLocaleString() + '</td></tr>';
+    }).join('') || '<tr><td colspan="4" style="text-align:center;padding:24px;color:#8b8ea5">No data</td></tr>';
+  }
+  setTimeout(() => { try { STOP_DAILY_CHART.resize(); STOP_HOURLY_CHART.resize(); } catch (e) {} }, 30);
 }
 
 function prettyDate(yyyyMmDd) {
   if (!yyyyMmDd) return '';
   const d = new Date(yyyyMmDd + 'T12:00:00Z');
-  return d.toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric' });
-}
-
-function renderStopLeaderboard(stops) {
-  const tbody = document.getElementById('stopLeaderBody');
-  if (!tbody) return;
-  if (!stops.length) {
-    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:#8b8ea5">No stop activity in this window.</td></tr>';
-    return;
-  }
-  const sorted = stops.slice().sort((a, b) => (b.boardings || 0) - (a.boardings || 0));
-  const rows = sorted.map((s, i) => {
-    const rank = i + 1;
-    const pillCls = rank <= 3 ? 'stop-rank-pill top' : 'stop-rank-pill';
-    const route = String(s.route || '');
-    const routeCls = 'route-pill r-' + route;
-    const net = (s.boardings || 0) - (s.alightings || 0);
-    const netStr = (net > 0 ? '+' : '') + net.toLocaleString();
-    const netColor = net > 0 ? '#4ade80' : (net < 0 ? '#f87171' : '#c9cad8');
-    return '<tr>'
-      + '<td><span class="' + pillCls + '">' + rank + '</span></td>'
-      + '<td><span class="' + routeCls + '">' + route + '</span></td>'
-      + '<td style="color:#dbdce6">' + escapeHtml(shortStopName(s.stop)) + '</td>'
-      + '<td style="text-align:right;color:#fff;font-weight:600">' + Number(s.boardings || 0).toLocaleString() + '</td>'
-      + '<td style="text-align:right;color:#f0d175">' + Number(s.alightings || 0).toLocaleString() + '</td>'
-      + '<td style="text-align:right;color:' + netColor + ';font-weight:600">' + netStr + '</td>'
-      + '<td style="text-align:right;color:#8b8ea5">' + Number(s.event_count || 0).toLocaleString() + '</td>'
-      + '</tr>';
-  });
-  tbody.innerHTML = rows.join('');
+  return d.toLocaleDateString('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'short' });
 }
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-function renderRouteMap(stops, busFilter) {
+function renderRouteMap() {
   if (!ROUTE_MAP || !ROUTE_MAP_LAYER) return;
   ROUTE_MAP_LAYER.clearLayers();
   if (!STOPS_REGISTRY) return;
-
-  // Build per-route registries we want to show (filtered)
-  const routesToShow = busFilter ? [busFilter] : Object.keys(STOPS_REGISTRY);
-  // Map stop boarding totals onto registry stops by name match for sizing
-  const boardingByStop = {};
-  stops.forEach(s => {
-    // s.stop may be a "A -> B" segment; use first segment's leading name as the key
-    const head = String(s.stop).split('->')[0].trim();
-    boardingByStop[head] = (boardingByStop[head] || 0) + (s.boardings || 0);
-  });
-
+  const routesToShow = RS.route === 'all' ? Object.keys(STOPS_REGISTRY) : [rsRouteKeyForBus(RS.route)];
+  const byKey = {}; RS.groups.forEach((g) => { byKey[g.key] = g; });
   const allLatLngs = [];
-  routesToShow.forEach(rk => {
+  routesToShow.forEach((rk) => {
     const route = STOPS_REGISTRY[rk];
     if (!route) return;
     const col = routeColorFor(rk);
-    const pts = (route.stops || []).map(st => [st.lat, st.lng]);
-    if (pts.length >= 2) {
-      L.polyline(pts, { color: col.hex, weight: 3, opacity: 0.7, dashArray: '6 6' }).addTo(ROUTE_MAP_LAYER);
-    }
-    // Find max boardings on this route for radius scaling
-    const routeMax = Math.max(1, ...((route.stops || []).map(st => boardingByStop[st.name] || 0)));
-    (route.stops || []).forEach(st => {
-      const v = boardingByStop[st.name] || 0;
-      const r = 6 + Math.sqrt(v / routeMax) * 18; // 6..24 radius
-      const marker = L.circleMarker([st.lat, st.lng], {
-        radius: r, color: col.hex, weight: 2, fillColor: col.hex, fillOpacity: 0.55,
-      });
-      const html = '<div style="font-family:Inter,sans-serif;font-size:12px;color:#222;min-width:180px">'
-        + '<div style="font-weight:700;margin-bottom:4px">' + escapeHtml(st.name) + '</div>'
-        + '<div>Route ' + escapeHtml(rk) + '</div>'
-        + '<div style="margin-top:4px">Boardings: <b>' + v.toLocaleString() + '</b></div>'
-        + '</div>';
-      marker.bindPopup(html);
+    const pts = (route.stops || []).map((st) => [st.lat, st.lng]);
+    if (pts.length >= 2) L.polyline(pts, { color: col.hex, weight: 3, opacity: 0.7, dashArray: '6 6' }).addTo(ROUTE_MAP_LAYER);
+    const seen = new Set();
+    const uniq = (route.stops || []).filter((st) => { const k = rsKey(rk, st.name); if (seen.has(k)) return false; seen.add(k); return true; });
+    const routeMax = Math.max(1, ...uniq.map((st) => (byKey[rsKey(rk, st.name)] || {}).boardings || 0));
+    uniq.forEach((st) => {
+      const key = rsKey(rk, st.name);
+      const g = byKey[key] || { boardings: 0, alightings: 0 };
+      const r = 6 + Math.sqrt((g.boardings || 0) / routeMax) * 18;
+      const marker = L.circleMarker([st.lat, st.lng], { radius: r, color: col.hex, weight: 2, fillColor: col.hex, fillOpacity: 0.55 });
+      marker.bindTooltip('<b>' + escapeHtml(rsStopLabel(st.name)) + '</b><br>Route ' + escapeHtml(rk)
+        + '<br>On ' + (g.boardings || 0).toLocaleString() + ' \u00b7 Off ' + (g.alightings || 0).toLocaleString(), { direction: 'top' });
+      marker.on('click', () => rsSelectStop(key));
       marker.addTo(ROUTE_MAP_LAYER);
       allLatLngs.push([st.lat, st.lng]);
     });
   });
-
-  if (allLatLngs.length) {
-    try { ROUTE_MAP.fitBounds(L.latLngBounds(allLatLngs), { padding: [24, 24], maxZoom: 15 }); } catch (e) { /* noop */ }
-  }
-  // Resize fix in case the panel just became visible
+  if (allLatLngs.length) { try { ROUTE_MAP.fitBounds(L.latLngBounds(allLatLngs), { padding: [28, 28], maxZoom: 15 }); } catch (e) { /* noop */ } }
   setTimeout(() => { try { ROUTE_MAP.invalidateSize(); } catch (e) {} }, 100);
 }
 
@@ -3197,82 +3438,63 @@ function buildStopHourMatrixChart(canvas) {
   });
 }
 
-// Renders the heatmap with real per-stop, per-hour counts (route + stop objects,
-// as returned by /api/stops/boardings — same shape as the Top Stops bar chart uses).
-async function renderStopHourMatrix(from, to, busFilter, topStops) {
+// Heatmap for the busiest stops, using the already-fetched hourly rows.
+function rsRenderHeatmap() {
   const wrap = document.getElementById('stopHourMatrixWrap');
   const emptyEl = document.getElementById('stopHourMatrixEmpty');
   if (!STOP_HOUR_CHART) return;
-
-  if (!topStops || !topStops.length) {
-    if (wrap) wrap.style.display = 'none';
-    if (emptyEl) emptyEl.style.display = 'block';
-    return;
-  }
+  const top = RS.groups.filter((g) => g.boardings + g.alightings > 0).slice(0, 10);
+  if (!top.length) { if (wrap) wrap.style.display = 'none'; if (emptyEl) emptyEl.style.display = 'block'; return; }
   if (wrap) wrap.style.display = '';
   if (emptyEl) emptyEl.style.display = 'none';
-
-  const params = { from, to };
-  if (busFilter) params.bus_id = busFilter;
-  const resp = await apiFetch('/api/stops/hourly', params);
-  const rawRows = (resp && resp.rows) || [];
-
-  // Aggregate real events into stop|displayHour buckets (converting the
-  // backend's UTC hour into the dashboard's display timezone).
-  const byStopHour = {};
-  rawRows.forEach(r => {
-    const dh = utcHourToDisplayHour(r.hour);
-    const key = r.stop + '|' + dh;
-    if (!byStopHour[key]) byStopHour[key] = { boardings: 0, alightings: 0 };
-    byStopHour[key].boardings += (r.boardings || 0);
-    byStopHour[key].alightings += (r.alightings || 0);
+  const cells = {};
+  RS.hourly.forEach((r) => {
+    const k = rsKey(r.route, r.stop) + '#' + utcHourToDisplayHour(r.hour);
+    if (!cells[k]) cells[k] = { b: 0, a: 0 };
+    cells[k].b += r.boardings || 0; cells[k].a += r.alightings || 0;
   });
-
-  const stopLabels = topStops.map(s => shortStopName(s.stop) + ' \u00b7 Route ' + s.route);
-  const points = [];
-  let maxVal = 0;
-  topStops.forEach(s => {
-    const rowLabel = shortStopName(s.stop) + ' \u00b7 Route ' + s.route;
+  const labels = top.map((g) => g.label + ' \u00b7 Route ' + g.route);
+  const points = []; let maxVal = 0;
+  top.forEach((g, i) => {
     for (let h = 0; h < 24; h++) {
-      const cell = byStopHour[s.stop + '|' + h] || { boardings: 0, alightings: 0 };
-      if (cell.boardings > maxVal) maxVal = cell.boardings;
-      points.push({ x: String(h).padStart(2, '0') + ':00', y: rowLabel, v: cell.boardings, a: cell.alightings });
+      const c = cells[g.key + '#' + h] || { b: 0, a: 0 };
+      if (c.b > maxVal) maxVal = c.b;
+      points.push({ x: String(h).padStart(2, '0') + ':00', y: labels[i], v: c.b, a: c.a });
     }
   });
-  if (maxVal <= 0) maxVal = 1;
-
-  // Resize the canvas's container to fit the number of stop rows before the
-  // chart recalculates cell height, so rows stay readable instead of squashed.
-  if (wrap) wrap.style.height = Math.max(140, stopLabels.length * 40 + 50) + 'px';
-
+  if (wrap) wrap.style.height = Math.max(140, labels.length * 40 + 50) + 'px';
   const ds = STOP_HOUR_CHART.data.datasets[0];
-  ds.data = points;
-  ds._max = maxVal;
-  ds._rowCount = stopLabels.length;
-  STOP_HOUR_CHART.options.scales.y.labels = stopLabels;
+  ds.data = points; ds._max = maxVal || 1; ds._rowCount = labels.length;
+  STOP_HOUR_CHART.options.scales.y.labels = labels;
   STOP_HOUR_CHART.resize();
   STOP_HOUR_CHART.update();
+  rsSetText('heatmapSubtitle', 'Boardings by hour for the ' + labels.length + ' busiest stops \u00b7 ' + rsRangeLabel());
 }
 
 function exportRoutesCsv() {
-  const stops = (CURRENT_STOPS_PAYLOAD && CURRENT_STOPS_PAYLOAD.stops) || [];
-  if (!stops.length) { alert('No stop data to export.'); return; }
-  const f = (CURRENT_STOPS_PAYLOAD.filters && CURRENT_STOPS_PAYLOAD.filters.from) || 'from';
-  const t = (CURRENT_STOPS_PAYLOAD.filters && CURRENT_STOPS_PAYLOAD.filters.to) || 'to';
-  const header = ['route', 'stop', 'boardings', 'alightings', 'net_load', 'event_count', 'first_seen', 'last_seen'];
-  const lines = [header.join(',')];
-  stops.forEach(s => {
-    const net = (s.boardings || 0) - (s.alightings || 0);
-    const cells = [s.route, s.stop, s.boardings, s.alightings, net, s.event_count || 0, s.first_seen || '', s.last_seen || ''];
-    lines.push(cells.map(c => '"' + String(c == null ? '' : c).replace(/"/g, '""') + '"').join(','));
-  });
+  const q = (c) => '"' + String(c == null ? '' : c).replace(/"/g, '""') + '"';
+  let lines; let name;
+  if (RS.stop !== 'all') {
+    const [route] = RS.stop.split('|');
+    const g = RS.groups.find((x) => x.key === RS.stop);
+    const label = g ? g.label : RS.stop.split('|').slice(1).join('|');
+    const perDay = {}; rsDateList(RS.from, RS.to).forEach((d) => { perDay[d] = { b: 0, a: 0 }; });
+    RS.daily.forEach((r) => { if (rsKey(r.route, r.stop) === RS.stop && perDay[r.date]) { perDay[r.date].b += r.boardings || 0; perDay[r.date].a += r.alightings || 0; } });
+    lines = [['date', 'route', 'stop', 'boardings', 'alightings', 'net'].join(',')];
+    Object.entries(perDay).forEach(([d, v]) => lines.push([d, route, label, v.b, v.a, v.b - v.a].map(q).join(',')));
+    name = 'stop_' + label.replace(/[^a-z0-9]+/gi, '_').toLowerCase() + '_' + RS.from + '_to_' + RS.to + '.csv';
+  } else {
+    if (!RS.groups.length) { alert('No stop data to export.'); return; }
+    const total = RS.groups.reduce((a, g) => a + g.boardings, 0) || 1;
+    lines = [['route', 'stop', 'boardings', 'alightings', 'net', 'share_of_boardings_pct'].join(',')];
+    RS.groups.forEach((g) => lines.push([g.route, g.label, g.boardings, g.alightings, g.boardings - g.alightings, Math.round((g.boardings / total) * 1000) / 10].map(q).join(',')));
+    name = 'stops_' + RS.from + '_to_' + RS.to + '.csv';
+  }
   const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url;
-  a.download = 'stops_' + f + '_to_' + t + '.csv';
-  document.body.appendChild(a);
-  a.click();
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click();
   setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 0);
 }
 
