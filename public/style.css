@@ -3825,3 +3825,10 @@ html, body {
 /* Demo white-label: hide the pilot client's logo (DEMO_WHITE_LABEL, default on) */
 html.demo-white-label .login-cobrand,
 html.demo-white-label .sidebar-cobrand { display: none !important; }
+
+/* Demo label-free map: the vector style is already dark, so drop the
+   invert filter used for the live raster tiles. */
+html.demo-nolabel-map .leaflet-tile-pane,
+html.demo-nolabel-map #routeMap .leaflet-tile { filter: none; }
+html.demo-nolabel-map .leaflet-control-attribution { background: rgba(15,17,23,0.7); color: #8b93a7; font-size: 10px; }
+html.demo-nolabel-map .leaflet-control-attribution a { color: #8b93a7; }

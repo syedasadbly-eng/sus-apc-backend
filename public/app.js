@@ -156,6 +156,40 @@ if (DEMO_WHITE_LABEL) {
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run); else run();
 }
 
+
+// ----- Map base layer -------------------------------------------------------
+// White-label demo: a dark OpenFreeMap vector style with every label layer
+// removed, so no town, street or building names appear on the map. Free for
+// commercial use, no key; attribution "© OpenMapTiles © OpenStreetMap".
+// Live dashboard keeps its existing raster tiles.
+const DEMO_MAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/dark';
+let _demoMapLibs = null;
+function loadDemoMapLibs() {
+  if (_demoMapLibs) return _demoMapLibs;
+  const addCss = (href) => { const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = href; document.head.appendChild(l); };
+  const addJs = (src) => new Promise((ok, fail) => { const t = document.createElement('script'); t.src = src; t.onload = ok; t.onerror = fail; document.head.appendChild(t); });
+  addCss('https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css');
+  _demoMapLibs = addJs('https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js')
+    .then(() => addJs('https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.0.22/leaflet-maplibre-gl.js'))
+    .then(() => fetch(DEMO_MAP_STYLE_URL).then((r) => r.json()))
+    .then((style) => { style.layers = style.layers.filter((l) => l.type !== 'symbol'); return style; });
+  return _demoMapLibs;
+}
+function addBaseLayer(map, url, opts) {
+  if (!DEMO_WHITE_LABEL) { L.tileLayer(url, opts).addTo(map); return; }
+  L.control.attribution({ prefix: false }).addAttribution('&copy; OpenMapTiles &copy; OpenStreetMap contributors').addTo(map);
+  loadDemoMapLibs().then((style) => {
+    if (!L.maplibreGL) throw new Error('maplibre-gl-leaflet missing');
+    L.maplibreGL({ style, interactive: false }).addTo(map);
+  }).catch((e) => {
+    // Never leave the map blank: fall back to the normal tiles.
+    console.warn('[DEMO] label-free map unavailable, using default tiles', e);
+    document.documentElement.classList.remove('demo-nolabel-map');
+    L.tileLayer(url, opts).addTo(map);
+  });
+}
+if (DEMO_WHITE_LABEL) document.documentElement.classList.add('demo-nolabel-map');
+
 function startDemoFeed() {
   // Present as connected: the server-side simulator is the feed.
   mqttState.connected = true;
@@ -1361,7 +1395,7 @@ function initOverview() {
 function initOverviewMap() {
   if (maps.overview) return;
   const map = L.map('overviewMap', { zoomControl: true, attributionControl: false }).setView(MAP_DEFAULT_CENTER, 12);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
+  addBaseLayer(map, 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 });
   renderStopsOnMap(map, 'overview');
   updateMapBusMarkers(map, 'overview');
   maps.overview = map;
@@ -1996,7 +2030,7 @@ function updateHourlyFlowChart(period) {
 function initLiveMap() {
   if (maps.liveMap) return;
   const map = L.map('liveMapFull', { zoomControl: true, attributionControl: false }).setView(MAP_DEFAULT_CENTER, 12);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
+  addBaseLayer(map, 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 });
   renderStopsOnMap(map, 'liveMap');
   updateMapBusMarkers(map, 'liveMap');
   maps.liveMap = map;
@@ -2872,9 +2906,9 @@ function initRoutes() {
   if (mapEl && window.L) {
     ROUTE_MAP = L.map('routeMap', { zoomControl: true, attributionControl: false, scrollWheelZoom: false })
       .setView([44.024, -92.467], 13);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    addBaseLayer(ROUTE_MAP, 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
       maxZoom: 19, subdomains: 'abcd',
-    }).addTo(ROUTE_MAP);
+    });
     ROUTE_MAP_LAYER = L.layerGroup().addTo(ROUTE_MAP);
   }
 
