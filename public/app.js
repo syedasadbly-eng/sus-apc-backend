@@ -874,6 +874,20 @@ const ROUTE_LINE_COLORS = ['#8b74d1', '#d4af37', '#7dd3fc', '#fb7185'];
 function routeColorByIndex(i) { return ROUTE_LINE_COLORS[i % ROUTE_LINE_COLORS.length]; }
 
 // Draw small dot markers for every stop on every route. Idempotent per map.
+// Full road-following line for a route when the stop file carries
+// per-leg paths (path_to_next); otherwise straight lines between stops.
+function routeLinePoints(route) {
+  const stops = (route && route.stops) || [];
+  const hasPaths = stops.some((s) => Array.isArray(s.path_to_next) && s.path_to_next.length > 1);
+  if (!hasPaths) return { pts: stops.map((s) => [s.lat, s.lng]), roads: false };
+  const pts = [];
+  stops.forEach((s) => {
+    if (Array.isArray(s.path_to_next) && s.path_to_next.length > 1) s.path_to_next.forEach((p) => pts.push(p));
+    else pts.push([s.lat, s.lng]);
+  });
+  return { pts, roads: true };
+}
+
 async function renderStopsOnMap(map, mapKey) {
   if (!map) return;
   const routes = await loadStopRegistry();
@@ -883,7 +897,13 @@ async function renderStopsOnMap(map, mapKey) {
   stopMarkers[mapKey] = [];
   let idx = 0;
   for (const [routeKey, route] of Object.entries(routes)) {
-    const color = routeColorByIndex(idx++);
+    const line = routeLinePoints(route);
+    // Road-path routes (demo) use the same per-route colours as the Route map.
+    const color = line.roads && ROUTE_COLOR[String(routeKey)] ? ROUTE_COLOR[String(routeKey)].hex : routeColorByIndex(idx);
+    idx++;
+    if (line.roads && line.pts.length > 1) {
+      stopMarkers[mapKey].push(L.polyline(line.pts, { color, weight: 3, opacity: 0.45, interactive: false }).addTo(map));
+    }
     (route.stops || []).forEach((s, sIdx) => {
       const isTerminal = sIdx === 0 || sIdx === route.stops.length - 1;
       const dotIcon = L.divIcon({
@@ -3332,8 +3352,10 @@ function renderRouteMap() {
     const route = STOPS_REGISTRY[rk];
     if (!route) return;
     const col = routeColorFor(rk);
-    const pts = (route.stops || []).map((st) => [st.lat, st.lng]);
-    if (pts.length >= 2) L.polyline(pts, { color: col.hex, weight: 3, opacity: 0.7, dashArray: '6 6' }).addTo(ROUTE_MAP_LAYER);
+    const line = routeLinePoints(route);
+    const pts = line.pts;
+    if (pts.length >= 2) L.polyline(pts, line.roads ? { color: col.hex, weight: 4, opacity: 0.75 } : { color: col.hex, weight: 3, opacity: 0.7, dashArray: '6 6' }).addTo(ROUTE_MAP_LAYER);
+    if (line.roads) pts.forEach((p) => allLatLngs.push(p));
     const seen = new Set();
     const uniq = (route.stops || []).filter((st) => { const k = rsKey(rk, st.name); if (seen.has(k)) return false; seen.add(k); return true; });
     const routeMax = Math.max(1, ...uniq.map((st) => (byKey[rsKey(rk, st.name)] || {}).boardings || 0));

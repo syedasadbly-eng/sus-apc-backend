@@ -45,6 +45,23 @@ if (ENABLED) {
   // alightings. The simulated count is already near-true, so the model would
   // only make the Welfare Console disagree with the dashboard.
   if (process.env.WELFARE_DERIVED_OCCUPANCY === undefined) process.env.WELFARE_DERIVED_OCCUPANCY = 'false';
+
+  // DEMO_CITY=manchester: the demo's routes, stops, depots, clock and weather
+  // all move to Manchester. Each can still be overridden by its own variable.
+  const CITY = String(process.env.DEMO_CITY || '').toLowerCase();
+  if (CITY === 'manchester') {
+    const def = (k, v) => { if (process.env[k] === undefined || process.env[k] === '') process.env[k] = v; };
+    def('STOPS_PATH', require('path').join(__dirname, '..', 'data', 'stops-demo-manchester.json'));
+    def('DISPLAY_TZ', 'Europe/London');
+    def('WEATHER_LAT', '53.4808');
+    def('WEATHER_LNG', '-2.2426');
+    def('WEATHER_LABEL', 'Manchester, UK');
+    def('WEATHER_UNITS', 'metric');
+    def('WELFARE_DEPOTS', JSON.stringify([
+      { name: 'Main Hospital', lat: 53.46268, lng: -2.22728, radiusM: 180, buses: ['515'] },
+      { name: 'Park & Ride North', lat: 53.5166, lng: -2.24617, radiusM: 180, buses: ['419'] },
+    ]));
+  }
 }
 
 const CFG = {
@@ -421,7 +438,7 @@ function init(c) {
   for (const [routeKey, route] of Object.entries((c.stopRegistry && c.stopRegistry.routes) || {})) {
     for (const bid of route.bus_ids || [routeKey]) {
       if (!BUSES[bid]) continue;
-      STOPS[bid] = (route.stops || []).map((s) => ({ name: s.name, lat: s.lat, lng: s.lng }));
+      STOPS[bid] = (route.stops || []).map((s) => ({ name: s.name, lat: s.lat, lng: s.lng, path: Array.isArray(s.path_to_next) ? s.path_to_next : null }));
       LOOP_MIN[bid] = route.loop_minutes || 45;
     }
   }
@@ -588,8 +605,35 @@ function positionAt(busId, plan, now) {
   if (now <= a.ts + dwellMs || a === b) return { lat: a.lat, lng: a.lng, speed: 0, inService: true };
   const f = Math.min(1, (now - a.ts - dwellMs) / Math.max(1, b.ts - a.ts - 2 * dwellMs));
   if (f >= 1) return { lat: b.lat, lng: b.lng, speed: 0, inService: true };
+  // Terminus layover (last stop back to the first, same place): parked.
+  if (Math.abs(a.lat - b.lat) < 0.0003 && Math.abs(a.lng - b.lng) < 0.0003) return { lat: a.lat, lng: a.lng, speed: 0, inService: true };
+  const speed = 22 + 8 * Math.sin(now / 13000);
+  // Follow the road path for this leg when the stop file has one.
+  const stops = STOPS[busId] || [];
+  const leg = stops[a.stopIdx];
+  if (leg && leg.path && leg.path.length >= 2 && b.stopIdx === (a.stopIdx + 1) % stops.length) {
+    const p = pointAlong(leg.path, f);
+    return { lat: p[0], lng: p[1], speed, inService: true };
+  }
   const jitter = (Math.sin(now / 9000) * 0.00008);
-  return { lat: a.lat + (b.lat - a.lat) * f + jitter, lng: a.lng + (b.lng - a.lng) * f - jitter, speed: 22 + 8 * Math.sin(now / 13000), inService: true };
+  return { lat: a.lat + (b.lat - a.lat) * f + jitter, lng: a.lng + (b.lng - a.lng) * f - jitter, speed, inService: true };
+}
+
+// Point at fraction f (0..1) of the way along a [[lat,lng],...] path, by distance.
+function pointAlong(path, f) {
+  const d = (p, q) => Math.hypot((q[0] - p[0]) * 111320, (q[1] - p[1]) * 111320 * Math.cos(p[0] * Math.PI / 180));
+  let total = 0;
+  for (let i = 1; i < path.length; i++) total += d(path[i - 1], path[i]);
+  let want = Math.max(0, Math.min(1, f)) * total;
+  for (let i = 1; i < path.length; i++) {
+    const seg = d(path[i - 1], path[i]);
+    if (want <= seg || i === path.length - 1) {
+      const t = seg ? Math.min(1, want / seg) : 0;
+      return [path[i - 1][0] + (path[i][0] - path[i - 1][0]) * t, path[i - 1][1] + (path[i][1] - path[i - 1][1]) * t];
+    }
+    want -= seg;
+  }
+  return path[path.length - 1];
 }
 
 function tick() {

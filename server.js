@@ -1189,6 +1189,19 @@ app.use(express.json());
 // Demo white-label: strip the pilot client's name from all JSON responses.
 app.use(demo.whiteLabelMiddleware);
 
+// Demo: seed positions and the fallback depot come from the demo's own stop
+// file (e.g. DEMO_CITY=manchester), not the pilot client's coordinates.
+if (demo.ENABLED) {
+  const routes = Object.values(STOP_REGISTRY.routes || {});
+  routes.forEach((r) => {
+    const first = (r.stops || [])[0];
+    if (!first) return;
+    (r.bus_ids || []).forEach((bid) => { BUS_STATIC_LOCATIONS[bid] = { lat: first.lat, lng: first.lng, label: first.name }; });
+  });
+  const f0 = routes[0] && (routes[0].stops || [])[0];
+  if (f0) Object.assign(DEPOT_FALLBACK, { lat: f0.lat, lng: f0.lng, label: f0.name });
+}
+
 // Welfare development interface — mounts /api/welfare and creates the
 // welfare_events table. Returns null and does nothing when the flag is off.
 welfare.initWelfare(app, db, { topicMode: MQTT_CONFIG.topic, capacity: BUS_CAPACITY });
