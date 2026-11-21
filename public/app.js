@@ -999,8 +999,63 @@ let STOP_CARD_ACTIVE = null;
 // Routes & Stops: cards follow the page's Period selection.
 const RS_CARD_OPTS = { keepClick: true, range: () => ({ from: RS.from, to: RS.to, label: rsRangeLabel() }) };
 
+// ----- Map readability helpers -------------------------------------------
+// Route colour key (demo road routes) so stop labels don't need route ids.
+const ROUTE_KEYS = {};
+function addRouteKey(map, mapKey, routes) {
+  if (!map || !routes) return;
+  const rows = [];
+  let idx = 0;
+  for (const [rk, route] of Object.entries(routes)) {
+    const line = routeLinePoints(route);
+    const color = line.roads && ROUTE_COLOR[String(rk)] ? ROUTE_COLOR[String(rk)].hex : routeColorByIndex(idx);
+    idx++;
+    if (!line.roads) continue;
+    rows.push(`<div class="rk-row"><span class="rk-line" style="background:${color}"></span><span class="rk-id">${escapeHtml(rk)}</span><span>${escapeHtml(rsRouteShortName(route) || ('Route ' + rk))}</span></div>`);
+  }
+  if (ROUTE_KEYS[mapKey]) { try { map.removeControl(ROUTE_KEYS[mapKey]); } catch (e) { /* noop */ } delete ROUTE_KEYS[mapKey]; }
+  if (!rows.length) return;
+  const ctl = L.control({ position: 'topright' });
+  ctl.onAdd = () => { const d = L.DomUtil.create('div', 'route-key'); d.innerHTML = rows.join(''); L.DomEvent.disableClickPropagation(d); return d; };
+  ctl.addTo(map);
+  ROUTE_KEYS[mapKey] = ctl;
+}
+
+// Hide permanent stop labels that would overlap another label or a bus.
+// Terminal / earlier labels win; hidden ones still show via the hover card.
+function declutterMapLabels(map) {
+  const c = map && map.getContainer && map.getContainer();
+  if (!c || !c.offsetParent) return;
+  const kept = [];
+  c.querySelectorAll('.live-bus-icon, .leaflet-control .route-key').forEach((el) => {
+    const r = el.getBoundingClientRect(); if (r.width) kept.push(r);
+    const nx = el.querySelector && el.querySelector('.bus-next'); if (nx) { const r2 = nx.getBoundingClientRect(); if (r2.width) kept.push(r2); }
+  });
+  const pad = 3;
+  const hit = (a, b) => !(a.right + pad < b.left || a.left - pad > b.right || a.bottom + pad < b.top || a.top - pad > b.bottom);
+  c.querySelectorAll('.leaflet-tooltip.stop-name-label').forEach((el) => {
+    el.classList.remove('label-hidden');
+    const r = el.getBoundingClientRect();
+    if (kept.some((k) => hit(r, k))) el.classList.add('label-hidden');
+    else kept.push(r);
+  });
+}
+const DECLUTTER_T = new WeakMap();
+function declutterSoon(map) {
+  if (!map) return;
+  if (!map._declutterWired) {
+    map._declutterWired = true;
+    map.on('zoomend moveend resize', () => declutterSoon(map));
+  }
+  clearTimeout(DECLUTTER_T.get(map));
+  DECLUTTER_T.set(map, setTimeout(() => declutterMapLabels(map), 120));
+}
+// Buses move continuously, so re-check the Live Map once a second.
+setInterval(() => { try { if (maps.liveMap) declutterMapLabels(maps.liveMap); if (maps.overview) declutterMapLabels(maps.overview); } catch (e) { /* noop */ } }, 1000);
+
 async function renderStopsOnMap(map, mapKey) {
   if (!map) return;
+  if (DEMO) map.options.zoomSnap = 0.25;   // frame the routes snugly
   const routes = await loadStopRegistry();
   if (!routes) return;
   // Clear existing stop markers for this map.
@@ -1027,7 +1082,7 @@ async function renderStopsOnMap(map, mapKey) {
       const showName = line.roads && !isReturn; // demo: name every stop on the map
       const m = L.marker([s.lat, s.lng], { icon: dotIcon }).addTo(map)
         .bindTooltip(showName
-          ? `<strong>${escapeHtml(s.name)}</strong> <span style="opacity:0.7">· ${routeKey}</span>`
+          ? `${escapeHtml(rsStopLabel(s.name))}`
           : `<strong>${s.name}</strong><br><span style="opacity:0.7">Route ${routeKey}</span>`,
           showName ? { permanent: true, direction: 'right', offset: [8, 0], className: 'stop-name-label' } : { direction: 'top', offset: [0, -6] });
       if (mapKey === 'liveMap') {
@@ -1039,6 +1094,8 @@ async function renderStopsOnMap(map, mapKey) {
       stopMarkers[mapKey].push(m);
     });
   }
+  addRouteKey(map, mapKey, routes);
+  declutterSoon(map);
   // Demo road routes: frame both whole routes once, so every stop is in view.
   if (DEMO && !mapAutoFitted[mapKey + ':routes']) {
     const lines = stopMarkers[mapKey].filter((l) => l instanceof L.Polyline);
@@ -1242,7 +1299,7 @@ function drawBusTrail(map, st, now) {
     const f = (s + 1) / TRAIL_SEGS;          // older -> fainter, thinner
     // Soft glow underneath, crisp core on top.
     st.segs.push(L.polyline(chunk.map((p) => [p[0], p[1]]), {
-      color: st.color, weight: 10 + 6 * f, opacity: 0.08 + 0.17 * f, lineCap: 'round', lineJoin: 'round', interactive: false,
+      color: st.color, weight: 10 + 6 * f, opacity: 0.08 + 0.17 * f, lineCap: 'round', lineJoin: 'round', interactive: false, className: 'bus-trail',
     }).addTo(map));
     st.segs.push(L.polyline(chunk.map((p) => [p[0], p[1]]), {
       color: st.color, weight: 3 + 5 * f, opacity: 0.15 + 0.8 * f, lineCap: 'round', lineJoin: 'round', interactive: false, className: 'bus-trail',
@@ -1312,16 +1369,21 @@ function updateMapBusMarkers(map, mapKey) {
     seen.add(bus.id);
     const occClass = bus.occupancy > 75 ? 'high-occupancy' : bus.occupancy > 50 ? 'medium-occupancy' : '';
     const shortId = bus.id.length > 3 ? bus.id.slice(-3) : bus.id;
-    const iconHtml = `<div class="bus-marker ${occClass}">${shortId}</div>`;
+    let nextHtml = '';
+    if (DEMO && bus.nextStopName && mapKey === 'liveMap') {
+      const dest = rsStopLabel(String(bus.nextStopName));
+      nextHtml = `<div class="bus-next"><span class="bus-next-arrow">&rarr;</span>${escapeHtml(dest)}</div>`;
+    }
+    const iconHtml = `<div class="bus-marker ${occClass}">${shortId}</div>${nextHtml}`;
     const target = [bus.lat, bus.lng];
     let st = state[bus.id];
     if (!st) {
-      const marker = L.marker(target, { icon: L.divIcon({ className: '', html: iconHtml, iconSize: [32, 32], iconAnchor: [16, 16] }), zIndexOffset: 1000 }).addTo(map);
+      const marker = L.marker(target, { icon: L.divIcon({ className: 'live-bus-icon', html: iconHtml, iconSize: [32, 32], iconAnchor: [16, 16] }), zIndexOffset: 1000 }).addTo(map);
       st = state[bus.id] = { marker, iconHtml, trail: busBackfillTrail(bus.id, target, now), backfilled: !!busRouteFor(bus.id), segs: [], path: null, color: busTrailColor(bus), target };
       marker.bindPopup(busPopupHtml(bus));
       drawBusTrail(map, st, now);
     } else {
-      if (st.iconHtml !== iconHtml) { st.marker.setIcon(L.divIcon({ className: '', html: iconHtml, iconSize: [32, 32], iconAnchor: [16, 16] })); st.iconHtml = iconHtml; }
+      if (st.iconHtml !== iconHtml) { st.marker.setIcon(L.divIcon({ className: 'live-bus-icon', html: iconHtml, iconSize: [32, 32], iconAnchor: [16, 16] })); st.iconHtml = iconHtml; }
       st.marker.setPopupContent(busPopupHtml(bus));
       st.color = busTrailColor(bus);
       if (!st.backfilled && busRouteFor(bus.id)) {
@@ -1337,13 +1399,6 @@ function updateMapBusMarkers(map, mapKey) {
         else { st.path = busRoadPath(bus.id, from, target) || [from, target]; st.t0 = now; st.dur = BUS_ANIM_MS; }
         st.target = target;
       }
-    }
-    if (DEMO && bus.nextStopName && mapKey === 'liveMap') {
-      const dest = String(bus.nextStopName).replace(/\s*\((return|rtn)\)\s*$/i, '');
-      const html = `&rarr; ${escapeHtml(dest)}`;
-      if (!st.marker.getTooltip()) st.marker.bindTooltip(html, { permanent: true, direction: 'top', offset: [0, -18], className: 'bus-dest-label' });
-      else if (st.tipHtml !== html) st.marker.setTooltipContent(html);
-      st.tipHtml = html;
     }
     mapMarkers[mapKey].push(st.marker);
   });
@@ -1732,6 +1787,16 @@ function initOverviewMap() {
   });
 }
 
+// One clean route line, e.g. "Downtown Inter-Campus Loop · Main Hospital ↔ Outpatient Centre"
+// (route and routeName often carry the same text, which doubled it up).
+function fleetRouteText(bus) {
+  const raw = String(bus.routeName || bus.route || '');
+  if (!raw) return '';
+  const name = raw.replace(/^Bus\s+\S+\s*[—–-]\s*/i, '');
+  const m = name.match(/^(.*?)\s*\((.*)\)\s*$/);
+  return escapeHtml(m ? m[1] + ' \u00b7 ' + m[2] : name);
+}
+
 function renderFleetList() {
   const list = document.getElementById('fleetList');
   if (!list) return;
@@ -1746,7 +1811,7 @@ function renderFleetList() {
     const occClass = bus.occupancy > 75 ? 'occupancy-high' : bus.occupancy > 50 ? 'occupancy-medium' : 'occupancy-low';
     return `<div class="fleet-item">
       <div class="fleet-badge" style="background:${bus.routeColor}">${bus.id.length > 3 ? bus.id.slice(-3) : bus.id}</div>
-      <div class="fleet-info"><div class="fleet-name">${bus.id}</div><div class="fleet-route">${bus.route ? 'Route '+bus.route+' — '+bus.routeName : ''}</div></div>
+      <div class="fleet-info"><div class="fleet-name">${bus.id}</div><div class="fleet-route">${fleetRouteText(bus)}</div></div>
       <div class="fleet-stats"><div class="fleet-passengers">${bus.passengers} pax</div><div class="fleet-occupancy ${occClass}">${bus.occupancy}%</div></div>
     </div>`;
   }).join('');
@@ -3375,7 +3440,7 @@ function initRoutes() {
   // ----- Leaflet route map -----
   const mapEl = document.getElementById('routeMap');
   if (mapEl && window.L) {
-    ROUTE_MAP = L.map('routeMap', { zoomControl: true, attributionControl: false, scrollWheelZoom: false })
+    ROUTE_MAP = L.map('routeMap', { zoomControl: true, attributionControl: false, scrollWheelZoom: false, zoomSnap: DEMO ? 0.25 : 1 })
       .setView(MAP_DEFAULT_CENTER, 13);
     addBaseLayer(ROUTE_MAP, 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
       maxZoom: 19, subdomains: 'abcd',
@@ -3742,7 +3807,7 @@ function renderRouteMap() {
       const marker = L.circleMarker([st.lat, st.lng], { radius: r, color: col.hex, weight: 2, fillColor: col.hex, fillOpacity: 0.55 });
       if (line.roads) {
         // Demo: name always visible next to the circle.
-        marker.bindTooltip(escapeHtml(rsStopLabel(st.name)) + ' <span style="opacity:0.7">\u00b7 ' + (g.boardings || 0).toLocaleString() + ' on</span>',
+        marker.bindTooltip(escapeHtml(rsStopLabel(st.name)),
           { permanent: true, direction: 'right', offset: [r, 0], className: 'stop-name-label' });
       } else {
         marker.bindTooltip('<b>' + escapeHtml(rsStopLabel(st.name)) + '</b><br>Route ' + escapeHtml(rk)
@@ -3755,7 +3820,9 @@ function renderRouteMap() {
       allLatLngs.push([st.lat, st.lng]);
     });
   });
-  if (allLatLngs.length) { try { ROUTE_MAP.fitBounds(L.latLngBounds(allLatLngs), { padding: [28, 28], maxZoom: 15 }); } catch (e) { /* noop */ } }
+  if (allLatLngs.length) { try { ROUTE_MAP.fitBounds(L.latLngBounds(allLatLngs), { padding: [36, 36], maxZoom: 15 }); } catch (e) { /* noop */ } }
+  if (STOPS_REGISTRY) addRouteKey(ROUTE_MAP, 'routeMap', RS.route === 'all' ? STOPS_REGISTRY : { [rsRouteKeyForBus(RS.route)]: STOPS_REGISTRY[rsRouteKeyForBus(RS.route)] });
+  declutterSoon(ROUTE_MAP);
   setTimeout(() => { try { ROUTE_MAP.invalidateSize(); } catch (e) {} }, 100);
 }
 
@@ -3799,7 +3866,7 @@ function initFootfallMap() {
   const panel = document.getElementById('footfallPanel');
   const el = document.getElementById('footfallMap');
   if (!panel || !el || !window.L || FOOTFALL_MAP) return;
-  FOOTFALL_MAP = L.map('footfallMap', { zoomControl: true, attributionControl: false, scrollWheelZoom: false }).setView(MAP_DEFAULT_CENTER, 14);
+  FOOTFALL_MAP = L.map('footfallMap', { zoomControl: true, attributionControl: false, scrollWheelZoom: false, zoomSnap: DEMO ? 0.25 : 1 }).setView(MAP_DEFAULT_CENTER, 14);
   addBaseLayer(FOOTFALL_MAP, 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19, subdomains: 'abcd' });
   FOOTFALL_LABELS = L.layerGroup().addTo(FOOTFALL_MAP);
   FOOTFALL_MAP.on('zoomend', () => { if (FOOTFALL_HEAT) rsRenderFootfall(); });
@@ -3884,7 +3951,7 @@ function rsRenderFootfall() {
     const mk = L.circleMarker([st.lat, st.lng], { radius: 4, color: '#fff', weight: 1.5, fillColor: '#0f1117', fillOpacity: 1 });
     attachStopHoverCard(mk, rk, rsBaseStop(st.name), routeColorFor(rk).hex, RS_CARD_OPTS);
     mk
-      .bindTooltip(escapeHtml(rsStopLabel(st.name)) + ' <span style="opacity:0.75">\u00b7 ' + n.toLocaleString() + ' ' + unit + '</span>',
+      .bindTooltip(escapeHtml(rsStopLabel(st.name)),
         { permanent: true, direction: 'right', offset: [8, 0], className: 'stop-name-label' })
       .on('click', () => rsSelectStop(key))
       .addTo(FOOTFALL_LABELS);
@@ -3898,7 +3965,8 @@ function rsRenderFootfall() {
   setTimeout(() => {
     try {
       FOOTFALL_MAP.invalidateSize();
-      if (!FOOTFALL_FITTED && bounds.length) { FOOTFALL_MAP.fitBounds(L.latLngBounds(bounds), { padding: [16, 16], maxZoom: 16 }); FOOTFALL_FITTED = true; }
+      if (!FOOTFALL_FITTED && bounds.length) { FOOTFALL_MAP.fitBounds(L.latLngBounds(bounds), { padding: [24, 24], maxZoom: 16 }); FOOTFALL_FITTED = true; }
+      declutterSoon(FOOTFALL_MAP);
     } catch (e) { /* noop */ }
   }, 80);
 }
@@ -5184,6 +5252,7 @@ function initHistoryControls() {
       const mode = btn.dataset.mode;
       document.querySelectorAll('.map-mode-tab').forEach(b => b.classList.toggle('active', b === btn));
       HISTORY.mode = mode;
+      if (maps.liveMap) maps.liveMap.getContainer().classList.toggle('history-on', mode === 'history');
       const liveBar = document.getElementById('liveFilterBar');
       const histBar = document.getElementById('historyFilterBar');
       const scrubber = document.getElementById('playbackScrubber');
