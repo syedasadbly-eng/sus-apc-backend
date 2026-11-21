@@ -1210,7 +1210,7 @@ try {
 app.get('/demo-config.js', (req, res) => {
   res.type('application/javascript').set('Cache-Control', 'no-store');
   // White-label class is set here, before first paint, so the client logo never flashes.
-  res.send(`window.SUS_DEMO = ${JSON.stringify(demo.clientConfig())};\n`
+  res.send(`window.SUS_DEMO = ${JSON.stringify({ ...demo.clientConfig(), tz: DISPLAY_TZ })};\n`
     + `if (window.SUS_DEMO.whiteLabel) document.documentElement.classList.add('demo-white-label');`);
 });
 app.get('/api/demo/status', (req, res) => res.json(demo.clientConfig()));
