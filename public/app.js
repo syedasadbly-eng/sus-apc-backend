@@ -915,9 +915,9 @@ function stopCardReplayTime() {
   return pt ? new Date(pt.timestamp) : null;
 }
 
-async function stopCardData(routeKey, stopName) {
-  const r = stopCardRange();
-  const until = stopCardReplayTime();
+async function stopCardData(routeKey, stopName, opts) {
+  const r = (opts && opts.range) ? opts.range() : stopCardRange();
+  const until = (opts && opts.range) ? null : stopCardReplayTime();
   // Round the replay time to the minute so scrubbing reuses responses.
   const untilIso = until ? new Date(Math.floor(until.getTime() / 60000) * 60000 + 59999).toISOString() : '';
   const key = [routeKey, stopName, r.from, r.to, untilIso].join('|');
@@ -967,18 +967,19 @@ function stopCardHtml(routeKey, stopName, color, res) {
   return html + '</div>';
 }
 
-function attachStopHoverCard(marker, routeKey, stopName, color) {
+function attachStopHoverCard(marker, routeKey, stopName, color, opts) {
+  opts = opts || {};
   let token = 0;
   const open = async () => {
     const map = marker._map; if (!map) return;
     const my = ++token;
     if (!STOP_CARD_POPUP) STOP_CARD_POPUP = L.popup({ closeButton: false, autoPan: false, className: 'stop-card-popup', offset: [0, -6], maxWidth: 300 });
     STOP_CARD_POPUP.setLatLng(marker.getLatLng()).setContent(stopCardHtml(routeKey, stopName, color, null)).openOn(map);
-    const res = await stopCardData(routeKey, stopName);
+    const res = await stopCardData(routeKey, stopName, opts);
     if (my !== token || !map.hasLayer(STOP_CARD_POPUP)) return;
     STOP_CARD_POPUP.setContent(stopCardHtml(routeKey, stopName, color, res));
     marker._stopCardRefresh = async () => {
-      const r2 = await stopCardData(routeKey, stopName);
+      const r2 = await stopCardData(routeKey, stopName, opts);
       if (my === token && map.hasLayer(STOP_CARD_POPUP)) STOP_CARD_POPUP.setContent(stopCardHtml(routeKey, stopName, color, r2));
     };
     STOP_CARD_ACTIVE = marker;
@@ -986,7 +987,7 @@ function attachStopHoverCard(marker, routeKey, stopName, color) {
   const close = () => { token++; if (STOP_CARD_POPUP && marker._map) marker._map.closePopup(STOP_CARD_POPUP); if (STOP_CARD_ACTIVE === marker) STOP_CARD_ACTIVE = null; };
   marker.on('mouseover', open);
   marker.on('mouseout', close);
-  marker.on('click', open);   // touch screens
+  if (!opts.keepClick) marker.on('click', open);   // touch screens
   // Also open from the permanent stop-name label.
   marker.on('tooltipopen', (e) => {
     const el = e.tooltip && e.tooltip.getElement && e.tooltip.getElement();
@@ -994,6 +995,9 @@ function attachStopHoverCard(marker, routeKey, stopName, color) {
   });
 }
 let STOP_CARD_ACTIVE = null;
+
+// Routes & Stops: cards follow the page's Period selection.
+const RS_CARD_OPTS = { keepClick: true, range: () => ({ from: RS.from, to: RS.to, label: rsRangeLabel() }) };
 
 async function renderStopsOnMap(map, mapKey) {
   if (!map) return;
@@ -3745,6 +3749,8 @@ function renderRouteMap() {
           + '<br>On ' + (g.boardings || 0).toLocaleString() + ' \u00b7 Off ' + (g.alightings || 0).toLocaleString(), { direction: 'top' });
       }
       marker.on('click', () => rsSelectStop(key));
+      if (!line.roads) marker.unbindTooltip();   // the hover card replaces the plain tip
+      attachStopHoverCard(marker, rk, rsBaseStop(st.name), col.hex, RS_CARD_OPTS);
       marker.addTo(ROUTE_MAP_LAYER);
       allLatLngs.push([st.lat, st.lng]);
     });
@@ -3873,9 +3879,11 @@ function rsRenderFootfall() {
   // Stop labels with the counted number
   FOOTFALL_LABELS.clearLayers();
   const unit = FF.measure === 'on' ? 'on' : FF.measure === 'off' ? 'off' : 'people';
-  stopsSeen.forEach(({ st }, key) => {
+  stopsSeen.forEach(({ st, rk }, key) => {
     const n = w[key] || 0;
-    L.circleMarker([st.lat, st.lng], { radius: 4, color: '#fff', weight: 1.5, fillColor: '#0f1117', fillOpacity: 1 })
+    const mk = L.circleMarker([st.lat, st.lng], { radius: 4, color: '#fff', weight: 1.5, fillColor: '#0f1117', fillOpacity: 1 });
+    attachStopHoverCard(mk, rk, rsBaseStop(st.name), routeColorFor(rk).hex, RS_CARD_OPTS);
+    mk
       .bindTooltip(escapeHtml(rsStopLabel(st.name)) + ' <span style="opacity:0.75">\u00b7 ' + n.toLocaleString() + ' ' + unit + '</span>',
         { permanent: true, direction: 'right', offset: [8, 0], className: 'stop-name-label' })
       .on('click', () => rsSelectStop(key))
