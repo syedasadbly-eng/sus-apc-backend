@@ -64,6 +64,7 @@ live client feed.
    | `DEMO_MODE` | `true` |
    | `DB_PATH` | `/data/demo.db` |
    | `DEMO_OPEN_ACCESS` | `true` to skip the password (optional) |
+   | `DEMO_WHITE_LABEL` | On by default: hides the pilot client's name and logo. `false` keeps them |
    | `DEMO_BADGE` | `true` (default) |
    | `DEMO_ADMIN_TOKEN` | any secret, to protect `/api/demo/incident` (recommended) |
 

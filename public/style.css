@@ -3821,3 +3821,7 @@ html, body {
   color: #fbbf24; background: rgba(251, 191, 36, 0.12);
   border: 1px solid rgba(251, 191, 36, 0.35);
 }
+
+/* Demo white-label: hide the pilot client's logo (DEMO_WHITE_LABEL, default on) */
+html.demo-white-label .login-cobrand,
+html.demo-white-label .sidebar-cobrand { display: none !important; }

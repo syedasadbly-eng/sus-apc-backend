@@ -1186,6 +1186,8 @@ function scheduleMidnightReset() {
 const app = express();
 app.use(cors());
 app.use(express.json());
+// Demo white-label: strip the pilot client's name from all JSON responses.
+app.use(demo.whiteLabelMiddleware);
 
 // Welfare development interface — mounts /api/welfare and creates the
 // welfare_events table. Returns null and does nothing when the flag is off.
@@ -1195,7 +1197,7 @@ welfare.initWelfare(app, db, { topicMode: MQTT_CONFIG.topic, capacity: BUS_CAPAC
 // /daily and /ridership. Wrapped so a weather fault can never stop the server.
 try {
   weather.initWeather(app, db, {
-    lat: DEPOT_FALLBACK.lat, lng: DEPOT_FALLBACK.lng, label: 'Rochester, MN (Mayo Clinic)',
+    lat: DEPOT_FALLBACK.lat, lng: DEPOT_FALLBACK.lng, label: (demo.ENABLED && demo.clientConfig().whiteLabel) ? 'Rochester, MN' : 'Rochester, MN (Mayo Clinic)',
     timezone: DISPLAY_TZ, displayDateStr,
   });
 } catch (err) {
@@ -1207,7 +1209,9 @@ try {
 // Always served: on a normal service it just says { enabled: false }.
 app.get('/demo-config.js', (req, res) => {
   res.type('application/javascript').set('Cache-Control', 'no-store');
-  res.send(`window.SUS_DEMO = ${JSON.stringify(demo.clientConfig())};`);
+  // White-label class is set here, before first paint, so the client logo never flashes.
+  res.send(`window.SUS_DEMO = ${JSON.stringify(demo.clientConfig())};\n`
+    + `if (window.SUS_DEMO.whiteLabel) document.documentElement.classList.add('demo-white-label');`);
 });
 app.get('/api/demo/status', (req, res) => res.json(demo.clientConfig()));
 // Demo only: raise an incident on demand during a live presentation.

@@ -115,6 +115,49 @@ if (DEMO) {
   configStore.mqtt = { host: '', port: 0, username: '', password: '', useTls: true, path: '/mqtt', topic: 'bus/#' };
 }
 
+// White-label demo: the server already strips the pilot client's name from
+// API data; this removes it from the static page too (logos, tooltips,
+// placeholders) and keeps any later-rendered text clean.
+const DEMO_WHITE_LABEL = !!(DEMO && DEMO.whiteLabel);
+function demoScrub(str) {
+  if (!DEMO_WHITE_LABEL || typeof str !== 'string' || !/mayo/i.test(str)) return str;
+  return str
+    .replace(/\s*\(\s*Mayo\s+Clinic\s*\)/gi, '')
+    .replace(/\(\s*Mayo\s+/gi, '(')
+    .replace(/\bMayo\s+Clinic\s+Rochester\b/gi, 'Rochester')
+    .replace(/\bMayo\s+Clinic['’]s\b/gi, 'the')
+    .replace(/\bMayo['’]s\b/gi, 'the')
+    .replace(/\bat\s+Mayo\s+Clinic\b/gi, 'on site')
+    .replace(/\bMayo\s+Clinic\s+/gi, '')
+    .replace(/\bMayo\s+Clinic\b/gi, 'Client')
+    .replace(/\bMayo\s+/gi, '')
+    .replace(/\s*\bMayo\b/gi, '');
+}
+function demoScrubTree(root) {
+  if (!DEMO_WHITE_LABEL || !root) return;
+  if (root.nodeType === 3) { const t = demoScrub(root.nodeValue); if (t !== root.nodeValue) root.nodeValue = t; return; }
+  if (root.nodeType !== 1 && root.nodeType !== 9) return;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let n; while ((n = walker.nextNode())) { const t = demoScrub(n.nodeValue); if (t !== n.nodeValue) n.nodeValue = t; }
+  const els = root.querySelectorAll ? root.querySelectorAll('[title],[placeholder],[alt],[aria-label]') : [];
+  els.forEach((el) => ['title', 'placeholder', 'alt', 'aria-label'].forEach((a) => {
+    const v = el.getAttribute(a); if (v && /mayo/i.test(v)) el.setAttribute(a, demoScrub(v));
+  }));
+}
+if (DEMO_WHITE_LABEL) {
+  document.documentElement.classList.add('demo-white-label');
+  document.title = demoScrub(document.title);
+  const run = () => {
+    demoScrubTree(document.body);
+    new MutationObserver((muts) => muts.forEach((m) => {
+      if (m.type === 'characterData') demoScrubTree(m.target);
+      else if (m.type === 'attributes') demoScrubTree(m.target.parentNode || m.target);
+      else m.addedNodes.forEach(demoScrubTree);
+    })).observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['title', 'placeholder', 'alt', 'aria-label'] });
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run); else run();
+}
+
 function startDemoFeed() {
   // Present as connected: the server-side simulator is the feed.
   mqttState.connected = true;
@@ -4666,7 +4709,7 @@ async function exportWelfareAuditPDF(from, to, busId, clientName) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
   const org = 'Smart Urban Sensing Ltd';
-  const site = clientName || 'Mayo Clinic Shuttle (Fleet Welfare)';
+  const site = clientName || (DEMO_WHITE_LABEL ? 'Demo Shuttle Fleet (Fleet Welfare)' : 'Mayo Clinic Shuttle (Fleet Welfare)');
 
   // Header banner
   doc.setFillColor(15, 23, 42); // slate-900
