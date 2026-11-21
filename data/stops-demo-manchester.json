@@ -5,7 +5,7 @@
  },
  "routes": {
   "515": {
-   "name": "Bus 515 — Downtown Inter-Campus Loop (Main Hospital ↔ Outpatient Centre ↔ West Campus)",
+   "name": "Bus 515 — Oxford Road Hospital Link (Main Hospital ↔ Outpatient Centre ↔ West Campus)",
    "loop_minutes": 40,
    "bus_ids": [
     "515"
@@ -1052,7 +1052,7 @@
    ]
   },
   "419": {
-   "name": "Bus 419 — NW Patient Parking Shuttle (Park & Ride North ↔ Clinics Building)",
+   "name": "Bus 419 — Cheetham Hill Park & Ride (Park & Ride North ↔ Clinics Building)",
    "loop_minutes": 50,
    "bus_ids": [
     "419"
