@@ -2873,6 +2873,20 @@ function renderRouteShare(allRows, from, to, windowDays, noPrev) {
   }).join('') || '<div class="rid-empty">No boardings in this period</div>';
 }
 
+// "Avg Boardings/Day" KPI over finished days only (today is still in
+// progress), so it matches the Ridership Trend's "Average per day".
+function ridSetAvgKpi(dailyRows, from, to) {
+  const today = displayDateStr();
+  const end = to >= today ? (() => { const d = new Date(today + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - 1); return d.toISOString().slice(0, 10); })() : to;
+  let days = 0;
+  for (const d = new Date(from + 'T12:00:00Z'); d.toISOString().slice(0, 10) <= end; d.setUTCDate(d.getUTCDate() + 1)) days++;
+  const sum = (dailyRows || []).filter((r) => r.date >= from && r.date <= end).reduce((a, r) => a + (r.total_in || 0), 0);
+  const avg = days ? Math.round(sum / days) : 0;
+  setKPI('ridership-kpi-avg', avg.toLocaleString());
+  const sub = document.getElementById('ridership-kpi-avg-sub');
+  if (sub) sub.textContent = days ? 'over ' + days + ' finished day' + (days === 1 ? '' : 's') + (end !== to ? ' (today excluded)' : '') : 'no finished days yet';
+}
+
 function ridHighlightBusiestDay(dowAvg) {
   const ch = charts.dayOfWeek; if (!ch || !dowAvg) return;
   const mx = Math.max(...dowAvg);
@@ -3002,6 +3016,7 @@ async function loadRidershipData() {
     renderRidershipCharts(rows, viewMode, fromDate, now);
     try {
       renderRidershipHero(dailyAll.daily, viewMode, fromDate, now, windowDays);
+      ridSetAvgKpi(dailyAll.daily, from, to);
       renderRouteShare(dailyAll.daily, from, to, windowDays);
       renderRidershipHeat(hourlyData && hourlyData.hourly, from, to);
     } catch (e) { console.warn('[ridership] chart render failed', e); }
@@ -3072,7 +3087,7 @@ async function loadYearlyRidershipData(busId) {
     renderRidershipChartsYearly(yearlyData.months, year);
     try {
       ridTrendSimple(yearlyData.months.map((m) => m.month), yearlyData.months.map((m) => m.boardings), year + ' boardings by month' + (year === currentYear ? ' \u00b7 ' + yearlyData.months[new Date().getMonth()].month + ' in progress (lighter bar)' : ''), year === currentYear ? new Date().getMonth() : -1);
-      if (dailyData && dailyData.daily) renderRouteShare(dailyData.daily, from, to, windowDays, true);
+      if (dailyData && dailyData.daily) { renderRouteShare(dailyData.daily, from, to, windowDays, true); ridSetAvgKpi(dailyData.daily, from, to); }
       const hy = await apiFetch('/api/hourly', { from, to, bus_id: busId !== 'all' ? busId : null });
       renderRidershipHeat(hy && hy.hourly, from, to);
     } catch (e) { console.warn('[ridership] yearly render failed', e); }
