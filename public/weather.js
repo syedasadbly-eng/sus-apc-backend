@@ -22,7 +22,12 @@
 
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const num = (n, d = 0) => (n == null || Number.isNaN(Number(n)) ? '–' : Number(n).toFixed(d));
-  const tempPair = (f, c) => `${num(f)}°F <span class="wx-sub">/ ${num(c, 1)}°C</span>`;
+  // Units follow the server (WEATHER_UNITS): metric = °C first (UK), else °F first.
+  let METRIC = false;
+  const setUnits = (loc) => { METRIC = !!(loc && loc.units === 'metric'); };
+  const tempPair = (f, c) => METRIC
+    ? `${num(c, 1)}°C <span class="wx-sub">/ ${num(f)}°F</span>`
+    : `${num(f)}°F <span class="wx-sub">/ ${num(c, 1)}°C</span>`;
 
   async function getJson(path) {
     const res = await fetch(path, { credentials: 'same-origin' });
@@ -52,6 +57,7 @@
   // ---------------------------------------------------------------------
   function renderStrip(el, w) {
     if (!w || w.enabled === false) { el.hidden = true; return; }
+    setUnits(w.location);
     el.hidden = false;
     if (!w.available) {
       el.innerHTML = `<div class="wx-main">${icon('cloud-off')}<div><div class="wx-label">Outside weather</div><div class="wx-value wx-muted">Unavailable right now</div></div></div>`;
@@ -137,16 +143,19 @@
       return;
     }
     section.hidden = false;
+    setUnits(data.location);
     renderSummary(summaryEl, data.summary);
+    const sub = document.getElementById('ridershipWeatherSubtitle');
+    if (METRIC && sub && data.location && data.location.label) sub.textContent = 'Daily boardings against outside temperature and rain/snow \u00b7 ' + data.location.label;
 
     const days = data.days || [];
     const labels = days.map((d) => {
       const dt = new Date(d.date + 'T12:00:00Z');
-      return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+      return dt.toLocaleDateString(METRIC ? 'en-GB' : 'en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
     });
     const boardings = days.map((d) => d.boardings);
-    const temps = days.map((d) => (d.weather ? d.weather.temp_avg_f : null));
-    const precip = days.map((d) => (d.weather ? Math.round(((d.weather.precip_mm || 0) / 25.4) * 100) / 100 : null));
+    const temps = days.map((d) => (d.weather ? (METRIC ? d.weather.temp_avg_c : d.weather.temp_avg_f) : null));
+    const precip = days.map((d) => (d.weather ? (METRIC ? (d.weather.precip_mm || 0) : Math.round(((d.weather.precip_mm || 0) / 25.4) * 100) / 100) : null));
 
     const primary = cssVar('--color-primary', '#3b82f6');
     const warn = cssVar('--color-warning', '#f59e0b');
@@ -160,8 +169,8 @@
         labels,
         datasets: [
           { type: 'bar', label: 'Boardings', data: boardings, yAxisID: 'y', backgroundColor: primary + '99', borderRadius: 3, order: 3 },
-          { type: 'line', label: 'Avg temp (°F)', data: temps, yAxisID: 'yTemp', borderColor: warn, backgroundColor: warn, pointRadius: days.length > 40 ? 0 : 2, tension: 0.3, spanGaps: true, order: 1 },
-          { type: 'bar', label: 'Rain/snow (in)', data: precip, yAxisID: 'yPrecip', backgroundColor: info + 'cc', borderRadius: 2, barPercentage: 0.4, order: 2 },
+          { type: 'line', label: METRIC ? 'Avg temp (°C)' : 'Avg temp (°F)', data: temps, yAxisID: 'yTemp', borderColor: warn, backgroundColor: warn, pointRadius: days.length > 40 ? 0 : 2, tension: 0.3, spanGaps: true, order: 1 },
+          { type: 'bar', label: METRIC ? 'Rain/snow (mm)' : 'Rain/snow (in)', data: precip, yAxisID: 'yPrecip', backgroundColor: info + 'cc', borderRadius: 2, barPercentage: 0.4, order: 2 },
         ],
       },
       options: {
@@ -177,7 +186,7 @@
                 if (!d || !d.weather) return 'No weather recorded';
                 const w = d.weather;
                 return [
-                  `${w.condition} · ${w.temp_min_f}–${w.temp_max_f}°F (${w.temp_min_c}–${w.temp_max_c}°C)`,
+                  (METRIC ? `${w.condition} · ${w.temp_min_c}–${w.temp_max_c}°C (${w.temp_min_f}–${w.temp_max_f}°F)` : `${w.condition} · ${w.temp_min_f}–${w.temp_max_f}°F (${w.temp_min_c}–${w.temp_max_c}°C)`),
                   `Humidity ${w.humidity_avg}% · Rain ${w.precip_mm} mm${w.snow_cm ? ` · Snow ${w.snow_cm} cm` : ''}`,
                 ];
               },
@@ -187,8 +196,8 @@
         scales: {
           x: { ticks: { color: muted, maxRotation: 0, autoSkip: true }, grid: { display: false } },
           y: { position: 'left', beginAtZero: true, title: { display: true, text: 'Boardings', color: muted }, ticks: { color: muted }, grid: { color: grid } },
-          yTemp: { position: 'right', title: { display: true, text: '°F', color: muted }, ticks: { color: muted }, grid: { display: false } },
-          yPrecip: { position: 'right', display: false, beginAtZero: true, suggestedMax: 2 },
+          yTemp: { position: 'right', title: { display: true, text: METRIC ? '°C' : '°F', color: muted }, ticks: { color: muted }, grid: { display: false } },
+          yPrecip: { position: 'right', display: false, beginAtZero: true, suggestedMax: METRIC ? 50 : 2 },
         },
       },
     });
