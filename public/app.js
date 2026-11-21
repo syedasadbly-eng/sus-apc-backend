@@ -892,6 +892,109 @@ function routeLinePoints(route) {
   return { pts, roads: true };
 }
 
+// ----- Stop hover card (Live Map + History replay) ------------------------
+// Hovering a stop shows its boardings/alightings (both directions): today in
+// Live mode, the selected period in History mode, plus "so far" totals at
+// the replay time during playback, and an hour-by-hour sparkline.
+const STOP_CARD_CACHE = new Map();
+let STOP_CARD_POPUP = null;
+
+function stopCardRange() {
+  if (typeof HISTORY === 'undefined' || HISTORY.mode !== 'history') {
+    const t = displayDateStr(); return { from: t, to: t, label: 'Today' };
+  }
+  const p = historyParams();
+  if (p.date) return { from: p.date, to: p.date, label: prettyDate(p.date) };
+  if (p.from && p.to) return { from: p.from, to: p.to, label: p.from === p.to ? prettyDate(p.from) : prettyDate(p.from) + ' \u2013 ' + prettyDate(p.to) };
+  const t = displayDateStr(); return { from: t, to: t, label: 'Today' };
+}
+
+function stopCardReplayTime() {
+  if (typeof HISTORY === 'undefined' || HISTORY.mode !== 'history' || HISTORY.vis !== 'playback') return null;
+  const pt = HISTORY.points[HISTORY.playback.idx];
+  return pt ? new Date(pt.timestamp) : null;
+}
+
+async function stopCardData(routeKey, stopName) {
+  const r = stopCardRange();
+  const until = stopCardReplayTime();
+  // Round the replay time to the minute so scrubbing reuses responses.
+  const untilIso = until ? new Date(Math.floor(until.getTime() / 60000) * 60000 + 59999).toISOString() : '';
+  const key = [routeKey, stopName, r.from, r.to, untilIso].join('|');
+  const hit = STOP_CARD_CACHE.get(key);
+  if (hit && Date.now() - hit.t < 30000) return { data: hit.data, range: r, until };
+  const data = await apiFetch('/api/stops/stop-detail', { route: routeKey, stop: stopName, from: r.from, to: r.to, until: untilIso || null });
+  if (data) STOP_CARD_CACHE.set(key, { t: Date.now(), data });
+  if (STOP_CARD_CACHE.size > 300) STOP_CARD_CACHE.delete(STOP_CARD_CACHE.keys().next().value);
+  return { data, range: r, until };
+}
+
+function stopCardHtml(routeKey, stopName, color, res) {
+  const head = `<div class="sc-head"><span class="sc-dot" style="background:${color}"></span><div><div class="sc-name">${escapeHtml(rsStopLabel ? rsStopLabel(stopName) : stopName)}</div><div class="sc-sub">Route ${escapeHtml(routeKey)} \u00b7 ${escapeHtml(res ? res.range.label : '')}</div></div></div>`;
+  if (!res) return `<div class="stop-card">${head}<div class="sc-loading">Loading counts\u2026</div></div>`;
+  const d = res.data;
+  if (!d) return `<div class="stop-card">${head}<div class="sc-loading">Counts unavailable</div></div>`;
+  const total = (d.boardings || 0) + (d.alightings || 0);
+  let html = `<div class="stop-card">${head}
+    <div class="sc-grid">
+      <div><div class="sc-num">${(d.boardings || 0).toLocaleString()}</div><div class="sc-lbl">Boardings</div></div>
+      <div><div class="sc-num">${(d.alightings || 0).toLocaleString()}</div><div class="sc-lbl">Alightings</div></div>
+      <div><div class="sc-num">${total.toLocaleString()}</div><div class="sc-lbl">Total</div></div>
+    </div>`;
+  if (res.until && d.untilBoardings != null) {
+    const t = res.until.toLocaleTimeString('en-GB', { timeZone: DISPLAY_TZ, hour: '2-digit', minute: '2-digit' });
+    html += `<div class="sc-replay"><span class="sc-replay-tag">Replay ${t}</span> ${d.untilBoardings.toLocaleString()} on \u00b7 ${d.untilAlightings.toLocaleString()} off so far</div>`;
+  }
+  // Hour-by-hour sparkline (display time), replay hour highlighted.
+  const byHour = new Array(24).fill(0);
+  (d.hourly || []).forEach((h) => { byHour[utcHourToDisplayHour(h.hour)] += (h.boardings || 0) + (h.alightings || 0); });
+  const first = byHour.findIndex((v) => v > 0), last = 23 - [...byHour].reverse().findIndex((v) => v > 0);
+  if (first >= 0) {
+    const lo = Math.min(first, 6), hi = Math.max(last, 20);
+    const mx = Math.max(...byHour);
+    const peakH = byHour.indexOf(mx);
+    const rh = res.until ? parseInt(res.until.toLocaleString('en-US', { timeZone: DISPLAY_TZ, hour: '2-digit', hour12: false }), 10) % 24 : -1;
+    let bars = '';
+    for (let h = lo; h <= hi; h++) {
+      const ht = mx ? Math.max(2, Math.round((byHour[h] / mx) * 30)) : 2;
+      const cls = h === rh ? ' sc-bar-now' : (res.until && h > rh ? ' sc-bar-future' : '');
+      bars += `<span class="sc-bar${cls}" style="height:${ht}px" title="${String(h).padStart(2, '0')}:00 \u00b7 ${byHour[h]}"></span>`;
+    }
+    html += `<div class="sc-spark">${bars}</div><div class="sc-axis"><span>${String(lo).padStart(2, '0')}:00</span><span>Busiest ${String(peakH).padStart(2, '0')}:00 \u00b7 ${mx}</span><span>${String(hi).padStart(2, '0')}:00</span></div>`;
+  } else {
+    html += `<div class="sc-loading">No passengers recorded in this period</div>`;
+  }
+  return html + '</div>';
+}
+
+function attachStopHoverCard(marker, routeKey, stopName, color) {
+  let token = 0;
+  const open = async () => {
+    const map = marker._map; if (!map) return;
+    const my = ++token;
+    if (!STOP_CARD_POPUP) STOP_CARD_POPUP = L.popup({ closeButton: false, autoPan: false, className: 'stop-card-popup', offset: [0, -6], maxWidth: 300 });
+    STOP_CARD_POPUP.setLatLng(marker.getLatLng()).setContent(stopCardHtml(routeKey, stopName, color, null)).openOn(map);
+    const res = await stopCardData(routeKey, stopName);
+    if (my !== token || !map.hasLayer(STOP_CARD_POPUP)) return;
+    STOP_CARD_POPUP.setContent(stopCardHtml(routeKey, stopName, color, res));
+    marker._stopCardRefresh = async () => {
+      const r2 = await stopCardData(routeKey, stopName);
+      if (my === token && map.hasLayer(STOP_CARD_POPUP)) STOP_CARD_POPUP.setContent(stopCardHtml(routeKey, stopName, color, r2));
+    };
+    STOP_CARD_ACTIVE = marker;
+  };
+  const close = () => { token++; if (STOP_CARD_POPUP && marker._map) marker._map.closePopup(STOP_CARD_POPUP); if (STOP_CARD_ACTIVE === marker) STOP_CARD_ACTIVE = null; };
+  marker.on('mouseover', open);
+  marker.on('mouseout', close);
+  marker.on('click', open);   // touch screens
+  // Also open from the permanent stop-name label.
+  marker.on('tooltipopen', (e) => {
+    const el = e.tooltip && e.tooltip.getElement && e.tooltip.getElement();
+    if (el && !el._scWired) { el._scWired = true; el.style.pointerEvents = 'auto'; el.addEventListener('mouseenter', open); el.addEventListener('mouseleave', close); }
+  });
+}
+let STOP_CARD_ACTIVE = null;
+
 async function renderStopsOnMap(map, mapKey) {
   if (!map) return;
   const routes = await loadStopRegistry();
@@ -923,6 +1026,12 @@ async function renderStopsOnMap(map, mapKey) {
           ? `<strong>${escapeHtml(s.name)}</strong> <span style="opacity:0.7">· ${routeKey}</span>`
           : `<strong>${s.name}</strong><br><span style="opacity:0.7">Route ${routeKey}</span>`,
           showName ? { permanent: true, direction: 'right', offset: [8, 0], className: 'stop-name-label' } : { direction: 'top', offset: [0, -6] });
+      if (mapKey === 'liveMap') {
+        // Both directions share one card; the return stop's plain hover tip
+        // would sit on top of it, so drop that tip on demo road routes.
+        if (isReturn && line.roads) m.unbindTooltip();
+        attachStopHoverCard(m, routeKey, String(s.name).replace(/\s*\((return|rtn)\)\s*$/i, ''), color);
+      }
       stopMarkers[mapKey].push(m);
     });
   }
@@ -5363,6 +5472,10 @@ function seekPlayback(idx) {
   const p = HISTORY.points[idx];
   const time = document.getElementById('playbackTime');
   if (time && p) time.textContent = new Date(p.timestamp).toLocaleString();
+  // Keep an open stop card in step with the replay (throttled).
+  if (STOP_CARD_ACTIVE && STOP_CARD_ACTIVE._stopCardRefresh && Date.now() - (seekPlayback._cardT || 0) > 400) {
+    seekPlayback._cardT = Date.now(); STOP_CARD_ACTIVE._stopCardRefresh();
+  }
   // Move each bus marker to its most-recent point at or before this timestamp.
   const cutoffTs = new Date(p.timestamp).getTime();
   Object.keys(HISTORY.playback.markers).forEach(busId => {

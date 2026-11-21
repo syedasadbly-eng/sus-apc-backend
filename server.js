@@ -1436,6 +1436,36 @@ app.get('/api/stops/boardings', (req, res) => {
 //   GET /api/stops/hourly?date=YYYY-MM-DD
 //   GET /api/stops/hourly?from=YYYY-MM-DD&to=YYYY-MM-DD
 //   GET /api/stops/hourly?bus_id=515
+// Counts for one physical stop (both directions), used by the Live Map
+// hover card. Optional `until` (ISO time) adds totals up to that moment for
+// History playback.
+//   GET /api/stops/stop-detail?route=515&stop=Main%20Hospital&from=YYYY-MM-DD&to=YYYY-MM-DD[&until=ISO]
+app.get('/api/stops/stop-detail', (req, res) => {
+  try {
+    const re = /^\d{4}-\d{2}-\d{2}$/;
+    const today = displayDateStr(new Date());
+    const from = re.test(req.query.from || '') ? req.query.from : today;
+    const to = re.test(req.query.to || '') ? req.query.to : from;
+    const stop = String(req.query.stop || '').replace(/\s*\((return|rtn)\)\s*$/i, '').slice(0, 120);
+    const route = String(req.query.route || '').slice(0, 40);
+    if (!stop) return res.status(400).json({ error: 'stop required' });
+    const params = { from, to, stop, stopLike: stop + ' (%' };
+    let where = " WHERE date BETWEEN @from AND @to AND (stop = @stop OR stop LIKE @stopLike) ";
+    if (route) { where += ' AND (route = @route OR bus_id = @route) '; params.route = route; }
+    const tot = db.prepare(`SELECT COALESCE(SUM(evt_in),0) AS boardings, COALESCE(SUM(evt_out),0) AS alightings, MAX(timestamp) AS last FROM records ${where}`).get(params);
+    const hourly = db.prepare(`SELECT hour, SUM(evt_in) AS boardings, SUM(evt_out) AS alightings FROM records ${where} GROUP BY hour ORDER BY hour`).all(params);
+    const out = { route, stop, from, to, boardings: tot.boardings, alightings: tot.alightings, last: tot.last, hourly };
+    const until = req.query.until ? new Date(String(req.query.until)) : null;
+    if (until && !isNaN(until)) {
+      const u = db.prepare(`SELECT COALESCE(SUM(evt_in),0) AS boardings, COALESCE(SUM(evt_out),0) AS alightings FROM records ${where} AND timestamp <= @until`).get({ ...params, until: until.toISOString() });
+      out.until = until.toISOString(); out.untilBoardings = u.boardings; out.untilAlightings = u.alightings;
+    }
+    res.json(out);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/stops/hourly', (req, res) => {
   try {
     const { date, from, to, bus_id } = req.query;

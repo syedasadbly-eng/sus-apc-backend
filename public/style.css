@@ -3890,3 +3890,25 @@ html.demo-nolabel-map .leaflet-control-attribution a { color: #8b93a7; }
 .ff-legend[hidden] { display: none; }
 .ff-legend-live { bottom: 28px; }
 .ff-legend-live strong { color: #fff; font-weight: 600; }
+
+/* Stop hover card (Live Map / History replay) */
+.stop-card-popup .leaflet-popup-content-wrapper { background: rgba(15,17,23,0.96); color: #e6e7ef; border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.45); }
+.stop-card-popup .leaflet-popup-tip { background: rgba(15,17,23,0.96); border: 1px solid rgba(255,255,255,0.12); }
+.stop-card-popup .leaflet-popup-content { margin: 12px 14px; width: 248px !important; }
+.stop-card { font: 400 12px/1.35 Inter, system-ui, sans-serif; }
+.stop-card .sc-head { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 10px; }
+.stop-card .sc-dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 3px; flex: none; }
+.stop-card .sc-name { font-weight: 600; font-size: 13px; color: #fff; }
+.stop-card .sc-sub { color: #9a9cb0; font-size: 11px; }
+.stop-card .sc-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 8px; }
+.stop-card .sc-grid > div { background: rgba(255,255,255,0.05); border-radius: 8px; padding: 6px 8px; }
+.stop-card .sc-num { font-size: 16px; font-weight: 700; color: #fff; font-variant-numeric: tabular-nums; }
+.stop-card .sc-lbl { font-size: 10px; color: #9a9cb0; text-transform: uppercase; letter-spacing: 0.04em; }
+.stop-card .sc-replay { font-size: 11px; color: #cfd2e4; margin-bottom: 8px; }
+.stop-card .sc-replay-tag { display: inline-block; background: rgba(56,189,248,0.18); color: #7dd3fc; border-radius: 6px; padding: 1px 6px; margin-right: 4px; font-weight: 600; }
+.stop-card .sc-spark { display: flex; align-items: flex-end; gap: 2px; height: 32px; }
+.stop-card .sc-bar { flex: 1; background: rgba(139,116,209,0.75); border-radius: 2px 2px 0 0; }
+.stop-card .sc-bar-now { background: #38bdf8; }
+.stop-card .sc-bar-future { background: rgba(139,116,209,0.25); }
+.stop-card .sc-axis { display: flex; justify-content: space-between; font-size: 10px; color: #7c7f95; margin-top: 4px; }
+.stop-card .sc-loading { color: #9a9cb0; font-size: 11px; padding: 4px 0; }
