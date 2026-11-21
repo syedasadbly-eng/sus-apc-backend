@@ -163,3 +163,29 @@ html[data-theme="warm"] .kpi-card:hover { transform: translateY(-2px); }
   html[data-theme="warm"] .chart-panel, html[data-theme="warm"] .kpi-card,
   html[data-theme="warm"] .weather-strip, html[data-theme="warm"] .pro-table-card { animation: none; --wb-angle: 300deg; }
 }
+
+/* ------------------------------------------------------------------
+   Dashboard headline boxes: each tile gets a soft tint of its accent
+   colour, a coloured label and a deep-toned number so they stand out.
+------------------------------------------------------------------- */
+html[data-theme="warm"] #view-overview .kpi-card { --kt-a: #eef3ff; --kt-b: #f8faff; --kt-ink: #1e3a8a; --kt-lbl: #1d4ed8; --kt-dot: #3b82f6; }
+html[data-theme="warm"] #view-overview .kpi-card.green { --kt-a: #e8f7ef; --kt-b: #f6fcf8; --kt-ink: #065f46; --kt-lbl: #047857; --kt-dot: #10b981; }
+html[data-theme="warm"] #view-overview .kpi-card.amber { --kt-a: #fdf3e1; --kt-b: #fffaf1; --kt-ink: #7c4a03; --kt-lbl: #b45309; --kt-dot: #f59e0b; }
+html[data-theme="warm"] #view-overview .kpi-card.cyan  { --kt-a: #e3f5f8; --kt-b: #f4fbfc; --kt-ink: #155e75; --kt-lbl: #0e7490; --kt-dot: #06b6d4; }
+html[data-theme="warm"] #view-overview .kpi-card.pink  { --kt-a: #fbeaf1; --kt-b: #fef6f9; --kt-ink: #831843; --kt-lbl: #be185d; --kt-dot: #ec4899; }
+html[data-theme="warm"] #view-overview .kpi-card {
+  background:
+    linear-gradient(140deg, var(--kt-a) 0%, var(--kt-b) 70%) padding-box,
+    conic-gradient(from var(--wb-angle),
+      var(--wb-base) 0deg, var(--wb-base) 180deg,
+      var(--wb-hi1) 245deg, var(--wb-hi2) 310deg,
+      var(--wb-base) 345deg, var(--wb-base) 360deg) border-box !important;
+}
+html[data-theme="warm"] #view-overview .kpi-card .kpi-label { color: var(--kt-lbl) !important; display: flex; align-items: center; gap: 8px; }
+html[data-theme="warm"] #view-overview .kpi-card .kpi-label::before {
+  content: ''; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  background: var(--kt-dot); box-shadow: 0 0 0 3px color-mix(in srgb, var(--kt-dot) 22%, transparent);
+}
+html[data-theme="warm"] #view-overview .kpi-card .kpi-value { color: var(--kt-ink) !important; }
+html[data-theme="warm"] #view-overview .kpi-card .kpi-sub { color: color-mix(in srgb, var(--kt-ink) 70%, #6b6157) !important; }
+html[data-theme="warm"] #view-overview .kpi-card::before { height: 4px !important; opacity: 1 !important; background: var(--kt-dot) !important; }
