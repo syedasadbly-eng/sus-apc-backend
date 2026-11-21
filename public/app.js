@@ -1091,8 +1091,88 @@ const RS_CARD_OPTS = { keepClick: true, range: () => ({ from: RS.from, to: RS.to
 // ----- Map readability helpers -------------------------------------------
 // Route colour key (demo road routes) so stop labels don't need route ids.
 const ROUTE_KEYS = {};
+const ROUTE_LAYERS = {};   // mapKey -> routeKey -> { line, markers }
+const ROUTE_FOCUS = {};    // mapKey -> focused routeKey (or null)
+
+// Live Map (demo): an interactive route key. Each row shows the Manchester
+// route name, its two end stops and where the bus is now; clicking a row
+// zooms to that route and fades the other one.
+function rkTermini(route) {
+  const stops = (route.stops || []).map((x) => String(x.name || '')).filter((n) => !/\((return|rtn)\)\s*$/i.test(n));
+  if (stops.length < 2) return '';
+  const first = rsStopLabel(stops[0]), last = rsStopLabel(stops[stops.length - 1]);
+  return first === last ? first : first + ' \u2194 ' + last;
+}
+function rkFocusRoute(map, mapKey, rk) {
+  const layers = ROUTE_LAYERS[mapKey] || {};
+  ROUTE_FOCUS[mapKey] = (ROUTE_FOCUS[mapKey] === rk) ? null : rk;
+  const f = ROUTE_FOCUS[mapKey];
+  Object.entries(layers).forEach(([k, l]) => {
+    const on = !f || k === f;
+    if (l.line) { l.line.setStyle({ opacity: on ? 0.9 : 0.15, weight: f && on ? 6 : 4 }); if (f && on) l.line.bringToFront(); }
+    l.markers.forEach((m) => { const el = m.getElement && m.getElement(); if (el) el.style.opacity = on ? '' : '0.2'; const t = m.getTooltip && m.getTooltip(); const te = t && t.getElement && t.getElement(); if (te) te.style.opacity = on ? '' : '0'; });
+  });
+  const box = ROUTE_KEYS[mapKey] && ROUTE_KEYS[mapKey].getContainer();
+  if (box) {
+    box.querySelectorAll('.rk-card').forEach((el) => { el.classList.toggle('active', el.dataset.rk === f); el.classList.toggle('dim', !!f && el.dataset.rk !== f); });
+    const all = box.querySelector('.rk-all'); if (all) all.hidden = !f;
+  }
+  try {
+    let b = null;
+    Object.entries(layers).forEach(([k, l]) => { if (l.line && (!f || k === f)) { b = b ? b.extend(l.line.getBounds()) : L.latLngBounds(l.line.getBounds().getSouthWest(), l.line.getBounds().getNorthEast()); } });
+    if (b) map.flyToBounds(b, { padding: [50, 50], maxZoom: 15, duration: 0.6 });
+  } catch (e) { /* noop */ }
+}
+function rkLiveText(route, rk) {
+  const ids = ((route.bus_ids && route.bus_ids.length) ? route.bus_ids : [rk]).map(String);
+  const b = (BUS_POSITIONS || []).find((x) => ids.includes(String(x.id)) || ids.includes(String(x.id).slice(-3)));
+  if (!b) return '<span class="rk-live off">No bus reporting</span>';
+  const next = b.nextStopName ? rsStopLabel(String(b.nextStopName)) : '';
+  const cap = b.capacity || CONFIG.busCapacity;
+  return '<span class="rk-live"><i></i>' + (next ? 'Next: ' + escapeHtml(next) : 'In service') + '<small>' + (b.passengers || 0) + '/' + cap + ' onboard</small></span>';
+}
+function refreshRouteKeyLive() {
+  const ctl = ROUTE_KEYS.liveMap; if (!ctl || !STOP_REGISTRY_CACHE) return;
+  const box = ctl.getContainer(); if (!box) return;
+  box.querySelectorAll('.rk-card').forEach((el) => { const r = STOP_REGISTRY_CACHE[el.dataset.rk]; const t = el.querySelector('.rk-live-wrap'); if (r && t) t.innerHTML = rkLiveText(r, el.dataset.rk); });
+}
+setInterval(() => { try { refreshRouteKeyLive(); } catch (e) { /* noop */ } }, 2000);
+function addInteractiveRouteKey(map, mapKey, routes) {
+  const cards = [];
+  let idx = 0;
+  for (const [rk, route] of Object.entries(routes)) {
+    const line = routeLinePoints(route);
+    const color = mapRouteHex(rk, idx);
+    idx++;
+    if (!line.roads) continue;
+    const nStops = (route.stops || []).filter((x) => !/\((return|rtn)\)\s*$/i.test(String(x.name || ''))).length;
+    cards.push(`<button type="button" class="rk-card" data-rk="${escapeHtml(rk)}" style="--rk:${color}" title="Show route ${escapeHtml(rk)} on the map">
+      <span class="rk-badge">${escapeHtml(rk)}</span>
+      <span class="rk-body"><b>${escapeHtml(rsRouteShortName(route) || ('Route ' + rk))}</b>
+        <span class="rk-ends">${escapeHtml(rkTermini(route))} \u00b7 ${nStops} stops</span>
+        <span class="rk-live-wrap">${rkLiveText(route, rk)}</span></span></button>`);
+  }
+  if (!cards.length) return false;
+  const ctl = L.control({ position: 'topright' });
+  ctl.onAdd = () => {
+    const d = L.DomUtil.create('div', 'route-key route-key-live');
+    d.innerHTML = `<div class="rk-head"><span>Bus routes <em>click to focus</em></span><button type="button" class="rk-all" hidden>Show all</button></div>` + cards.join('');
+    L.DomEvent.disableClickPropagation(d); L.DomEvent.disableScrollPropagation(d);
+    d.querySelectorAll('.rk-card').forEach((el) => el.addEventListener('click', () => rkFocusRoute(map, mapKey, el.dataset.rk)));
+    d.querySelector('.rk-all').addEventListener('click', () => { if (ROUTE_FOCUS[mapKey]) rkFocusRoute(map, mapKey, ROUTE_FOCUS[mapKey]); });
+    return d;
+  };
+  ctl.addTo(map);
+  ROUTE_KEYS[mapKey] = ctl;
+  ROUTE_FOCUS[mapKey] = null;
+  return true;
+}
 function addRouteKey(map, mapKey, routes) {
   if (!map || !routes) return;
+  if (mapKey === 'liveMap' && DEMO) {
+    if (ROUTE_KEYS[mapKey]) { try { map.removeControl(ROUTE_KEYS[mapKey]); } catch (e) { /* noop */ } delete ROUTE_KEYS[mapKey]; }
+    if (addInteractiveRouteKey(map, mapKey, routes)) return;
+  }
   const rows = [];
   let idx = 0;
   for (const [rk, route] of Object.entries(routes)) {
@@ -1150,14 +1230,17 @@ async function renderStopsOnMap(map, mapKey) {
   // Clear existing stop markers for this map.
   (stopMarkers[mapKey] || []).forEach(m => map.removeLayer(m));
   stopMarkers[mapKey] = [];
+  ROUTE_LAYERS[mapKey] = {};
   let idx = 0;
   for (const [routeKey, route] of Object.entries(routes)) {
     const line = routeLinePoints(route);
+    const rl = ROUTE_LAYERS[mapKey][routeKey] = { line: null, markers: [] };
     // Road-path routes (demo) use the same per-route colours as the Route map.
     const color = mapRouteHex(routeKey, idx);
     idx++;
     if (line.roads && line.pts.length > 1) {
-      stopMarkers[mapKey].push(L.polyline(line.pts, { color, weight: 4, opacity: 0.85, interactive: false, lineJoin: 'round' }).addTo(map));
+      rl.line = L.polyline(line.pts, { color, weight: 4, opacity: 0.85, interactive: false, lineJoin: 'round' }).addTo(map);
+      stopMarkers[mapKey].push(rl.line);
     }
     (route.stops || []).forEach((s, sIdx) => {
       const isTerminal = sIdx === 0 || sIdx === route.stops.length - 1;
@@ -1181,6 +1264,7 @@ async function renderStopsOnMap(map, mapKey) {
         attachStopHoverCard(m, routeKey, String(s.name).replace(/\s*\((return|rtn)\)\s*$/i, ''), color);
       }
       stopMarkers[mapKey].push(m);
+      rl.markers.push(m);
     });
   }
   addRouteKey(map, mapKey, routes);

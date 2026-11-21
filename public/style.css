@@ -4144,3 +4144,28 @@ html.demo-nolabel-map .leaflet-control-attribution a, .leaflet-control-attributi
 #wAlertFeed .exec-alert-card.is-resolved .exec-alert-icon-box { filter: saturate(0.3); }
 #wAlertFeed .exec-alert-card.driver-help { border: 2px solid #dc2626 !important; }
 @media (prefers-reduced-motion: reduce) { #wAlertFeed .exec-alert-card { animation: none !important; } }
+
+/* Live Map interactive route key (demo) */
+.route-key.route-key-live { padding: 10px; width: 330px; max-width: calc(100vw - 80px); white-space: normal; display: flex; flex-direction: column; gap: 6px;
+  background: rgba(255,255,255,0.97); border: 1px solid #e7e2da; border-radius: 14px; box-shadow: 0 10px 28px -10px rgba(28,25,23,0.35); color: #1c1917; }
+.route-key-live .rk-head { display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #57534e; padding: 0 2px 2px; }
+.route-key-live .rk-head em { font-style: normal; font-weight: 500; letter-spacing: 0; text-transform: none; color: #a8a29e; margin-left: 6px; }
+.route-key-live .rk-all { font: 600 11px/1 inherit; font-family: inherit; color: #1d4ed8; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 999px; padding: 4px 9px; cursor: pointer; letter-spacing: 0; text-transform: none; }
+.route-key-live .rk-card { display: flex; gap: 10px; align-items: flex-start; width: 100%; text-align: left; cursor: pointer; font-family: inherit;
+  background: #fff; border: 1px solid #ece7df; border-left: 4px solid var(--rk); border-radius: 10px; padding: 9px 10px; transition: background 0.15s, box-shadow 0.15s, opacity 0.15s, transform 0.15s; }
+.route-key-live .rk-card:hover { background: color-mix(in srgb, var(--rk) 6%, #fff); transform: translateY(-1px); box-shadow: 0 6px 14px -8px color-mix(in srgb, var(--rk) 70%, transparent); }
+.route-key-live .rk-card.active { background: color-mix(in srgb, var(--rk) 10%, #fff); border-color: color-mix(in srgb, var(--rk) 45%, #fff); border-left-color: var(--rk); box-shadow: 0 0 0 2px color-mix(in srgb, var(--rk) 30%, transparent); }
+.route-key-live .rk-card.dim { opacity: 0.5; }
+.route-key-live .rk-badge { flex: none; min-width: 38px; height: 26px; padding: 0 6px; border-radius: 7px; background: var(--rk); color: #fff; font-weight: 800; font-size: 13px; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 3px 8px -3px var(--rk); }
+.route-key-live .rk-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.route-key-live .rk-body b { font-size: 13.5px; font-weight: 700; color: #1c1917; line-height: 1.25; }
+.route-key-live .rk-ends { font-size: 11.5px; color: #6b6157; line-height: 1.3; }
+.route-key-live .rk-live { display: inline-flex; align-items: center; gap: 5px; flex-wrap: wrap; font-size: 11.5px; font-weight: 600; color: #047857; margin-top: 2px; }
+.route-key-live .rk-live i { width: 7px; height: 7px; border-radius: 50%; background: #10b981; box-shadow: 0 0 0 3px rgba(16,185,129,0.2); }
+.route-key-live .rk-live.off { color: #a8a29e; }
+html:not([data-theme="warm"]) .route-key.route-key-live { background: rgba(20,21,29,0.95); border-color: rgba(255,255,255,0.12); color: #e4e5ed; }
+html:not([data-theme="warm"]) .route-key-live .rk-card { background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.1); border-left-color: var(--rk); }
+html:not([data-theme="warm"]) .route-key-live .rk-body b { color: #fff; }
+html:not([data-theme="warm"]) .route-key-live .rk-ends { color: #a5a8c1; }
+.route-key-live .rk-live small { font-size: 11px; font-weight: 600; color: #57534e; background: #f5f2ed; border-radius: 999px; padding: 1px 7px; }
+.route-key-live .rk-card { overflow: hidden; }
