@@ -3884,3 +3884,9 @@ html.demo-nolabel-map .leaflet-control-attribution a { color: #8b93a7; }
 
 /* Chart canvases are stretched to 100%; keep Leaflet's own canvases at native size. */
 .chart-body .leaflet-container canvas { width: auto !important; max-width: none; }
+
+/* Live Map footfall toggle + legend */
+.live-ff-btn.active { background: var(--color-primary); color: #fff; border-color: var(--color-primary); }
+.ff-legend[hidden] { display: none; }
+.ff-legend-live { bottom: 28px; }
+.ff-legend-live strong { color: #fff; font-weight: 600; }
