@@ -243,6 +243,71 @@ if (typeof Chart !== 'undefined' && typeof ChartDataLabels !== 'undefined') {
   Chart.register(ChartDataLabels);
   Chart.defaults.set('plugins.datalabels', { display: false });
 }
+if (typeof Chart !== 'undefined') {
+  // Warm light theme: remap the dark-theme chart colours (light text, white
+  // series, faint white grids) to warm, high-contrast equivalents. Runs on
+  // every update, so colours set later by renderers are covered too.
+  if (document.documentElement.getAttribute('data-theme') === 'warm') {
+    Chart.defaults.color = '#57534e';
+    Chart.defaults.borderColor = 'rgba(68,52,36,0.10)';
+    const TEXT = new Set(['#c9cad8', '#8b8ea5', '#a5a8c1', '#dbdce6', '#e4e5ed', '#9a9cb0', '#e6e7ef', '#cbd5e1', '#94a3b8', '#9ca3af', '#d1d5db', '#e5e7eb', '#f3f4f6']);
+    const DARK_EDGE = new Set(['#14151d', '#0f1117', '#161822', '#1c1e2e', 'rgba(10,11,18,0.85)', '#111827', '#0f172a']);
+    const parseCol = (k) => {
+      let m = k.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/);
+      if (m) { let h = m[1]; if (h.length === 3) h = h.split('').map((x) => x + x).join(''); return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16), 1]; }
+      m = k.match(/^rgba?\((\d+),(\d+),(\d+)(?:,([\d.]+))?\)$/);
+      if (m) return [+m[1], +m[2], +m[3], m[4] == null ? 1 : parseFloat(m[4])];
+      if (k === 'white') return [255, 255, 255, 1];
+      return null;
+    };
+    const warmColor = (c, role) => {
+      if (typeof c !== 'string') return c;
+      const k = c.replace(/\s+/g, '').toLowerCase();
+      if (TEXT.has(k)) return role === 'grid' ? 'rgba(68,52,36,0.10)' : '#57534e';
+      if (DARK_EDGE.has(k)) return '#ffffff';
+      const p = parseCol(k);
+      if (!p) return c;
+      const [r, g, b, a] = p;
+      const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+      const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+      const neutral = (mx - mn) < 48;
+      if (neutral && lum > 0.62) {
+        // Light neutral built for a dark background
+        if (role === 'grid' || a < 0.2) return 'rgba(68,52,36,' + Math.min(0.14, a * 1.8 + 0.04).toFixed(3) + ')';
+        if (role === 'text') return '#57534e';
+        return 'rgba(30,58,95,' + Math.max(0.55, a) + ')';
+      }
+      if (neutral && lum < 0.14 && role === 'series' && a > 0.5) return '#ffffff';
+      return c;
+    };
+    const mapVal = (v, role) => {
+      if (Array.isArray(v)) return v.map((x) => warmColor(x, role));
+      if (typeof v === 'function') { if (v._warm) return v; const f = (...a) => warmColor(v(...a), role); f._warm = true; return f; }
+      return warmColor(v, role);
+    };
+    Chart.register({
+      id: 'warmTheme',
+      beforeUpdate(chart) {
+        const o = chart.options || {};
+        Object.values(o.scales || {}).forEach((sc) => {
+          if (sc.ticks) sc.ticks.color = mapVal(sc.ticks.color, 'text');
+          if (sc.grid) sc.grid.color = mapVal(sc.grid.color, 'grid');
+          if (sc.title) sc.title.color = mapVal(sc.title.color, 'text');
+          if (sc.pointLabels) sc.pointLabels.color = mapVal(sc.pointLabels.color, 'text');
+        });
+        const lg = o.plugins && o.plugins.legend && o.plugins.legend.labels;
+        if (lg && lg.color) lg.color = mapVal(lg.color, 'text');
+        if (o.plugins && o.plugins.datalabels && o.plugins.datalabels.color) o.plugins.datalabels.color = mapVal(o.plugins.datalabels.color, 'text');
+        if (o.plugins && o.plugins.title && o.plugins.title.color) o.plugins.title.color = mapVal(o.plugins.title.color, 'text');
+        (chart.data.datasets || []).forEach((ds) => {
+          ['backgroundColor', 'borderColor', 'pointBackgroundColor', 'pointBorderColor', 'hoverBackgroundColor', 'hoverBorderColor', 'pointHoverBackgroundColor'].forEach((p) => {
+            if (ds[p] != null) ds[p] = mapVal(ds[p], 'series');
+          });
+        });
+      },
+    });
+  }
+}
 
 let charts = {};
 let maps = {};
@@ -5572,8 +5637,8 @@ async function refreshStopBoardingsHome() {
     };
 
     chart.data.labels = top.map(r => shortLabel(r.stop));
-    chart.data.datasets[0].data = top.map(r => ({ x: r.boardings || 0, _meta: r }));
-    chart.data.datasets[1].data = top.map(r => ({ x: r.alightings || 0, _meta: r }));
+    chart.data.datasets[0].data = top.map((r, i) => ({ x: r.boardings || 0, y: i, _meta: r }));
+    chart.data.datasets[1].data = top.map((r, i) => ({ x: r.alightings || 0, y: i, _meta: r }));
     chart.update('active');
   } catch (err) {
     console.warn('[stopBoardingsHome] refresh failed:', err);
@@ -6097,3 +6162,18 @@ async function exportWelfareAuditCSV(from, to, busId) {
   a.click();
   document.body.removeChild(a);
 }
+
+
+// Theme toggle (warm light <-> dark). Reloads so charts pick up colours.
+(function wireThemeToggle() {
+  const btn = document.getElementById('themeToggle'); if (!btn) return;
+  const cur = document.documentElement.getAttribute('data-theme') || 'warm';
+  btn.innerHTML = cur === 'warm'
+    ? '<i data-lucide="moon" style="width:14px;height:14px"></i><span>Dark</span>'
+    : '<i data-lucide="sun" style="width:14px;height:14px"></i><span>Light</span>';
+  if (window.lucide) try { window.lucide.createIcons(); } catch (e) { /* noop */ }
+  btn.addEventListener('click', () => {
+    try { localStorage.setItem('sus-theme', cur === 'warm' ? 'dark' : 'warm'); } catch (e) { /* noop */ }
+    location.reload();
+  });
+})();
