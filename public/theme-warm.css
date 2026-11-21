@@ -118,3 +118,48 @@ html[data-theme="warm"] .map-mode-tab.active { background: #1d4ed8; color: #fff;
 
 /* Reports heading sits directly on the page, not in a card */
 html[data-theme="warm"] #view-reports > .filter-bar { background: transparent !important; border: none !important; box-shadow: none !important; padding-left: 0; }
+
+/* ------------------------------------------------------------------
+   Dynamic section borders: a slow travelling gradient highlight that
+   circles each card's edge, brightening on hover.
+------------------------------------------------------------------- */
+@property --wb-angle { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+@keyframes wbSpin { to { --wb-angle: 360deg; } }
+
+html[data-theme="warm"] .chart-panel,
+html[data-theme="warm"] .kpi-card,
+html[data-theme="warm"] .weather-strip,
+html[data-theme="warm"] .pro-table-card {
+  --wb-base: #e7dfd3;
+  --wb-hi1: rgba(29, 78, 216, 0.70);
+  --wb-hi2: rgba(217, 119, 6, 0.65);
+  border: 2px solid transparent !important;
+  background:
+    linear-gradient(#ffffff, #ffffff) padding-box,
+    conic-gradient(from var(--wb-angle),
+      var(--wb-base) 0deg, var(--wb-base) 180deg,
+      var(--wb-hi1) 245deg, var(--wb-hi2) 310deg,
+      var(--wb-base) 345deg, var(--wb-base) 360deg) border-box !important;
+  animation: wbSpin 12s linear infinite;
+  transition: box-shadow 0.25s ease, transform 0.25s ease;
+}
+/* Stagger so neighbouring cards are never in sync */
+html[data-theme="warm"] .kpi-card:nth-child(2n), html[data-theme="warm"] .chart-panel:nth-child(2n) { animation-delay: -4s; }
+html[data-theme="warm"] .kpi-card:nth-child(3n), html[data-theme="warm"] .chart-panel:nth-child(3n) { animation-delay: -8s; }
+
+html[data-theme="warm"] .chart-panel:hover,
+html[data-theme="warm"] .kpi-card:hover,
+html[data-theme="warm"] .weather-strip:hover,
+html[data-theme="warm"] .pro-table-card:hover {
+  --wb-base: #ddd2c2;
+  --wb-hi1: rgba(29, 78, 216, 1);
+  --wb-hi2: rgba(217, 119, 6, 0.95);
+  animation-duration: 5s;
+  box-shadow: 0 1px 2px rgba(68,52,36,0.06), 0 14px 32px -12px rgba(29,78,216,0.22) !important;
+}
+html[data-theme="warm"] .kpi-card:hover { transform: translateY(-2px); }
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme="warm"] .chart-panel, html[data-theme="warm"] .kpi-card,
+  html[data-theme="warm"] .weather-strip, html[data-theme="warm"] .pro-table-card { animation: none; --wb-angle: 300deg; }
+}
