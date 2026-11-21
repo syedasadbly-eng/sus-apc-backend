@@ -162,7 +162,7 @@ if (DEMO_WHITE_LABEL) {
 // removed, so no town, street or building names appear on the map. Free for
 // commercial use, no key; attribution "© OpenMapTiles © OpenStreetMap".
 // Live dashboard keeps its existing raster tiles.
-const DEMO_MAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/dark';
+const DEMO_MAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/positron';   // clean white base map
 let _demoMapLibs = null;
 function loadDemoMapLibs() {
   if (_demoMapLibs) return _demoMapLibs;
@@ -174,13 +174,13 @@ function loadDemoMapLibs() {
     .then(() => fetch(DEMO_MAP_STYLE_URL).then((r) => r.json()))
     .then((style) => {
       // Hide street/area names only while the demo sits on the pilot client's city.
-      if (!(DEMO && DEMO.mapLabels)) style.layers = style.layers.filter((l) => l.type !== 'symbol');
+      if (DEMO_WHITE_LABEL && !(DEMO && DEMO.mapLabels)) style.layers = style.layers.filter((l) => l.type !== 'symbol');
       return style;
     });
   return _demoMapLibs;
 }
 function addBaseLayer(map, url, opts) {
-  if (!DEMO_WHITE_LABEL) { L.tileLayer(url, opts).addTo(map); return; }
+  // Every map (demo and live) uses the free white OpenFreeMap vector style.
   L.control.attribution({ prefix: false }).addAttribution('&copy; OpenMapTiles &copy; OpenStreetMap contributors').addTo(map);
   loadDemoMapLibs().then((style) => {
     if (!L.maplibreGL) throw new Error('maplibre-gl-leaflet missing');
@@ -874,7 +874,10 @@ async function loadStopRegistry() {
 }
 
 // Colour each route distinctly. Order matches the routes object keys.
-const ROUTE_LINE_COLORS = ['#8b74d1', '#d4af37', '#7dd3fc', '#fb7185'];
+// Strong, distinct route colours for the white maps.
+const ROUTE_LINE_COLORS = ['#7c3aed', '#ea580c', '#0891b2', '#db2777'];
+const MAP_ROUTE_HEX = { '515': '#7c3aed', '419': '#ea580c' };
+function mapRouteHex(rk, idx) { return MAP_ROUTE_HEX[String(rk)] || routeColorByIndex(idx || 0); }
 function routeColorByIndex(i) { return ROUTE_LINE_COLORS[i % ROUTE_LINE_COLORS.length]; }
 
 // Draw small dot markers for every stop on every route. Idempotent per map.
@@ -1008,7 +1011,7 @@ function addRouteKey(map, mapKey, routes) {
   let idx = 0;
   for (const [rk, route] of Object.entries(routes)) {
     const line = routeLinePoints(route);
-    const color = line.roads && ROUTE_COLOR[String(rk)] ? ROUTE_COLOR[String(rk)].hex : routeColorByIndex(idx);
+    const color = mapRouteHex(rk, idx);
     idx++;
     if (!line.roads) continue;
     rows.push(`<div class="rk-row"><span class="rk-line" style="background:${color}"></span><span class="rk-id">${escapeHtml(rk)}</span><span>${escapeHtml(rsRouteShortName(route) || ('Route ' + rk))}</span></div>`);
@@ -1065,10 +1068,10 @@ async function renderStopsOnMap(map, mapKey) {
   for (const [routeKey, route] of Object.entries(routes)) {
     const line = routeLinePoints(route);
     // Road-path routes (demo) use the same per-route colours as the Route map.
-    const color = line.roads && ROUTE_COLOR[String(routeKey)] ? ROUTE_COLOR[String(routeKey)].hex : routeColorByIndex(idx);
+    const color = mapRouteHex(routeKey, idx);
     idx++;
     if (line.roads && line.pts.length > 1) {
-      stopMarkers[mapKey].push(L.polyline(line.pts, { color, weight: 3, opacity: 0.45, interactive: false }).addTo(map));
+      stopMarkers[mapKey].push(L.polyline(line.pts, { color, weight: 4, opacity: 0.85, interactive: false, lineJoin: 'round' }).addTo(map));
     }
     (route.stops || []).forEach((s, sIdx) => {
       const isTerminal = sIdx === 0 || sIdx === route.stops.length - 1;
@@ -1284,7 +1287,7 @@ function pathPointAt(path, f) {
 }
 
 // Bright cyan so the trail stands out against the gold/purple route lines.
-function busTrailColor() { return '#38bdf8'; }
+function busTrailColor() { return '#2563eb'; }
 
 function drawBusTrail(map, st, now) {
   st.trail = st.trail.filter((p) => now - p[2] <= TRAIL_MS);
@@ -1775,7 +1778,7 @@ function initOverview() {
 function initOverviewMap() {
   if (maps.overview) return;
   const map = L.map('overviewMap', { zoomControl: true, attributionControl: false }).setView(MAP_DEFAULT_CENTER, 12);
-  addBaseLayer(map, 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 });
+  addBaseLayer(map, 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 });
   renderStopsOnMap(map, 'overview');
   updateMapBusMarkers(map, 'overview');
   maps.overview = map;
@@ -2483,7 +2486,7 @@ async function initLiveFootfall(map) {
 function initLiveMap() {
   if (maps.liveMap) return;
   const map = L.map('liveMapFull', { zoomControl: true, attributionControl: false }).setView(MAP_DEFAULT_CENTER, 12);
-  addBaseLayer(map, 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 });
+  addBaseLayer(map, 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 });
   renderStopsOnMap(map, 'liveMap');
   updateMapBusMarkers(map, 'liveMap');
   maps.liveMap = map;
@@ -3442,8 +3445,8 @@ function initRoutes() {
   if (mapEl && window.L) {
     ROUTE_MAP = L.map('routeMap', { zoomControl: true, attributionControl: false, scrollWheelZoom: false, zoomSnap: DEMO ? 0.25 : 1 })
       .setView(MAP_DEFAULT_CENTER, 13);
-    addBaseLayer(ROUTE_MAP, 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      maxZoom: 19, subdomains: 'abcd',
+    addBaseLayer(ROUTE_MAP, 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
     });
     ROUTE_MAP_LAYER = L.layerGroup().addTo(ROUTE_MAP);
   }
@@ -3792,10 +3795,10 @@ function renderRouteMap() {
   routesToShow.forEach((rk) => {
     const route = STOPS_REGISTRY[rk];
     if (!route) return;
-    const col = routeColorFor(rk);
+    const col = { hex: mapRouteHex(rk, Object.keys(STOPS_REGISTRY || {}).indexOf(rk)) };
     const line = routeLinePoints(route);
     const pts = line.pts;
-    if (pts.length >= 2) L.polyline(pts, line.roads ? { color: col.hex, weight: 4, opacity: 0.75 } : { color: col.hex, weight: 3, opacity: 0.7, dashArray: '6 6' }).addTo(ROUTE_MAP_LAYER);
+    if (pts.length >= 2) L.polyline(pts, line.roads ? { color: col.hex, weight: 4, opacity: 0.9, lineJoin: 'round' } : { color: col.hex, weight: 3, opacity: 0.7, dashArray: '6 6' }).addTo(ROUTE_MAP_LAYER);
     if (line.roads) pts.forEach((p) => allLatLngs.push(p));
     const seen = new Set();
     const uniq = (route.stops || []).filter((st) => { const k = rsKey(rk, st.name); if (seen.has(k)) return false; seen.add(k); return true; });
@@ -3804,7 +3807,7 @@ function renderRouteMap() {
       const key = rsKey(rk, st.name);
       const g = byKey[key] || { boardings: 0, alightings: 0 };
       const r = 6 + Math.sqrt((g.boardings || 0) / routeMax) * 18;
-      const marker = L.circleMarker([st.lat, st.lng], { radius: r, color: col.hex, weight: 2, fillColor: col.hex, fillOpacity: 0.55 });
+      const marker = L.circleMarker([st.lat, st.lng], { radius: r, color: '#ffffff', weight: 2, fillColor: col.hex, fillOpacity: 0.8 });
       if (line.roads) {
         // Demo: name always visible next to the circle.
         marker.bindTooltip(escapeHtml(rsStopLabel(st.name)),
@@ -3867,7 +3870,7 @@ function initFootfallMap() {
   const el = document.getElementById('footfallMap');
   if (!panel || !el || !window.L || FOOTFALL_MAP) return;
   FOOTFALL_MAP = L.map('footfallMap', { zoomControl: true, attributionControl: false, scrollWheelZoom: false, zoomSnap: DEMO ? 0.25 : 1 }).setView(MAP_DEFAULT_CENTER, 14);
-  addBaseLayer(FOOTFALL_MAP, 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19, subdomains: 'abcd' });
+  addBaseLayer(FOOTFALL_MAP, 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 });
   FOOTFALL_LABELS = L.layerGroup().addTo(FOOTFALL_MAP);
   FOOTFALL_MAP.on('zoomend', () => { if (FOOTFALL_HEAT) rsRenderFootfall(); });
   document.querySelectorAll('#footfallMeasure [data-ff-measure]').forEach((b) => b.addEventListener('click', () => {
@@ -3948,8 +3951,8 @@ function rsRenderFootfall() {
   const unit = FF.measure === 'on' ? 'on' : FF.measure === 'off' ? 'off' : 'people';
   stopsSeen.forEach(({ st, rk }, key) => {
     const n = w[key] || 0;
-    const mk = L.circleMarker([st.lat, st.lng], { radius: 4, color: '#fff', weight: 1.5, fillColor: '#0f1117', fillOpacity: 1 });
-    attachStopHoverCard(mk, rk, rsBaseStop(st.name), routeColorFor(rk).hex, RS_CARD_OPTS);
+    const mk = L.circleMarker([st.lat, st.lng], { radius: 4.5, color: '#ffffff', weight: 2, fillColor: '#111827', fillOpacity: 1 });
+    attachStopHoverCard(mk, rk, rsBaseStop(st.name), mapRouteHex(rk), RS_CARD_OPTS);
     mk
       .bindTooltip(escapeHtml(rsStopLabel(st.name)),
         { permanent: true, direction: 'right', offset: [8, 0], className: 'stop-name-label' })
