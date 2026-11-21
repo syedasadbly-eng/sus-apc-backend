@@ -913,6 +913,20 @@
       </div>`;
   }
 
+  // Route name for a bus from the stop registry (same names as the maps and
+  // Ridership), so demo and live both show their own routes.
+  function routeNameFor(busId) {
+    const id = String(busId);
+    // Live service keeps its existing short names.
+    if (!(window.SUS_DEMO && window.SUS_DEMO.enabled)) return ({ '515': 'Downtown Loop', '419': 'NW Parking Shuttle' })[id] || '';
+    let reg = null;
+    try { reg = (typeof STOP_REGISTRY_CACHE !== 'undefined' && STOP_REGISTRY_CACHE) || (typeof STOPS_REGISTRY !== 'undefined' && STOPS_REGISTRY) || null; } catch (_) { reg = null; }
+    if (!reg) { if (typeof loadStopRegistry === 'function') loadStopRegistry(); return ''; }
+    const entry = Object.entries(reg).find(([k, r]) => String(k) === id || ((r && r.bus_ids) || []).map(String).includes(id));
+    if (!entry) return '';
+    return typeof rsRouteShortName === 'function' ? rsRouteShortName(entry[1]) : String(entry[1].name || '');
+  }
+
   function fmtClock(iso) {
     try { return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); } catch { return ''; }
   }
@@ -1001,7 +1015,7 @@
             <div class="bus-icon-wrap"><i data-lucide="bus"></i></div>
             <div>
               <div class="exec-vcard-title">Bus ${esc(h.bus_id)}</div>
-              <div class="exec-vcard-route">${esc((h.route && !/^\d+$/.test(String(h.route)) ? h.route : null) || ({ '515': 'Downtown Loop', '419': 'NW Parking Shuttle' })[String(h.bus_id)] || '')}</div>
+              <div class="exec-vcard-route">${esc((h.route && !/^\d+$/.test(String(h.route)) ? h.route : null) || routeNameFor(h.bus_id))}</div>
             </div>
           </div>
           <span class="exec-vcard-status-tag ${cls}">${esc(headline)}</span>
