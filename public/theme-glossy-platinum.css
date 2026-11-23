@@ -1,0 +1,277 @@
+/* ============================================
+   SUS APC DASHBOARD — GLOSSY PLATINUM THEME
+   Second colour scheme. Every rule is scoped to
+   html[data-skin="glossy-platinum"], so the original dark
+   theme is completely unaffected when it is selected.
+   ============================================ */
+
+/* ---------- Theme selector (shown in both themes) ---------- */
+.sus-theme-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: var(--radius-full, 9999px);
+  border: 1px solid var(--color-divider);
+  background: var(--color-surface-2);
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.sus-theme-select svg { width: 14px; height: 14px; }
+.sus-theme-select select {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font: 500 12px/1 var(--font-body, Inter, sans-serif);
+  padding-right: 14px;
+  cursor: pointer;
+  outline: none;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: calc(100% - 6px) 55%, calc(100% - 2px) 55%;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
+}
+.sus-theme-select select option { color: #111; background: #fff; }
+.sus-theme-select:focus-within { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+@media (max-width: 760px) { .sus-theme-select svg { display: none; } }
+
+/* ---------- Tokens ---------- */
+html[data-skin="glossy-platinum"],
+html[data-skin="glossy-platinum"] [data-theme] {
+  --color-bg: #eceef1;
+  --color-surface: #ffffff;
+  --color-surface-2: #f2f3f5;
+  --color-surface-3: #e6e8ec;
+  --color-surface-offset: #f6f7f9;
+  --color-divider: #dcdfe4;
+  --color-border: #c8cdd4;
+  --color-text: #16191f;
+  --color-text-muted: #4f5866;
+  --color-text-faint: #69727f;
+  --color-text-inverse: #ffffff;
+  --color-primary: #2563eb;
+  --color-primary-hover: #1d4ed8;
+  --color-primary-active: #1e40af;
+  --color-primary-light: rgba(37, 99, 235, 0.10);
+  --color-success: #059669;
+  --color-success-light: rgba(5, 150, 105, 0.12);
+  --color-warning: #d97706;
+  --color-warning-light: rgba(217, 119, 6, 0.12);
+  --color-error: #dc2626;
+  --color-error-light: rgba(220, 38, 38, 0.10);
+  --chart-1: #2563eb;
+  --chart-2: #0d9488;
+  --chart-3: #d97706;
+  --chart-4: #7c3aed;
+  --chart-5: #db2777;
+  --chart-6: #0891b2;
+  --chart-7: #ea580c;
+  --chart-8: #65a30d;
+  --shadow-sm: 0 1px 3px rgba(24, 33, 47, 0.08);
+  --shadow-md: 0 6px 16px rgba(24, 33, 47, 0.10);
+  --shadow-lg: 0 16px 36px rgba(24, 33, 47, 0.16);
+  color-scheme: light;
+}
+
+html[data-skin="glossy-platinum"] body {
+  background: #eceef1;
+  color: var(--color-text);
+}
+
+/* ---------- Canvas ---------- */
+html[data-skin="glossy-platinum"] .main {
+  background:
+    radial-gradient(ellipse 70% 45% at 45% 0, #ffffff 0, rgba(255,255,255,0) 70%),
+    linear-gradient(180deg, #f1f3f5 0%, #e6e9ed 100%) !important;
+}
+
+/* ---------- Black metallic sidebar + header ---------- */
+html[data-skin="glossy-platinum"] .sidebar,
+html[data-skin="glossy-platinum"] .header {
+  --color-text: #f6f7f9;
+  --color-text-muted: #c0c6ce;
+  --color-text-faint: #9aa3ae;
+  --color-divider: #3a3d43;
+  --color-surface: #17191d;
+  --color-surface-2: #2a2e34;
+  --color-surface-3: #343940;
+  --color-border: #4f555e;
+  --color-primary-light: rgba(255, 255, 255, 0.10);
+  color: var(--color-text);
+}
+html[data-skin="glossy-platinum"] .sidebar {
+  background: linear-gradient(170deg, #1d1f23 0%, #0b0c0e 38%, #24272c 62%, #08090b 100%) !important;
+  border-right: 1px solid #2c2f35 !important;
+  box-shadow: inset -1px 0 0 rgba(255,255,255,0.08), 4px 0 18px rgba(0,0,0,0.12);
+}
+html[data-skin="glossy-platinum"] .header {
+  background: linear-gradient(115deg, #08090b 0%, #2d3035 42%, #101114 65%, #070809 100%) !important;
+  border-bottom: 1px solid #2c2f35 !important;
+  box-shadow: inset 0 -1px 0 rgba(255,255,255,0.07), 0 4px 18px rgba(0,0,0,0.12);
+}
+html[data-skin="glossy-platinum"] .sidebar .logo-text,
+html[data-skin="glossy-platinum"] .header-title { color: #ffffff !important; }
+html[data-skin="glossy-platinum"] .sidebar .nav-item { color: #c3cad3 !important; }
+html[data-skin="glossy-platinum"] .sidebar .nav-item:hover { background: rgba(255,255,255,0.08) !important; color: #ffffff !important; }
+html[data-skin="glossy-platinum"] .sidebar .nav-item.active {
+  background: linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0.05)) !important;
+  color: #ffffff !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.22), inset 0 0 0 1px rgba(255,255,255,0.16);
+}
+html[data-skin="glossy-platinum"] .sidebar .nav-item.active svg { color: #ffffff !important; }
+html[data-skin="glossy-platinum"] .header .btn-secondary {
+  background: linear-gradient(180deg, #f8f9fb, #d9dde3) !important;
+  color: #14181e !important;
+  border: 1px solid #ffffff66 !important;
+  box-shadow: inset 0 1px 0 #fff;
+}
+html[data-skin="glossy-platinum"] .header .btn-secondary svg { color: #14181e !important; }
+html[data-skin="glossy-platinum"] .header .export-menu {
+  --color-surface: #ffffff;
+  --color-surface-2: #f2f3f5;
+  --color-text: #16191f;
+  --color-text-muted: #4f5866;
+  --color-divider: #dcdfe4;
+}
+
+/* ---------- Glossy platinum KPI cards ---------- */
+html[data-skin="glossy-platinum"] .kpi-card {
+  background:
+    linear-gradient(125deg, rgba(255,255,255,0.85) 0%, rgba(255,255,255,0.2) 34%, rgba(255,255,255,0) 35%),
+    linear-gradient(180deg, #fafbfc 0%, #e1e4e9 49%, #d3d8df 50%, #eceef2 100%) !important;
+  border: 1px solid #bcc3cc !important;
+  border-radius: 15px !important;
+  box-shadow: inset 0 1px 0 #ffffff, inset 0 -1px 0 rgba(255,255,255,0.6), 0 8px 20px rgba(24,33,47,0.08) !important;
+  transition: transform .22s ease, box-shadow .22s ease !important;
+}
+html[data-skin="glossy-platinum"] .kpi-card:hover {
+  transform: translateY(-3px);
+  box-shadow: inset 0 1px 0 #ffffff, 0 14px 26px rgba(24,33,47,0.16) !important;
+}
+html[data-skin="glossy-platinum"] .kpi-card::before {
+  background: linear-gradient(90deg, transparent, #ffffff, transparent) !important;
+  height: 1px !important;
+  animation: none !important;
+}
+html[data-skin="glossy-platinum"] .kpi-card::after { display: none !important; }
+html[data-skin="glossy-platinum"] .kpi-card .kpi-value,
+html[data-skin="glossy-platinum"] .kpi-value { color: #11151b !important; text-shadow: 0 1px 0 rgba(255,255,255,0.7); }
+html[data-skin="glossy-platinum"] .kpi-card .kpi-label,
+html[data-skin="glossy-platinum"] .kpi-label { color: #2f3843 !important; }
+html[data-skin="glossy-platinum"] .kpi-card .kpi-sub,
+html[data-skin="glossy-platinum"] .kpi-sub { color: #4e5866 !important; }
+
+/* ---------- White chart panels ---------- */
+html[data-skin="glossy-platinum"] .chart-panel {
+  background: linear-gradient(140deg, #ffffff, #fbfcfe) !important;
+  border: 1px solid #d1d6dd !important;
+  border-radius: 16px !important;
+  box-shadow: inset 0 1px 0 #ffffff, 0 8px 25px rgba(24,33,47,0.06) !important;
+}
+html[data-skin="glossy-platinum"] .chart-header,
+html[data-skin="glossy-platinum"] .chart-panel-feature .chart-header,
+html[data-skin="glossy-platinum"] .ridership-premium .chart-header {
+  background: linear-gradient(180deg, #ffffff, #f3f5f8) !important;
+  border-bottom: 1px solid #e0e4e9 !important;
+}
+html[data-skin="glossy-platinum"] .chart-title { color: #1c222b !important; }
+html[data-skin="glossy-platinum"] .chart-subtitle { color: #5d6774 !important; }
+
+/* Tabs / segmented controls */
+html[data-skin="glossy-platinum"] .period-tabs,
+html[data-skin="glossy-platinum"] .ridership-premium #ridershipViewTabs.period-tabs {
+  background: #eceef1 !important;
+  border: 1px solid #d6dae0 !important;
+}
+html[data-skin="glossy-platinum"] .period-tab,
+html[data-skin="glossy-platinum"] .ridership-premium #ridershipViewTabs .period-tab { color: #4f5866 !important; }
+html[data-skin="glossy-platinum"] .period-tab:hover { color: #11151b !important; }
+html[data-skin="glossy-platinum"] .period-tab.active,
+html[data-skin="glossy-platinum"] .ridership-premium #ridershipViewTabs .period-tab.active,
+html[data-skin="glossy-platinum"] .map-mode-tab.active,
+html[data-skin="glossy-platinum"] .history-preset.active,
+html[data-skin="glossy-platinum"] .history-mode.active,
+html[data-skin="glossy-platinum"] #routePresetGroup .btn-ghost.active {
+  background: linear-gradient(180deg, #343b46, #12161c) !important;
+  color: #ffffff !important;
+  border-color: #12161c !important;
+}
+html[data-skin="glossy-platinum"] .map-mode-tab:hover,
+html[data-skin="glossy-platinum"] .history-preset:hover,
+html[data-skin="glossy-platinum"] .history-mode:hover { color: #11151b; }
+
+/* Labels with hard-coded light text in the dark theme */
+html[data-skin="glossy-platinum"] .ridership-premium .filter-label,
+html[data-skin="glossy-platinum"] .ridership-premium .kpi-label,
+html[data-skin="glossy-platinum"] .stop-empty-state .empty-title,
+html[data-skin="glossy-platinum"] .stop-hour-rowname,
+html[data-skin="glossy-platinum"] .stop-attr-chip,
+html[data-skin="glossy-platinum"] #stopLeaderTable thead th,
+html[data-skin="glossy-platinum"] #stopLeaderTable tbody tr td { color: #1f252e !important; }
+html[data-skin="glossy-platinum"] .stop-attr-chip .chip-sep { color: #8a929d !important; }
+html[data-skin="glossy-platinum"] #stopLeaderTable .stop-rank-pill { color: #3b2f74 !important; }
+html[data-skin="glossy-platinum"] #stopLeaderTable .route-pill.r-515 { color: #4c2f8f !important; }
+html[data-skin="glossy-platinum"] .report-icon.green { color: #047857 !important; }
+html[data-skin="glossy-platinum"] .report-icon.purple { color: #6d28d9 !important; }
+
+/* ---------- Forms, tables, buttons ---------- */
+html[data-skin="glossy-platinum"] .main input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+html[data-skin="glossy-platinum"] .main select,
+html[data-skin="glossy-platinum"] .main textarea {
+  background-color: #ffffff;
+  color: #16191f;
+  border-color: #c8cdd4;
+}
+html[data-skin="glossy-platinum"] .main .btn-secondary,
+html[data-skin="glossy-platinum"] .main .btn-ghost {
+  background: linear-gradient(180deg, #ffffff, #eef0f3);
+  color: #1c222b;
+  border-color: #c8cdd4;
+}
+html[data-skin="glossy-platinum"] .main .btn-primary {
+  background: linear-gradient(180deg, #343b46, #12161c);
+  color: #ffffff;
+  border-color: #12161c;
+}
+html[data-skin="glossy-platinum"] table thead th { background: #f3f5f8; }
+
+/* ---------- Light maps ---------- */
+html[data-skin="glossy-platinum"] .leaflet-tile-pane { filter: none !important; }
+html[data-skin="glossy-platinum"] #routeMap { background: #e9ecef !important; }
+html[data-skin="glossy-platinum"] #routeMap .leaflet-tile { filter: none !important; }
+html[data-skin="glossy-platinum"] .map-container .leaflet-container,
+html[data-skin="glossy-platinum"] .leaflet-container { background: #e9ecef; }
+html[data-skin="glossy-platinum"] .leaflet-control-zoom a {
+  background: #ffffff !important;
+  color: #16191f !important;
+  border-color: #c8cdd4 !important;
+}
+html[data-skin="glossy-platinum"] .leaflet-popup-content-wrapper,
+html[data-skin="glossy-platinum"] .leaflet-popup-tip {
+  background: #ffffff;
+  color: #16191f;
+}
+
+/* ---------- Login ---------- */
+html[data-skin="glossy-platinum"] .login-screen {
+  background: radial-gradient(ellipse at top, #3b3e44, #08090b 75%) !important;
+}
+html[data-skin="glossy-platinum"] .login-card {
+  background: linear-gradient(145deg, #ffffff, #e7eaf0) !important;
+  border: 1px solid rgba(255,255,255,0.67) !important;
+  border-radius: 20px !important;
+  box-shadow: 0 30px 90px rgba(0,0,0,0.53), inset 0 1px 0 #fff !important;
+}
+
+/* ---------- Accessibility ---------- */
+html[data-skin="glossy-platinum"] *:focus-visible { outline: 2px solid #2563eb !important; outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) {
+  html[data-skin="glossy-platinum"] .kpi-card { transition: none !important; }
+  html[data-skin="glossy-platinum"] .kpi-card:hover { transform: none !important; }
+}
+
+/* Mayo Clinic co-brand logo is white artwork; darken it on the light login card */
+html[data-skin="glossy-platinum"] .mayo-logo--login { filter: brightness(0) saturate(100%) opacity(0.72); }
