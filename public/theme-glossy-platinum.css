@@ -383,3 +383,38 @@ html[data-skin="glossy-platinum"][data-theme] :is(#view-overview, .main) .kpi-ca
 html[data-skin="glossy-platinum"][data-theme] :is(#view-overview, .main) .kpi-icon {
   box-shadow: inset 0 0 0 1.5px #d4a845, 0 6px 14px -5px rgba(0,0,0,0.5) !important;
 }
+
+/* Premium gold frames on all charts, graphs and table cards */
+html[data-skin="glossy-platinum"][data-theme] .chart-panel,
+html[data-skin="glossy-platinum"][data-theme] .chart-panel.chart-panel-feature,
+html[data-skin="glossy-platinum"][data-theme] .pro-table-card {
+  border: 1.5px solid transparent !important;
+  border-radius: 16px !important;
+  background:
+    linear-gradient(140deg, #ffffff, #fbfcfe) padding-box,
+    linear-gradient(135deg, #f3dc9f 0%, #c99a3e 28%, #8f6a26 52%, #d8b25c 76%, #f1d896 100%) border-box !important;
+  box-shadow: inset 0 1px 0 #ffffff, 0 0 0 1px rgba(143,106,38,0.10), 0 14px 32px -16px rgba(143,106,38,0.45), 0 2px 6px rgba(24,33,47,0.05) !important;
+  animation: none !important;
+}
+html[data-skin="glossy-platinum"][data-theme] .chart-panel:hover,
+html[data-skin="glossy-platinum"][data-theme] .pro-table-card:hover {
+  box-shadow: inset 0 1px 0 #ffffff, 0 0 0 1px rgba(143,106,38,0.18), 0 18px 36px -16px rgba(143,106,38,0.55), 0 3px 8px rgba(24,33,47,0.06) !important;
+}
+/* Gold hairline under the panel header and a small gold accent beside the title */
+html[data-skin="glossy-platinum"][data-theme] .chart-panel .chart-header {
+  border-bottom: 1px solid transparent !important;
+  border-image: linear-gradient(90deg, rgba(201,154,62,0.05), rgba(201,154,62,0.6) 20%, rgba(201,154,62,0.6) 80%, rgba(201,154,62,0.05)) 1 !important;
+  border-top-left-radius: 14px; border-top-right-radius: 14px;
+}
+html[data-skin="glossy-platinum"][data-theme] .chart-panel .chart-title {
+  position: relative;
+  padding-left: 12px;
+}
+html[data-skin="glossy-platinum"][data-theme] .chart-panel .chart-title::before {
+  content: "";
+  position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 1em; border-radius: 2px;
+  background: linear-gradient(180deg, #f3dc9f, #c99a3e 55%, #8f6a26);
+}
+/* The live map panel is a full-bleed map: keep the frame, skip the inner glow */
+html[data-skin="glossy-platinum"][data-theme] .chart-panel.live-map-panel { box-shadow: 0 14px 32px -16px rgba(143,106,38,0.45) !important; }
