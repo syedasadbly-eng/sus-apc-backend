@@ -47,9 +47,15 @@
 <link rel="stylesheet" href="./base.css">
 <link rel="stylesheet" href="./style.css">
 <link rel="stylesheet" href="./theme-warm.css">
+<link rel="stylesheet" href="./theme-glossy-platinum.css">
 <script>
-  // Theme: warm light by default; the original dark theme is one click away.
-  (function () { try { var t = localStorage.getItem('sus-theme'); if (t === 'dark' || t === 'warm') document.documentElement.setAttribute('data-theme', t); } catch (e) {} })();
+  // Theme: warm light by default; dark and Glossy Platinum are selectable from the header.
+  // Glossy Platinum builds on the light theme (data-theme="warm") plus data-skin="glossy-platinum".
+  (function () { try {
+    var t = localStorage.getItem('sus-theme'), d = document.documentElement;
+    if (t === 'dark' || t === 'warm') d.setAttribute('data-theme', t);
+    else if (t === 'glossy') { d.setAttribute('data-theme', 'warm'); d.setAttribute('data-skin', 'glossy-platinum'); }
+  } catch (e) {} })();
 </script>
 </head>
 <body>
@@ -311,9 +317,14 @@
         <i data-lucide="bell"></i>
         <span class="badge" id="headerBellDot" hidden></span>
       </button>
-      <button class="btn btn-secondary theme-toggle" id="themeToggle" type="button" title="Switch between light and dark theme">
-        <i data-lucide="moon" style="width:14px;height:14px"></i><span>Dark</span>
-      </button>
+      <label class="sus-theme-select theme-toggle" title="Dashboard colour scheme">
+        <i data-lucide="palette"></i>
+        <select id="themeToggle" aria-label="Dashboard colour scheme">
+          <option value="warm">Light</option>
+          <option value="dark">Dark</option>
+          <option value="glossy">Glossy Platinum</option>
+        </select>
+      </label>
       <div class="export-dropdown" id="globalExport">
         <button class="btn btn-secondary" id="exportBtn">
           <i data-lucide="download" style="width:14px;height:14px"></i>

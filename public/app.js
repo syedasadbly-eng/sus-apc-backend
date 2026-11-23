@@ -6280,16 +6280,15 @@ async function exportWelfareAuditCSV(from, to, busId) {
 }
 
 
-// Theme toggle (warm light <-> dark). Reloads so charts pick up colours.
+// Theme selector (light / dark / Glossy Platinum). Reloads so charts pick up colours.
 (function wireThemeToggle() {
-  const btn = document.getElementById('themeToggle'); if (!btn) return;
-  const cur = document.documentElement.getAttribute('data-theme') || 'warm';
-  btn.innerHTML = cur === 'warm'
-    ? '<i data-lucide="moon" style="width:14px;height:14px"></i><span>Dark</span>'
-    : '<i data-lucide="sun" style="width:14px;height:14px"></i><span>Light</span>';
-  if (window.lucide) try { window.lucide.createIcons(); } catch (e) { /* noop */ }
-  btn.addEventListener('click', () => {
-    try { localStorage.setItem('sus-theme', cur === 'warm' ? 'dark' : 'warm'); } catch (e) { /* noop */ }
+  const sel = document.getElementById('themeToggle'); if (!sel) return;
+  const d = document.documentElement;
+  const cur = d.getAttribute('data-skin') === 'glossy-platinum' ? 'glossy' : (d.getAttribute('data-theme') || 'warm');
+  sel.value = cur;
+  sel.addEventListener('change', () => {
+    if (sel.value === cur) return;
+    try { localStorage.setItem('sus-theme', sel.value); } catch (e) { /* noop */ }
     location.reload();
   });
 })();
