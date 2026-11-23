@@ -6280,11 +6280,11 @@ async function exportWelfareAuditCSV(from, to, busId) {
 }
 
 
-// Theme selector (light / dark / Glossy Platinum). Reloads so charts pick up colours.
+// Theme selector (dark / Glossy Platinum). Reloads so charts pick up colours.
 (function wireThemeToggle() {
   const sel = document.getElementById('themeToggle'); if (!sel) return;
   const d = document.documentElement;
-  const cur = d.getAttribute('data-skin') === 'glossy-platinum' ? 'glossy' : (d.getAttribute('data-theme') || 'warm');
+  const cur = d.getAttribute('data-skin') === 'glossy-platinum' ? 'glossy' : 'dark';
   sel.value = cur;
   sel.addEventListener('change', () => {
     if (sel.value === cur) return;
