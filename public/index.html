@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="warm">
+<html lang="en" data-theme="dark">
 <head>
 <!--
    ______                            __
@@ -49,12 +49,11 @@
 <link rel="stylesheet" href="./theme-warm.css">
 <link rel="stylesheet" href="./theme-glossy-platinum.css">
 <script>
-  // Theme: warm light by default; dark and Glossy Platinum are selectable from the header.
-  // Glossy Platinum builds on the light theme (data-theme="warm") plus data-skin="glossy-platinum".
+  // Theme: original dark by default; Glossy Platinum is selectable from the header.
+  // Glossy Platinum builds on the light stylesheet (data-theme="warm") plus data-skin="glossy-platinum".
   (function () { try {
-    var t = localStorage.getItem('sus-theme'), d = document.documentElement;
-    if (t === 'dark' || t === 'warm') d.setAttribute('data-theme', t);
-    else if (t === 'glossy') { d.setAttribute('data-theme', 'warm'); d.setAttribute('data-skin', 'glossy-platinum'); }
+    var d = document.documentElement;
+    if (localStorage.getItem('sus-theme') === 'glossy') { d.setAttribute('data-theme', 'warm'); d.setAttribute('data-skin', 'glossy-platinum'); }
   } catch (e) {} })();
 </script>
 </head>
@@ -320,7 +319,6 @@
       <label class="sus-theme-select theme-toggle" title="Dashboard colour scheme">
         <i data-lucide="palette"></i>
         <select id="themeToggle" aria-label="Dashboard colour scheme">
-          <option value="warm">Light</option>
           <option value="dark">Dark</option>
           <option value="glossy">Glossy Platinum</option>
         </select>
