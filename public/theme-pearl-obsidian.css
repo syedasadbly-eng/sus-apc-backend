@@ -1,0 +1,33 @@
+@property --sus-a{syntax:'<angle>';initial-value:0deg;inherits:false}
+html[data-skin="pearl-obsidian"]{--color-bg:#010203;--color-surface:#05080c;--color-surface-2:#0b1017;--color-surface-3:#121a24;--color-surface-offset:#080c12;--color-divider:#202b3b;--color-border:#3a4757;--color-text:#f5f7fb;--color-text-muted:#bdc8d8;--color-text-faint:#98a6b8;--color-primary:#5b9cff;--color-primary-hover:#4a8af0;--color-primary-light:rgba(91,156,255,.16);--color-success:#2de2d1;--color-warning:#ffc55c;--color-error:#ff7e8b;--chart-1:#5b9cff;--chart-2:#2de2d1;--chart-3:#ffc55c;--chart-4:#b69cff;--chart-5:#ff63b8;--chart-6:#2dd4ff;--font-body:'Inter',-apple-system,BlinkMacSystemFont,sans-serif}
+html[data-skin="pearl-obsidian"] body{background:#010203;color:#f5f7fb}
+html[data-skin="pearl-obsidian"] .main{background:#010203}
+html[data-skin="pearl-obsidian"] .sidebar,html[data-skin="pearl-obsidian"] .header{background:radial-gradient(ellipse 110% 95% at 35% -65%,rgba(255,255,255,.18),transparent 83%),linear-gradient(117deg,#010203,#12151b 43%,#020305 75%);border-color:#4a5463;box-shadow:inset 0 1px rgba(255,255,255,.25),0 9px 25px #000}
+html[data-skin="pearl-obsidian"] .header-title,html[data-skin="pearl-obsidian"] .logo-text{color:#f5f7fb;font-weight:500;letter-spacing:-.4px}
+html[data-skin="pearl-obsidian"] .nav-item.active{color:#fff;background:linear-gradient(105deg,#1d314c,#080e18);box-shadow:inset 0 0 0 1px #36557c}
+html[data-skin="pearl-obsidian"] .kpi-card{--c1:#5b9cff;--c2:#2de2d1;border:2px solid transparent;border-radius:12px;color:#101721;background:linear-gradient(145deg,#fff,#f2f4f7 65%,#dfe5ed) padding-box,conic-gradient(from var(--sus-a),var(--c1),var(--c2),var(--c1) 55%,#fff 62%,var(--c1)) border-box;animation:sus-spin 7s linear infinite;box-shadow:0 12px 26px rgba(0,0,0,.75)}
+html[data-skin="pearl-obsidian"] .kpi-card:nth-child(2){--c1:#2de2d1;--c2:#34d399}
+html[data-skin="pearl-obsidian"] .kpi-card:nth-child(3){--c1:#ffc55c;--c2:#fff0a8}
+html[data-skin="pearl-obsidian"] .kpi-card:nth-child(4){--c1:#2dd4ff;--c2:#b69cff}
+html[data-skin="pearl-obsidian"] .kpi-card:nth-child(5){--c1:#b69cff;--c2:#ff63b8}
+html[data-skin="pearl-obsidian"] .kpi-card::before{display:none}
+html[data-skin="pearl-obsidian"] .kpi-card .kpi-label{color:#34465c;font-weight:600}
+html[data-skin="pearl-obsidian"] .kpi-card .kpi-value{color:#101721;font-weight:700;letter-spacing:-1.2px}
+html[data-skin="pearl-obsidian"] .kpi-card .kpi-sub{color:#526176}
+html[data-skin="pearl-obsidian"] .chart-panel,html[data-skin="pearl-obsidian"] .comparison-controls,html[data-skin="pearl-obsidian"] .report-card{--c1:#5b9cff;--c2:#2de2d1;border:2px solid transparent;border-radius:12px;background:#05080c padding-box,conic-gradient(from var(--sus-a),#3a4757,var(--c1),var(--c2),#3a4757 62%,#fff 68%,#3a4757) border-box;animation:sus-spin 9s linear infinite;box-shadow:0 9px 25px #000}
+html[data-skin="pearl-obsidian"] .chart-header{border-bottom-color:#202b3b;background:linear-gradient(rgba(255,255,255,.03),transparent)}
+html[data-skin="pearl-obsidian"] .chart-title{color:#f5f7fb;font-weight:500;letter-spacing:-.3px}
+html[data-skin="pearl-obsidian"] .chart-subtitle{color:#98a6b8}
+html[data-skin="pearl-obsidian"] .period-tab.active{background:linear-gradient(#2a4f7c,#16304f);color:#fff}
+html[data-skin="pearl-obsidian"] .data-table th{background:#0b1017;color:#bdc8d8}
+html[data-skin="pearl-obsidian"] .data-table td{border-bottom-color:#202b3b}
+html[data-skin="pearl-obsidian"] .map-container,html[data-skin="pearl-obsidian"] .map-container .leaflet-container,html[data-skin="pearl-obsidian"] .leaflet-container{background:#f0f2f4}
+html[data-skin="pearl-obsidian"] .leaflet-tile-pane{filter:none}
+html[data-skin="pearl-obsidian"] .leaflet-control-zoom a{background:#fff!important;color:#101721!important;border-color:#c8d0da!important}
+html[data-skin="pearl-obsidian"] .theme-select-wrap select{background:#080b10;color:#f5f7fb;border:1px solid #4c5b70;border-radius:7px;padding:7px 10px;font-size:12px}
+html[data-skin="pearl-obsidian"] .login-screen{background:radial-gradient(ellipse at top,#1a1e26,#010203 75%)}
+.theme-select-wrap{display:flex;align-items:center}
+.theme-select-wrap select{background:var(--color-surface-2);color:var(--color-text);border:1px solid var(--color-border);border-radius:7px;padding:7px 10px;font-size:12px}
+.theme-select-wrap select:focus-visible{outline:2px solid #5b9cff;outline-offset:2px}
+@keyframes sus-spin{to{--sus-a:360deg}}
+@media (prefers-reduced-motion:reduce){html[data-skin="pearl-obsidian"] .kpi-card,html[data-skin="pearl-obsidian"] .chart-panel{animation:none}}
