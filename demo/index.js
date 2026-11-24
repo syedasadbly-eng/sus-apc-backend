@@ -80,8 +80,9 @@ const CFG = {
   missIn: Number(process.env.DEMO_MISS_BOARD || 0),
   // Mean minutes between welfare incidents during service.
   welfareEveryMin: Number(process.env.DEMO_WELFARE_EVERY_MIN || 30),
-  // Minutes a bus waits at its terminus between loops.
-  layoverMin: Number(process.env.DEMO_LAYOVER_MIN || 3),
+  // Minutes a bus waits at its terminus between loops. Short, so a bus is
+  // never seen parked for minutes on the Live Map (was 3).
+  layoverMin: Number(process.env.DEMO_LAYOVER_MIN || 0.3),
   tickMs: 5000,
   // GPS cadence: short enough that drive bursts and pauses read clearly.
   gpsEveryMs: Number(process.env.DEMO_GPS_EVERY_MS || 2500),
@@ -273,8 +274,15 @@ function planDay(busId, dateStr, capacity) {
   const legMin = layoverLeg ? (loop - layMin) / (n - 1) : stepMin;
   const offset = [];
   for (let k = 0, t = 0; k < n; k++) { offset.push(t); t += legMin; }
+  let prevJitter = 0;
   for (let i = 0; i <= nVisits; i++) {
-    const minute = startMin + Math.floor(i / n) * loop + offset[i % n] + (rng() - 0.5) * 1.5;
+    // Timetable jitter (+/-45 s). Across a terminus layover the departure
+    // reuses the arrival's jitter so the layover stays its set length
+    // instead of stretching to ~2 min with a parked bus.
+    let jitter = (rng() - 0.5) * 1.5;
+    if (layoverLeg && i > 0 && i % n === 0) jitter = prevJitter;
+    prevJitter = jitter;
+    const minute = startMin + Math.floor(i / n) * loop + offset[i % n] + jitter;
     const ts = localToUtcMs(dateStr, minute);
     const stopIdx = i % stops.length;
     const spec = bus.stops[stopIdx] || { weight: 1, role: 'mid' };
@@ -635,7 +643,8 @@ function legPlan(busId, a, b) {
   const drives = [], pauses = [];
   let est = 0;
   for (let g = 0; g < 400; g++) {
-    const d = 80000 + rnd() * 20000;
+    // First burst has a random length so buses don't pause in step.
+    const d = drives.length ? 80000 + rnd() * 20000 : 25000 + rnd() * 75000;
     if (drives.length && est + d > win) break;
     drives.push(d); est += d;
     const p = 9000 + rnd() * 2000;
