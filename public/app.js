@@ -1397,6 +1397,14 @@ const TRAIL_MAX_MS = 8 * 60 * 1000; // hard cap on trail age
 const TRAIL_M = 2400;          // trail length in metres (kept while the bus is stopped)
 const TRAIL_SEGS = 16;         // trail drawn as segments of falling opacity
 let busAnimRaf = null;
+// Leaflet rounds marker positions to whole pixels; at city zoom a bus moves
+// well under a pixel per frame, so that made it hop. Keep sub-pixel.
+const SmoothBusMarker = L.Marker.extend({
+  update() {
+    if (this._icon && this._map) this._setPos(this._map.project(this._latlng)._subtract(this._map.getPixelOrigin()));
+    return this;
+  },
+});
 
 // Stop registry from either the Routes page or the map loader.
 function busRouteFor(busId) {
@@ -1600,7 +1608,7 @@ function updateMapBusMarkers(map, mapKey) {
     const target = [bus.lat, bus.lng];
     let st = state[bus.id];
     if (!st) {
-      const marker = L.marker(target, { icon: L.divIcon({ className: 'live-bus-icon', html: iconHtml, iconSize: [32, 32], iconAnchor: [16, 16] }), zIndexOffset: 1000 }).addTo(map);
+      const marker = new SmoothBusMarker(target, { icon: L.divIcon({ className: 'live-bus-icon', html: iconHtml, iconSize: [32, 32], iconAnchor: [16, 16] }), zIndexOffset: 1000 }).addTo(map);
       st = state[bus.id] = { marker, iconHtml, trail: busBackfillTrail(bus.id, target, now), backfilled: !!busRouteFor(bus.id), segs: [], path: null, color: busTrailColor(bus), target };
       busSetMoving(st, false);
       const ring = marker.getElement && marker.getElement(); if (ring) ring.style.setProperty('--bus-route', st.color);
@@ -1623,7 +1631,13 @@ function updateMapBusMarkers(map, mapKey) {
         const hop = geoDist(from, target);
         if (hop > 3000) { st.marker.setLatLng(target); st.trail = [[target[0], target[1], now]]; st.path = null; }
         else if (hop < 1.5) { st.marker.setLatLng(target); }
-        else { st.path = busRoadPath(bus.id, from, target) || [from, target]; st.t0 = now; st.dur = BUS_ANIM_MS; }
+        else {
+          // Glide over the measured gap between updates (+15%) so the bus
+          // never stalls waiting for the next fix when a poll runs late.
+          if (st.lastFixAt) { const gap = now - st.lastFixAt; if (gap > 1000 && gap < 4500) st.fixGap = st.fixGap ? st.fixGap * 0.7 + gap * 0.3 : gap; }
+          st.lastFixAt = now;
+          st.path = busRoadPath(bus.id, from, target) || [from, target]; st.t0 = now; st.dur = (st.fixGap || BUS_ANIM_MS) * 1.15;
+        }
         st.target = target;
       }
     }
