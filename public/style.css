@@ -4345,3 +4345,31 @@ html[data-skin="glossy-platinum"][data-theme] #view-welfare-console .wc-top-weat
   #view-welfare-console .wc-top-weather > * { flex-shrink: 0; }
   #view-welfare-console .wc-top-weather .wx-meta { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 }
+
+/* ==== LIVE MAP — stop-and-go motion, route trails (livemap-motion-v1) ==== */
+/* Route lines are hidden on the Live Map; the trail tells the story. */
+#liveMapFull path.route-guide { transition: stroke-opacity 0.25s; }
+#liveMapFull path.bus-trail { transition: none; }
+#liveMapFull path.bus-trail-glow { filter: blur(3px); }
+/* Bus marker: route-coloured halo; soft pulse while stopped */
+.live-bus-icon .bus-marker::after {
+  content: ''; position: absolute; inset: -6px; border-radius: 50%;
+  border: 2px solid var(--bus-route, #2563eb); opacity: 0; pointer-events: none;
+}
+.live-bus-icon.bus-is-stopped .bus-marker::after { animation: busStopPulse 1.8s ease-out infinite; }
+.live-bus-icon.bus-is-moving .bus-marker::after { opacity: 0.55; inset: -4px; }
+@keyframes busStopPulse {
+  0% { transform: scale(0.85); opacity: 0.75; }
+  100% { transform: scale(1.7); opacity: 0; }
+}
+.live-bus-icon.bus-is-stopped .bus-next::after {
+  content: 'Stopped'; margin-left: 6px; padding-left: 6px; border-left: 1px solid rgba(255,255,255,0.35);
+  font-weight: 500; opacity: 0.8;
+}
+/* Calmer stop markers on the Live Map */
+#liveMapFull .stop-dot { width: 10px; height: 10px; border-width: 2px; background: var(--stop-color, #7c3aed); }
+#liveMapFull .stop-dot-terminal { width: 14px; height: 14px; border-width: 3px; background: #ffffff; }
+#liveMapFull .leaflet-tooltip.stop-name-label { font-weight: 500; font-size: 11px; padding: 1px 6px; color: #334155; border-color: #e2e8f0; box-shadow: 0 1px 2px rgba(15,23,42,0.12); }
+@media (prefers-reduced-motion: reduce) {
+  .live-bus-icon.bus-is-stopped .bus-marker::after { animation: none; opacity: 0.6; }
+}

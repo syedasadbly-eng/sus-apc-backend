@@ -767,7 +767,7 @@ function handleMessage(topic, rawPayload) {
     } catch (err) {
       console.error('[welfare] observe hook failed (APC unaffected):', err.message);
     }
-    console.log(`[MQTT] ${busId} (${topic}) GPS/status only - no counting data`);
+    if (!demo.isActive()) console.log(`[MQTT] ${busId} (${topic}) GPS/status only - no counting data`);
     return;
   }
 
