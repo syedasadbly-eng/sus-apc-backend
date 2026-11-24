@@ -418,3 +418,61 @@ html[data-skin="glossy-platinum"][data-theme] .chart-panel .chart-title::before 
 }
 /* The live map panel is a full-bleed map: keep the frame, skip the inner glow */
 html[data-skin="glossy-platinum"][data-theme] .chart-panel.live-map-panel { box-shadow: 0 14px 32px -16px rgba(143,106,38,0.45) !important; }
+
+/* ==========================================================================
+   Brighter whites with a premium gloss finish
+   ========================================================================== */
+html[data-skin="glossy-platinum"][data-theme] {
+  --color-bg: #f8f9fb;
+  --color-surface: #ffffff;
+  --color-surface-2: #fafbfc;
+  --color-surface-offset: #fbfcfd;
+}
+html[data-skin="glossy-platinum"][data-theme] body { background: #f8f9fb; }
+/* Page canvas: near-white with a soft top light */
+html[data-skin="glossy-platinum"][data-theme] .main {
+  background:
+    radial-gradient(ellipse 80% 50% at 50% -10%, #ffffff 0%, rgba(255,255,255,0) 70%),
+    linear-gradient(180deg, #fdfdfe 0%, #f6f7f9 55%, #f1f3f6 100%) !important;
+}
+/* Panels: pure white with a glossy top sheen and diagonal highlight (gold frame kept) */
+html[data-skin="glossy-platinum"][data-theme] .chart-panel,
+html[data-skin="glossy-platinum"][data-theme] .chart-panel.chart-panel-feature,
+html[data-skin="glossy-platinum"][data-theme] .pro-table-card,
+html[data-skin="glossy-platinum"][data-theme] .weather-strip {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,1) 0%, rgba(255,255,255,0) 38%) padding-box,
+    linear-gradient(118deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.9) 22%, rgba(255,255,255,0) 40%) padding-box,
+    linear-gradient(180deg, #ffffff 0%, #fdfdfe 60%, #f9fafb 100%) padding-box,
+    linear-gradient(135deg, #f3dc9f 0%, #c99a3e 28%, #8f6a26 52%, #d8b25c 76%, #f1d896 100%) border-box !important;
+  box-shadow: inset 0 1px 0 #ffffff, inset 0 -1px 0 rgba(24,33,47,0.03), 0 0 0 1px rgba(143,106,38,0.10), 0 16px 34px -18px rgba(143,106,38,0.42), 0 2px 6px rgba(24,33,47,0.04) !important;
+}
+/* Panel headers: bright white gloss band */
+html[data-skin="glossy-platinum"][data-theme] .chart-header,
+html[data-skin="glossy-platinum"][data-theme] .chart-panel-feature .chart-header,
+html[data-skin="glossy-platinum"][data-theme] .ridership-premium .chart-header {
+  background: linear-gradient(180deg, #ffffff 0%, #ffffff 45%, #f8f9fb 100%) !important;
+}
+/* Tables and inner tiles: clean white */
+html[data-skin="glossy-platinum"][data-theme] table thead th,
+html[data-skin="glossy-platinum"][data-theme] .pro-table thead th { background: linear-gradient(180deg, #ffffff, #f7f8fa) !important; }
+html[data-skin="glossy-platinum"][data-theme] .pro-table tbody tr:nth-child(even) td { background: #fbfcfd !important; }
+html[data-skin="glossy-platinum"][data-theme] .pro-table tbody tr:hover td { background: #f6f7f9 !important; }
+html[data-skin="glossy-platinum"][data-theme] .period-tabs { background: linear-gradient(180deg, #ffffff, #f3f4f6) !important; }
+/* Filter bar and inputs: white gloss */
+html[data-skin="glossy-platinum"][data-theme] .filter-bar {
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcfd 100%) !important;
+  box-shadow: inset 0 1px 0 #ffffff, 0 2px 8px rgba(24,33,47,0.04) !important;
+}
+html[data-skin="glossy-platinum"][data-theme] .main input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+html[data-skin="glossy-platinum"][data-theme] .main select,
+html[data-skin="glossy-platinum"][data-theme] .filter-select {
+  background-color: #ffffff !important;
+  box-shadow: inset 0 1px 0 #ffffff, 0 1px 2px rgba(24,33,47,0.05);
+}
+html[data-skin="glossy-platinum"][data-theme] .report-card {
+  background:
+    linear-gradient(118deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.9) 22%, rgba(255,255,255,0) 40%),
+    linear-gradient(180deg, #ffffff 0%, #fdfdfe 60%, #f9fafb 100%) !important;
+  box-shadow: inset 0 1px 0 #ffffff, 0 10px 24px -16px rgba(24,33,47,0.25) !important;
+}
