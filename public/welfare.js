@@ -780,6 +780,38 @@
     setText('wDeckFleetVal', `${watched} / ${inService.length || health.length}`);
     setText('wDeckFleetMeta', watchable.length ? `${watchable.length} bus telemetry paused` : 'All saloons connected');
 
+    // ---- queue summary ----
+    // Counted per incident card (same bus + type + day), matching what the
+    // operator sees in the queue rather than raw detection counts.
+    {
+      const groups = new Map();
+      for (const e of events) {
+        const k = `${new Date(e.detected_at).toDateString()}|${e.bus_id}|${e.event_type}|${e.source === 'simulated'}`;
+        if (!groups.has(k)) groups.set(k, []);
+        groups.get(k).push(e);
+      }
+      const todayStr = new Date().toDateString();
+      let qOpen = 0; let qCrit = 0; let qAck = 0; let qRes = 0;
+      for (const items of groups.values()) {
+        const unres = items.filter((x) => !x.resolved);
+        if (!unres.length) {
+          if (new Date(items[0].detected_at).toDateString() === todayStr) qRes += 1;
+          continue;
+        }
+        if (unres.some((x) => !x.acknowledged)) qOpen += 1; else qAck += 1;
+        if (unres.some((x) => x.severity >= 4 || x.driver_response === 'help')) qCrit += 1;
+      }
+      setText('wqOpen', String(qOpen));
+      setText('wqCritical', String(qCrit));
+      setText('wqAcked', String(qAck));
+      setText('wqResolved', String(qRes));
+      const sum = document.getElementById('wQueueSummary');
+      if (sum) {
+        sum.classList.toggle('has-open', qOpen > 0);
+        sum.classList.toggle('has-critical', qCrit > 0);
+      }
+    }
+
     // ---- alert feed ----
     // The raw feed printed one identical card per detection, so a camera test
     // run became a wall of 30 "Possible altercation" cards. Repeats of the

@@ -1491,48 +1491,58 @@
         </div>
       </div>
 
-      <!-- Outside weather (Open-Meteo) — filled by weather.js -->
-      <div class="weather-strip" id="weatherStripWelfare" hidden aria-live="polite"></div>
-
-      <!-- Main Operational Grid: Active Incidents (Left) & Live Fleet Saloons (Right) -->
-      <div class="wc-grid">
-        <section class="wc-panel" aria-labelledby="wFeedTitle">
-          <header class="wc-panel-head">
+      <!-- Main Operational Layout: the Live Incident Queue runs the full width;
+           fleet saloons and outside weather sit in a supporting row beneath it. -->
+      <div class="wc-grid wc-layout">
+        <section class="wc-panel wc-queue" aria-labelledby="wFeedTitle">
+          <header class="wc-panel-head wc-queue-head">
             <div class="panel-head-left">
-              <i data-lucide="bell-ring" class="head-icon"></i>
+              <span class="wc-queue-icon"><i data-lucide="bell-ring"></i></span>
               <div>
                 <h2 class="wc-panel-title" id="wFeedTitle">Live Incident Queue</h2>
-                <div class="wc-panel-sub">Real-time alerts with one-click resolution</div>
+                <div class="wc-panel-sub">Real-time welfare alerts, newest first &middot; acknowledge or resolve in one click</div>
               </div>
             </div>
-            <div class="feed-filters" id="wFeedFilterBar">
+            <div class="feed-filters" id="wFeedFilterBar" role="tablist" aria-label="Filter incidents">
               <button class="feed-filter-btn active" data-filter="all">All</button>
               <button class="feed-filter-btn" data-filter="urgent">Urgent</button>
               <button class="feed-filter-btn" data-filter="unresolved">Unresolved</button>
             </div>
           </header>
+          <!-- Queue summary: filled by welfare.js renderConsole() -->
+          <div class="wc-queue-summary" id="wQueueSummary" aria-live="polite">
+            <div class="wq-stat wq-open"><span class="wq-num" id="wqOpen">0</span><span class="wq-lbl">Open</span></div>
+            <div class="wq-stat wq-crit"><span class="wq-num" id="wqCritical">0</span><span class="wq-lbl">Critical open</span></div>
+            <div class="wq-stat wq-ack"><span class="wq-num" id="wqAcked">0</span><span class="wq-lbl">Acknowledged</span></div>
+            <div class="wq-stat wq-res"><span class="wq-num" id="wqResolved">0</span><span class="wq-lbl">Resolved today</span></div>
+          </div>
           <div class="wc-feed" id="wAlertFeed">
             <div class="welfare-empty">Scanning for telemetry events...</div>
           </div>
         </section>
 
-        <section class="wc-panel" aria-labelledby="wBusTitle">
-          <header class="wc-panel-head">
-            <div class="panel-head-left">
-              <i data-lucide="layout-grid" class="head-icon"></i>
-              <div>
-                <h2 class="wc-panel-title" id="wBusTitle">Fleet Saloon Status</h2>
-                <div class="wc-panel-sub">Real-time onboard loads & sensor pings</div>
+        <aside class="wc-rail" aria-label="Fleet and outside conditions">
+          <section class="wc-panel" aria-labelledby="wBusTitle">
+            <header class="wc-panel-head">
+              <div class="panel-head-left">
+                <i data-lucide="layout-grid" class="head-icon"></i>
+                <div>
+                  <h2 class="wc-panel-title" id="wBusTitle">Fleet Saloon Status</h2>
+                  <div class="wc-panel-sub">Onboard loads &amp; sensor pings</div>
+                </div>
               </div>
+              <a href="driver.html?bus=515" target="_blank" class="cab-link" title="Open Driver Alert Display">
+                <i data-lucide="external-link" style="width:13px;height:13px"></i> Driver View
+              </a>
+            </header>
+            <div class="wc-buses" id="wVehicleCards">
+              <div class="welfare-empty">Loading fleet telemetry...</div>
             </div>
-            <a href="driver.html?bus=515" target="_blank" class="cab-link" title="Open Driver Alert Display">
-              <i data-lucide="external-link" style="width:13px;height:13px"></i> Driver View
-            </a>
-          </header>
-          <div class="wc-buses" id="wVehicleCards">
-            <div class="welfare-empty">Loading fleet telemetry...</div>
-          </div>
-        </section>
+          </section>
+
+          <!-- Outside weather (Open-Meteo) — filled by weather.js; compact in the rail -->
+          <div class="weather-strip wc-rail-weather" id="weatherStripWelfare" hidden aria-live="polite"></div>
+        </aside>
       </div>
 
       <!-- Collapsible Technical Diagnostics Drawer (Hidden by default, toggled via Diagnostics button) -->
