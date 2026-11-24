@@ -4174,7 +4174,7 @@ html:not([data-theme="warm"]) .route-key-live .rk-ends { color: #a5a8c1; }
    WELFARE CONSOLE — incident-first layout
    The Live Incident Queue is the primary surface: a wide main column
    that fills the viewport, with a queue summary and scannable rows.
-   Fleet saloons and outside weather sit in a row beneath it.
+   Weather sits in a slim strip above it; fleet saloons sit beneath it.
    ================================================================== */
 
 /* Top deck: three KPI tiles plus actions; never clips at narrow widths */
@@ -4209,7 +4209,7 @@ html:not([data-theme="warm"]) .route-key-live .rk-ends { color: #a5a8c1; }
 }
 #view-welfare-console .wc-rail {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px; align-items: start; min-width: 0;
 }
 /* Fleet cards side by side in the wider supporting row */
@@ -4311,21 +4311,21 @@ html:not([data-theme="warm"]) .route-key-live .rk-ends { color: #a5a8c1; }
 #view-welfare-console .wc-rail .exec-vcard-header { margin-bottom: 10px; }
 #view-welfare-console .wc-rail .exec-occupancy-block { margin-bottom: 10px; }
 
-#view-welfare-console .wc-rail-weather {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 12px 14px;
-  margin: 0; padding: 16px; border-radius: 16px; align-content: start;
-  background: #111827; border-color: #1f293d;
+/* Outside weather: slim one-line strip directly under the KPI deck */
+#view-welfare-console .wc-top-weather {
+  margin: 0 0 16px; padding: 10px 18px; gap: 8px 18px; flex-wrap: wrap;
+  background: #111827; border-color: #1f293d; border-radius: 14px;
 }
-#view-welfare-console .wc-rail-weather[hidden] { display: none !important; }
-#view-welfare-console .wc-rail-weather .wx-main {
-  grid-column: 1 / -1; padding: 0 0 12px; border-right: 0; border-bottom: 1px solid #1f293d;
-}
-#view-welfare-console .wc-rail-weather .wx-main svg { width: 30px; height: 30px; }
-#view-welfare-console .wc-rail-weather .wx-stat { align-items: flex-start; min-width: 0; }
-#view-welfare-console .wc-rail-weather .wx-stat svg { width: 15px; height: 15px; margin-top: 2px; }
-#view-welfare-console .wc-rail-weather .wx-label { font-size: 10.5px; }
-#view-welfare-console .wc-rail-weather .wx-value { font-size: 14px; }
-#view-welfare-console .wc-rail-weather .wx-meta { grid-column: 1 / -1; margin: 0; padding-top: 4px; }
+#view-welfare-console .wc-top-weather .wx-main { padding-right: 18px; gap: 10px; }
+#view-welfare-console .wc-top-weather .wx-meta { white-space: nowrap; font-size: 11px; }
+#view-welfare-console .wc-top-weather .wx-main svg { width: 26px; height: 26px; }
+#view-welfare-console .wc-top-weather .wx-main > div { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+#view-welfare-console .wc-top-weather .wx-temp { font-size: 18px; line-height: 1.1; }
+#view-welfare-console .wc-top-weather .wx-label { font-size: 10.5px; }
+#view-welfare-console .wc-top-weather .wx-value { font-size: 14px; }
+#view-welfare-console .wc-top-weather .wx-stat svg { width: 15px; height: 15px; }
+#view-welfare-console .wc-top-weather .wx-stat > div { display: flex; align-items: baseline; gap: 8px; }
+@media (max-width: 1100px) { #view-welfare-console .wc-top-weather .wx-meta { flex-basis: auto; margin-left: auto; } }
 
 /* Glossy Platinum: gold accents for the new queue elements */
 html[data-skin="glossy-platinum"][data-theme] .wc-queue-summary { background: rgba(0,0,0,0.35); border-bottom-color: rgba(201,154,62,0.28); }
@@ -4334,10 +4334,14 @@ html[data-skin="glossy-platinum"][data-theme] .wq-lbl { color: #d9bd80; }
 html[data-skin="glossy-platinum"][data-theme] .wc-queue-icon { background: linear-gradient(145deg, #222225, #050506); border-color: #c99a3e; color: #f3dc9f; }
 html[data-skin="glossy-platinum"][data-theme] #wAlertFeed .wc-day { background: linear-gradient(180deg, #0c0c0e 75%, rgba(12,12,14,0)); color: #d9bd80; }
 html[data-skin="glossy-platinum"][data-theme] #wAlertFeed .wc-day::after { background: rgba(201,154,62,0.28); }
-html[data-skin="glossy-platinum"][data-theme] #view-welfare-console .wc-rail-weather { padding: 16px; }
-html[data-skin="glossy-platinum"][data-theme] #view-welfare-console .wc-rail-weather .wx-main { border-bottom-color: rgba(201,154,62,0.28); }
+html[data-skin="glossy-platinum"][data-theme] #view-welfare-console .wc-top-weather { padding: 10px 18px; border-radius: 14px !important; }
 /* Medium queue widths: title + time on top, guidance, then status + actions */
 @container wcq (max-width: 999.98px) {
   #wAlertFeed .exec-alert-footer { flex-wrap: wrap; gap: 8px; }
   #wAlertFeed .exec-alert-state-wrap { flex-wrap: wrap; }
+}
+@media (min-width: 1280px) {
+  #view-welfare-console .wc-top-weather { flex-wrap: nowrap; }
+  #view-welfare-console .wc-top-weather > * { flex-shrink: 0; }
+  #view-welfare-console .wc-top-weather .wx-meta { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 }

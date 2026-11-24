@@ -1491,8 +1491,11 @@
         </div>
       </div>
 
+      <!-- Outside weather (Open-Meteo) — filled by weather.js; slim strip under the deck -->
+      <div class="weather-strip wc-top-weather" id="weatherStripWelfare" hidden aria-live="polite"></div>
+
       <!-- Main Operational Layout: the Live Incident Queue runs the full width;
-           fleet saloons and outside weather sit in a supporting row beneath it. -->
+           fleet saloons sit in a supporting row beneath it. -->
       <div class="wc-grid wc-layout">
         <section class="wc-panel wc-queue" aria-labelledby="wFeedTitle">
           <header class="wc-panel-head wc-queue-head">
@@ -1521,7 +1524,7 @@
           </div>
         </section>
 
-        <aside class="wc-rail" aria-label="Fleet and outside conditions">
+        <aside class="wc-rail" aria-label="Fleet status">
           <section class="wc-panel" aria-labelledby="wBusTitle">
             <header class="wc-panel-head">
               <div class="panel-head-left">
@@ -1540,8 +1543,6 @@
             </div>
           </section>
 
-          <!-- Outside weather (Open-Meteo) — filled by weather.js; compact in the rail -->
-          <div class="weather-strip wc-rail-weather" id="weatherStripWelfare" hidden aria-live="polite"></div>
         </aside>
       </div>
 
