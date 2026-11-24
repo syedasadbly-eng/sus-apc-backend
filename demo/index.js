@@ -608,8 +608,8 @@ function send(topic, payload) {
 }
 
 // Stop-and-go motion. Each leg between stops is split into drive bursts of
-// ~30-60 s separated by short 5-10 s pauses (lights, junctions, traffic),
-// plus a 5-10 s dwell at the stop itself. Fully deterministic per bus and
+// ~80-100 s (about 1.5 min) separated by ~9-11 s pauses (lights, junctions, traffic),
+// plus a ~9-11 s dwell at the stop itself. Fully deterministic per bus and
 // leg so every server instance and restart shows the same motion; the
 // timetable (and so the counts emitted at visit times) is unchanged.
 function seededRng(str) {
@@ -628,18 +628,18 @@ function legPlan(busId, a, b) {
   const hit = legPlanCache.get(key);
   if (hit) return hit;
   const rnd = seededRng(key);
-  const dwell = 5000 + rnd() * 5000;                 // at the stop
+  const dwell = 9000 + rnd() * 2000;                 // at the stop
   const start = a.ts + dwell, win = Math.max(1, b.ts - start);
   // Pick drive/pause pairs, then scale the drives so the bus still arrives
   // exactly on time. Pauses keep their 5-10 s length.
   const drives = [], pauses = [];
   let est = 0;
   for (let g = 0; g < 400; g++) {
-    const d = 30000 + rnd() * 30000;
+    const d = 80000 + rnd() * 20000;
     if (drives.length && est + d > win) break;
     drives.push(d); est += d;
-    const p = 5000 + rnd() * 5000;
-    if (est + p + 30000 > win) break;
+    const p = 9000 + rnd() * 2000;
+    if (est + p + 60000 > win) break;
     pauses.push(p); est += p;
   }
   pauses.length = Math.max(0, drives.length - 1);
@@ -658,17 +658,25 @@ function legPlan(busId, a, b) {
   if (legPlanCache.size > 500) legPlanCache.delete(legPlanCache.keys().next().value);
   return plan;
 }
+// Burst velocity profile: smooth (cosine) acceleration over ~15 s, steady
+// cruise, then smooth braking. Returns distance fraction and relative speed.
+function burstShape(t, D) {
+  const r = Math.min(15000, D / 3);
+  const area = D - r;                       // integral of the speed profile
+  let x, v;
+  if (t < r) { x = t / 2 - (r / (2 * Math.PI)) * Math.sin(Math.PI * t / r); v = (1 - Math.cos(Math.PI * t / r)) / 2; }
+  else if (t <= D - r) { x = r / 2 + (t - r); v = 1; }
+  else { const q = D - t; x = area - (q / 2 - (r / (2 * Math.PI)) * Math.sin(Math.PI * q / r)); v = (1 - Math.cos(Math.PI * q / r)) / 2; }
+  return { x: Math.max(0, Math.min(1, x / area)), v, peak: D / area };
+}
 // Fraction of the leg covered at `now`, plus whether the bus is moving.
-// Each burst eases in and out (zero speed at both ends) so starts and
-// stops look natural rather than sudden.
 function legProgress(lp, now) {
   if (now <= lp.start) return { f: 0, moving: false, u: 0, seg: null };
   for (const sg of lp.segs) {
     if (now < sg.t1) {
       if (!sg.drive) return { f: sg.f0, moving: false, seg: sg };
-      const u = (now - sg.t0) / Math.max(1, sg.t1 - sg.t0);
-      const e = u - Math.sin(2 * Math.PI * u) / (2 * Math.PI);
-      return { f: sg.f0 + (sg.f1 - sg.f0) * e, moving: true, u, seg: sg };
+      const b = burstShape(now - sg.t0, Math.max(1, sg.t1 - sg.t0));
+      return { f: sg.f0 + (sg.f1 - sg.f0) * b.x, moving: true, v: b.v * b.peak, seg: sg };
     }
   }
   return { f: 1, moving: false, seg: null };
@@ -707,7 +715,7 @@ function positionAt(busId, plan, now) {
   if (pr.moving && pr.seg) {
     const segMs = Math.max(1, pr.seg.t1 - pr.seg.t0);
     const avg = (lenM * (pr.seg.f1 - pr.seg.f0)) / (segMs / 1000);   // m/s
-    speed = Math.round(avg * (1 - Math.cos(2 * Math.PI * pr.u)) * 3.6 * 10) / 10;
+    speed = Math.round(avg * pr.v * 3.6 * 10) / 10;
   }
   if (onPath) {
     const p = pointAlong(leg.path, pr.f);
