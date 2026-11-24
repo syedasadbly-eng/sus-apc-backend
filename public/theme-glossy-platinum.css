@@ -3,6 +3,8 @@
    Second colour scheme. Every rule is scoped to
    html[data-skin="glossy-platinum"][data-theme], so the original dark
    theme is completely unaffected when it is selected.
+   Builds on the dark stylesheet (data-theme="dark"): glossy obsidian
+   surfaces throughout, framed in champagne gold.
    ============================================ */
 
 /* ---------- Theme selector (shown in both themes) ---------- */
@@ -38,316 +40,209 @@
 .sus-theme-select:focus-within { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 @media (max-width: 760px) { .sus-theme-select svg { display: none; } }
 
-/* ---------- Tokens ---------- */
-html[data-skin="glossy-platinum"][data-theme],
-html[data-skin="glossy-platinum"][data-theme] .main {
-  --color-bg: #eceef1;
-  --color-surface: #ffffff;
-  --color-surface-2: #f2f3f5;
-  --color-surface-3: #e6e8ec;
-  --color-surface-offset: #f6f7f9;
-  --color-divider: #dcdfe4;
-  --color-border: #c8cdd4;
-  --color-text: #16191f;
-  --color-text-muted: #4f5866;
-  --color-text-faint: #69727f;
-  --color-text-inverse: #ffffff;
-  --color-primary: #2563eb;
-  --color-primary-hover: #1d4ed8;
-  --color-primary-active: #1e40af;
-  --color-primary-light: rgba(37, 99, 235, 0.10);
-  --color-success: #059669;
-  --color-success-light: rgba(5, 150, 105, 0.12);
-  --color-warning: #d97706;
-  --color-warning-light: rgba(217, 119, 6, 0.12);
-  --color-error: #dc2626;
-  --color-error-light: rgba(220, 38, 38, 0.10);
-  --chart-1: #2563eb;
-  --chart-2: #0d9488;
-  --chart-3: #d97706;
-  --chart-4: #7c3aed;
-  --chart-5: #db2777;
-  --chart-6: #0891b2;
-  --chart-7: #ea580c;
-  --chart-8: #65a30d;
-  --shadow-sm: 0 1px 3px rgba(24, 33, 47, 0.08);
-  --shadow-md: 0 6px 16px rgba(24, 33, 47, 0.10);
-  --shadow-lg: 0 16px 36px rgba(24, 33, 47, 0.16);
-  color-scheme: light;
-}
 
-html[data-skin="glossy-platinum"][data-theme] body {
-  background: #eceef1;
-  color: var(--color-text);
-}
-
-/* ---------- Canvas ---------- */
-html[data-skin="glossy-platinum"][data-theme] .main {
-  background:
-    radial-gradient(ellipse 70% 45% at 45% 0, #ffffff 0, rgba(255,255,255,0) 70%),
-    linear-gradient(180deg, #f1f3f5 0%, #e6e9ed 100%) !important;
-}
-
-/* ---------- Black metallic sidebar + header ---------- */
-html[data-skin="glossy-platinum"][data-theme] .sidebar,
-html[data-skin="glossy-platinum"][data-theme] .header {
-  --color-text: #f6f7f9;
-  --color-text-muted: #c0c6ce;
-  --color-text-faint: #9aa3ae;
-  --color-divider: #3a3d43;
-  --color-surface: #17191d;
-  --color-surface-2: #2a2e34;
-  --color-surface-3: #343940;
-  --color-border: #4f555e;
-  --color-primary-light: rgba(255, 255, 255, 0.10);
-  color: var(--color-text);
-}
-html[data-skin="glossy-platinum"][data-theme] .sidebar {
-  background: linear-gradient(170deg, #1d1f23 0%, #0b0c0e 38%, #24272c 62%, #08090b 100%) !important;
-  border-right: 1px solid #2c2f35 !important;
-  box-shadow: inset -1px 0 0 rgba(255,255,255,0.08), 4px 0 18px rgba(0,0,0,0.12);
-}
-html[data-skin="glossy-platinum"][data-theme] .header {
-  background: linear-gradient(115deg, #08090b 0%, #2d3035 42%, #101114 65%, #070809 100%) !important;
-  border-bottom: 1px solid #2c2f35 !important;
-  box-shadow: inset 0 -1px 0 rgba(255,255,255,0.07), 0 4px 18px rgba(0,0,0,0.12);
-}
-html[data-skin="glossy-platinum"][data-theme] .sidebar .logo-text,
-html[data-skin="glossy-platinum"][data-theme] .header-title { color: #ffffff !important; }
-html[data-skin="glossy-platinum"][data-theme] .sidebar .nav-item { color: #c3cad3 !important; }
-html[data-skin="glossy-platinum"][data-theme] .sidebar .nav-item:hover { background: rgba(255,255,255,0.08) !important; color: #ffffff !important; }
-html[data-skin="glossy-platinum"][data-theme] .sidebar .nav-item.active {
-  background: linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0.05)) !important;
-  color: #ffffff !important;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.22), inset 0 0 0 1px rgba(255,255,255,0.16);
-}
-html[data-skin="glossy-platinum"][data-theme] .sidebar .nav-item.active svg { color: #ffffff !important; }
-html[data-skin="glossy-platinum"][data-theme] .header .btn-secondary {
-  background: linear-gradient(180deg, #f8f9fb, #d9dde3) !important;
-  color: #14181e !important;
-  border: 1px solid #ffffff66 !important;
-  box-shadow: inset 0 1px 0 #fff;
-}
-html[data-skin="glossy-platinum"][data-theme] .header .btn-secondary svg { color: #14181e !important; }
-html[data-skin="glossy-platinum"][data-theme] .header .export-menu {
-  --color-surface: #ffffff;
-  --color-surface-2: #f2f3f5;
-  --color-text: #16191f;
-  --color-text-muted: #4f5866;
-  --color-divider: #dcdfe4;
-}
-
-/* ---------- Glossy platinum KPI cards ---------- */
-html[data-skin="glossy-platinum"][data-theme] :is(#view-overview, .main) .kpi-card {
-  background:
-    linear-gradient(125deg, rgba(255,255,255,0.85) 0%, rgba(255,255,255,0.2) 34%, rgba(255,255,255,0) 35%),
-    linear-gradient(180deg, #fafbfc 0%, #e1e4e9 49%, #d3d8df 50%, #eceef2 100%) !important;
-  border: 1px solid #bcc3cc !important;
-  border-radius: 15px !important;
-  box-shadow: inset 0 1px 0 #ffffff, inset 0 -1px 0 rgba(255,255,255,0.6), 0 8px 20px rgba(24,33,47,0.08) !important;
-  transition: transform .22s ease, box-shadow .22s ease !important;
-}
-html[data-skin="glossy-platinum"][data-theme] :is(#view-overview, .main) .kpi-card:hover {
-  transform: translateY(-3px);
-  box-shadow: inset 0 1px 0 #ffffff, 0 14px 26px rgba(24,33,47,0.16) !important;
-}
-html[data-skin="glossy-platinum"][data-theme] :is(#view-overview, .main) .kpi-card::before {
-  background: linear-gradient(90deg, transparent, #ffffff, transparent) !important;
-  height: 1px !important;
-  animation: none !important;
-}
-html[data-skin="glossy-platinum"][data-theme] :is(#view-overview, .main) .kpi-card::after { display: none !important; }
-html[data-skin="glossy-platinum"][data-theme] :is(#view-overview, .main) .kpi-card .kpi-value,
-html[data-skin="glossy-platinum"][data-theme] .kpi-value { color: #11151b !important; text-shadow: 0 1px 0 rgba(255,255,255,0.7); }
-html[data-skin="glossy-platinum"][data-theme] :is(#view-overview, .main) .kpi-card .kpi-label,
-html[data-skin="glossy-platinum"][data-theme] .kpi-label { color: #2f3843 !important; }
-html[data-skin="glossy-platinum"][data-theme] :is(#view-overview, .main) .kpi-card .kpi-sub,
-html[data-skin="glossy-platinum"][data-theme] .kpi-sub { color: #4e5866 !important; }
-
-/* ---------- White chart panels ---------- */
-html[data-skin="glossy-platinum"][data-theme] .chart-panel {
-  background: linear-gradient(140deg, #ffffff, #fbfcfe) !important;
-  border: 1px solid #d1d6dd !important;
-  border-radius: 16px !important;
-  box-shadow: inset 0 1px 0 #ffffff, 0 8px 25px rgba(24,33,47,0.06) !important;
-}
-html[data-skin="glossy-platinum"][data-theme] .chart-header,
-html[data-skin="glossy-platinum"][data-theme] .chart-panel-feature .chart-header,
-html[data-skin="glossy-platinum"][data-theme] .ridership-premium .chart-header {
-  background: linear-gradient(180deg, #ffffff, #f3f5f8) !important;
-  border-bottom: 1px solid #e0e4e9 !important;
-}
-html[data-skin="glossy-platinum"][data-theme] .chart-title { color: #1c222b !important; }
-html[data-skin="glossy-platinum"][data-theme] .chart-subtitle { color: #5d6774 !important; }
-
-/* Tabs / segmented controls */
-html[data-skin="glossy-platinum"][data-theme] .period-tabs,
-html[data-skin="glossy-platinum"][data-theme] .ridership-premium #ridershipViewTabs.period-tabs {
-  background: #eceef1 !important;
-  border: 1px solid #d6dae0 !important;
-}
-html[data-skin="glossy-platinum"][data-theme] .period-tab,
-html[data-skin="glossy-platinum"][data-theme] .ridership-premium #ridershipViewTabs .period-tab { color: #4f5866 !important; }
-html[data-skin="glossy-platinum"][data-theme] .period-tab:hover { color: #11151b !important; }
-html[data-skin="glossy-platinum"][data-theme] .period-tab.active,
-html[data-skin="glossy-platinum"][data-theme] .ridership-premium #ridershipViewTabs .period-tab.active,
-html[data-skin="glossy-platinum"][data-theme] .map-mode-tab.active,
-html[data-skin="glossy-platinum"][data-theme] .history-preset.active,
-html[data-skin="glossy-platinum"][data-theme] .history-mode.active,
-html[data-skin="glossy-platinum"][data-theme] #routePresetGroup .btn-ghost.active {
-  background: linear-gradient(180deg, #343b46, #12161c) !important;
-  color: #ffffff !important;
-  border-color: #12161c !important;
-}
-html[data-skin="glossy-platinum"][data-theme] .map-mode-tab:hover,
-html[data-skin="glossy-platinum"][data-theme] .history-preset:hover,
-html[data-skin="glossy-platinum"][data-theme] .history-mode:hover { color: #11151b; }
-
-/* Labels with hard-coded light text in the dark theme */
-html[data-skin="glossy-platinum"][data-theme] .ridership-premium .filter-label,
-html[data-skin="glossy-platinum"][data-theme] .ridership-premium .kpi-label,
-html[data-skin="glossy-platinum"][data-theme] .stop-empty-state .empty-title,
-html[data-skin="glossy-platinum"][data-theme] .stop-hour-rowname,
-html[data-skin="glossy-platinum"][data-theme] .stop-attr-chip,
-html[data-skin="glossy-platinum"][data-theme] #stopLeaderTable thead th,
-html[data-skin="glossy-platinum"][data-theme] #stopLeaderTable tbody tr td { color: #1f252e !important; }
-html[data-skin="glossy-platinum"][data-theme] .stop-attr-chip .chip-sep { color: #8a929d !important; }
-html[data-skin="glossy-platinum"][data-theme] #stopLeaderTable .stop-rank-pill { color: #3b2f74 !important; }
-html[data-skin="glossy-platinum"][data-theme] #stopLeaderTable .route-pill.r-515 { color: #4c2f8f !important; }
-html[data-skin="glossy-platinum"][data-theme] .report-icon.green { color: #047857 !important; }
-html[data-skin="glossy-platinum"][data-theme] .report-icon.purple { color: #6d28d9 !important; }
-
-/* ---------- Forms, tables, buttons ---------- */
-html[data-skin="glossy-platinum"][data-theme] .main input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
-html[data-skin="glossy-platinum"][data-theme] .main select,
-html[data-skin="glossy-platinum"][data-theme] .main textarea {
-  background-color: #ffffff;
-  color: #16191f;
-  border-color: #c8cdd4;
-}
-html[data-skin="glossy-platinum"][data-theme] .main .btn-secondary,
-html[data-skin="glossy-platinum"][data-theme] .main .btn-ghost {
-  background: linear-gradient(180deg, #ffffff, #eef0f3);
-  color: #1c222b;
-  border-color: #c8cdd4;
-}
-html[data-skin="glossy-platinum"][data-theme] .main .btn-primary {
-  background: linear-gradient(180deg, #343b46, #12161c);
-  color: #ffffff;
-  border-color: #12161c;
-}
-html[data-skin="glossy-platinum"][data-theme] table thead th { background: #f3f5f8; }
-
-/* ---------- Light maps ---------- */
-html[data-skin="glossy-platinum"][data-theme] .leaflet-tile-pane { filter: none !important; }
-html[data-skin="glossy-platinum"][data-theme] #routeMap { background: #e9ecef !important; }
-html[data-skin="glossy-platinum"][data-theme] #routeMap .leaflet-tile { filter: none !important; }
-html[data-skin="glossy-platinum"][data-theme] .map-container .leaflet-container,
-html[data-skin="glossy-platinum"][data-theme] .leaflet-container { background: #e9ecef; }
-html[data-skin="glossy-platinum"][data-theme] .leaflet-control-zoom a {
-  background: #ffffff !important;
-  color: #16191f !important;
-  border-color: #c8cdd4 !important;
-}
-html[data-skin="glossy-platinum"][data-theme] .leaflet-popup-content-wrapper,
-html[data-skin="glossy-platinum"][data-theme] .leaflet-popup-tip {
-  background: #ffffff;
-  color: #16191f;
-}
-
-/* ---------- Login ---------- */
-html[data-skin="glossy-platinum"][data-theme] .login-screen {
-  background: radial-gradient(ellipse at top, #3b3e44, #08090b 75%) !important;
-}
-html[data-skin="glossy-platinum"][data-theme] .login-card {
-  background: linear-gradient(145deg, #ffffff, #e7eaf0) !important;
-  border: 1px solid rgba(255,255,255,0.67) !important;
-  border-radius: 20px !important;
-  box-shadow: 0 30px 90px rgba(0,0,0,0.53), inset 0 1px 0 #fff !important;
-}
-
-/* ---------- Accessibility ---------- */
-html[data-skin="glossy-platinum"][data-theme] *:focus-visible { outline: 2px solid #2563eb !important; outline-offset: 3px; }
-@media (prefers-reduced-motion: reduce) {
-  html[data-skin="glossy-platinum"][data-theme] :is(#view-overview, .main) .kpi-card { transition: none !important; }
-  html[data-skin="glossy-platinum"][data-theme] :is(#view-overview, .main) .kpi-card:hover { transform: none !important; }
-}
-
-/* Mayo Clinic co-brand logo is white artwork; darken it on the light login card */
-html[data-skin="glossy-platinum"][data-theme] .mayo-logo--login { filter: brightness(0) saturate(100%) opacity(0.72); }
-
-/* ==========================================================================
-   Premium refinement: deeper obsidian black + champagne-gold accents
-   ========================================================================== */
+/* ---------- Tokens: obsidian surfaces, champagne gold ---------- */
 html[data-skin="glossy-platinum"][data-theme] {
   --gp-gold-1: #f6e3b4;
   --gp-gold-2: #c9a45c;
   --gp-gold-3: #8a6a2f;
-  --gp-gold-line: linear-gradient(135deg, #f6e3b4 0%, #c9a45c 38%, #8a6a2f 62%, #e8cf94 100%);
+  --gp-gold-line: linear-gradient(135deg, #f3dc9f 0%, #c99a3e 28%, #8f6a26 52%, #d8b25c 76%, #f1d896 100%);
+  --gp-gold-soft: linear-gradient(135deg, rgba(243,220,159,0.75) 0%, rgba(201,154,62,0.55) 30%, rgba(143,106,38,0.35) 55%, rgba(216,178,92,0.55) 78%, rgba(241,216,150,0.7) 100%);
   --gp-obsidian: linear-gradient(170deg, #0b0b0c 0%, #020203 40%, #111113 64%, #000000 100%);
+  --gp-panel: linear-gradient(180deg, #141416 0%, #0b0b0d 55%, #08080a 100%);
+  --gp-sheen: linear-gradient(180deg, rgba(255,255,255,0.055) 0%, rgba(255,255,255,0) 34%);
+  --gp-diag: linear-gradient(118deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.035) 22%, rgba(255,255,255,0) 40%);
+
+  --color-bg: #050506;
+  --color-surface: #0e0e10;
+  --color-surface-2: #151517;
+  --color-surface-3: #1c1c1f;
+  --color-surface-offset: #111113;
+  --color-divider: #232326;
+  --color-border: #3a3428;
+  --color-text: #f3f1ec;
+  --color-text-muted: #a9a59c;
+  --color-text-faint: #77736b;
+  --color-text-inverse: #050506;
+  --color-primary: #d4b06a;
+  --color-primary-hover: #e2c486;
+  --color-primary-active: #b8924c;
+  --color-primary-light: rgba(212,176,106,0.14);
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.5);
+  --shadow-md: 0 8px 20px rgba(0,0,0,0.55);
+  --shadow-lg: 0 18px 40px rgba(0,0,0,0.65);
+  color-scheme: dark;
+}
+html[data-skin="glossy-platinum"][data-theme] body { background: #050506; color: var(--color-text); }
+
+/* ---------- Canvas: deep obsidian with a soft top light ---------- */
+html[data-skin="glossy-platinum"][data-theme] .main {
+  background:
+    radial-gradient(ellipse 75% 40% at 50% -8%, rgba(212,176,106,0.07) 0%, rgba(212,176,106,0) 70%),
+    radial-gradient(ellipse 60% 50% at 50% 0%, rgba(255,255,255,0.035) 0%, rgba(255,255,255,0) 70%),
+    linear-gradient(180deg, #0a0a0b 0%, #050506 55%, #020203 100%) !important;
 }
 
-/* Deeper, richer black chrome */
+/* ---------- Black metallic sidebar + header ---------- */
+html[data-skin="glossy-platinum"][data-theme] .sidebar, html[data-skin="glossy-platinum"][data-theme] .header {
+  --color-text: #f6f7f9;
+  --color-text-muted: #c0c6ce;
+  --color-text-faint: #9aa3ae;
+  --color-surface: #17191d;
+  --color-surface-2: #161618;
+  --color-surface-3: #1d1d20;
+  --color-divider: #232326;
+  --color-border: #3a3428;
+  --color-primary-light: rgba(255,255,255,0.10);
+  color: var(--color-text);
+}
 html[data-skin="glossy-platinum"][data-theme] .sidebar {
   background: var(--gp-obsidian) !important;
   border-right: 1px solid transparent !important;
   border-image: linear-gradient(180deg, rgba(201,164,92,0.55), rgba(201,164,92,0.08) 55%, rgba(201,164,92,0.4)) 1 !important;
-  box-shadow: inset -1px 0 0 rgba(255,255,255,0.04), 6px 0 24px rgba(0,0,0,0.22) !important;
+  box-shadow: inset -1px 0 0 rgba(255,255,255,0.04), 6px 0 24px rgba(0,0,0,0.4) !important;
 }
 html[data-skin="glossy-platinum"][data-theme] .header {
   background: linear-gradient(115deg, #000000 0%, #141416 40%, #050506 66%, #000000 100%) !important;
   border-bottom: 1px solid transparent !important;
   border-image: linear-gradient(90deg, rgba(201,164,92,0.15), rgba(232,207,148,0.75) 50%, rgba(201,164,92,0.15)) 1 !important;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 6px 22px rgba(0,0,0,0.22) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 6px 22px rgba(0,0,0,0.4) !important;
 }
-html[data-skin="glossy-platinum"][data-theme] .sidebar,
-html[data-skin="glossy-platinum"][data-theme] .header {
-  --color-divider: #232326;
-  --color-surface-2: #161618;
-  --color-surface-3: #1d1d20;
-  --color-border: #3a3428;
-}
+html[data-skin="glossy-platinum"][data-theme] .sidebar .logo-text, html[data-skin="glossy-platinum"][data-theme] .header-title { color: #ffffff !important; }
+html[data-skin="glossy-platinum"][data-theme] .sidebar .nav-item { color: #c3cad3 !important; }
+html[data-skin="glossy-platinum"][data-theme] .sidebar .nav-item:hover { background: rgba(255,255,255,0.06) !important; color: #ffffff !important; }
 html[data-skin="glossy-platinum"][data-theme] .sidebar .nav-item.active {
   background: linear-gradient(90deg, rgba(201,164,92,0.20), rgba(201,164,92,0.04)) !important;
   box-shadow: inset 2px 0 0 var(--gp-gold-2), inset 0 0 0 1px rgba(201,164,92,0.28) !important;
   color: #fff6e0 !important;
 }
 html[data-skin="glossy-platinum"][data-theme] .sidebar .nav-item.active svg { color: var(--gp-gold-1) !important; }
-html[data-skin="glossy-platinum"][data-theme] .header .sus-theme-select { border-color: rgba(201,164,92,0.45); }
+html[data-skin="glossy-platinum"][data-theme] .header .sus-theme-select { border-color: rgba(201,164,92,0.45); background: #111113; }
+html[data-skin="glossy-platinum"][data-theme] .header .btn-secondary {
+  background: linear-gradient(180deg, #f8f9fb, #d9dde3) !important;
+  color: #14181e !important;
+  border: 1px solid var(--gp-gold-2) !important;
+  box-shadow: inset 0 1px 0 #fff;
+}
+html[data-skin="glossy-platinum"][data-theme] .header .btn-secondary svg { color: #14181e !important; }
 
-/* Champagne-gold borders on the headline boxes */
+/* ---------- Glossy obsidian KPI cards with gold frames ---------- */
 html[data-skin="glossy-platinum"][data-theme] :is(#view-overview, .main) .kpi-card {
   border: 1.5px solid transparent !important;
+  border-radius: 15px !important;
   background:
-    linear-gradient(125deg, rgba(255,255,255,0.85) 0%, rgba(255,255,255,0.2) 34%, rgba(255,255,255,0) 35%) padding-box,
-    linear-gradient(180deg, #fafbfc 0%, #e1e4e9 49%, #d3d8df 50%, #eceef2 100%) padding-box,
+    var(--gp-diag) padding-box,
+    var(--gp-sheen) padding-box,
+    linear-gradient(180deg, #1a1a1d 0%, #0e0e10 49%, #070708 50%, #0c0c0e 100%) padding-box,
     var(--gp-gold-line) border-box !important;
-  box-shadow: inset 0 1px 0 #ffffff, 0 10px 24px -10px rgba(138,106,47,0.35), 0 2px 6px rgba(24,33,47,0.06) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.07), 0 0 0 1px rgba(201,154,62,0.10), 0 14px 30px -14px rgba(201,154,62,0.35), 0 4px 12px rgba(0,0,0,0.5) !important;
+  transition: transform .22s ease, box-shadow .22s ease !important;
 }
 html[data-skin="glossy-platinum"][data-theme] :is(#view-overview, .main) .kpi-card:hover {
-  box-shadow: inset 0 1px 0 #ffffff, 0 16px 30px -10px rgba(138,106,47,0.45), 0 3px 8px rgba(24,33,47,0.08) !important;
+  transform: translateY(-3px);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.09), 0 0 0 1px rgba(201,154,62,0.22), 0 18px 36px -14px rgba(201,154,62,0.5), 0 6px 16px rgba(0,0,0,0.55) !important;
 }
 html[data-skin="glossy-platinum"][data-theme] :is(#view-overview, .main) .kpi-card::before {
   height: 2px !important;
-  background: linear-gradient(90deg, transparent, var(--gp-gold-1), var(--gp-gold-2), var(--gp-gold-1), transparent) !important;
-  opacity: 1 !important;
+  background: linear-gradient(90deg, transparent, #f6dd9c, #d4a845, #f6dd9c, transparent) !important;
+  opacity: 0.9 !important;
+  animation: none !important;
 }
+html[data-skin="glossy-platinum"][data-theme] :is(#view-overview, .main) .kpi-card::after { display: none !important; }
+html[data-skin="glossy-platinum"][data-theme] .kpi-value, html[data-skin="glossy-platinum"][data-theme] :is(#view-overview, .main) .kpi-card .kpi-value {
+  color: #ffffff !important;
+  background: none !important;
+  -webkit-text-fill-color: currentColor !important;
+  text-shadow: 0 1px 0 rgba(0,0,0,0.6), 0 0 18px rgba(255,255,255,0.06);
+}
+html[data-skin="glossy-platinum"][data-theme] .kpi-label, html[data-skin="glossy-platinum"][data-theme] :is(#view-overview, .main) .kpi-card .kpi-label { color: #e2c486 !important; letter-spacing: 0.08em; }
+html[data-skin="glossy-platinum"][data-theme] .kpi-sub, html[data-skin="glossy-platinum"][data-theme] :is(#view-overview, .main) .kpi-card .kpi-sub { color: #a9a59c !important; }
 html[data-skin="glossy-platinum"][data-theme] :is(#view-overview, .main) .kpi-icon {
-  background: linear-gradient(145deg, #1a1a1c, #000000) !important;
-  box-shadow: inset 0 0 0 1px rgba(201,164,92,0.55), 0 6px 14px -5px rgba(0,0,0,0.5) !important;
+  background: linear-gradient(145deg, #222225, #050506) !important;
+  box-shadow: inset 0 0 0 1.5px #c99a3e, 0 6px 14px -5px rgba(0,0,0,0.7) !important;
 }
 html[data-skin="glossy-platinum"][data-theme] :is(#view-overview, .main) .kpi-icon svg { color: var(--gp-gold-1) !important; }
 
-/* Gold frame on feature charts and the weather strip; other panels stay neutral */
+/* ---------- Glossy obsidian panels: charts, tables, weather, reports ---------- */
+html[data-skin="glossy-platinum"][data-theme] .chart-panel,
 html[data-skin="glossy-platinum"][data-theme] .chart-panel.chart-panel-feature,
-html[data-skin="glossy-platinum"][data-theme] .weather-strip {
+html[data-skin="glossy-platinum"][data-theme] .pro-table-card,
+html[data-skin="glossy-platinum"][data-theme] .weather-strip,
+html[data-skin="glossy-platinum"][data-theme] .filter-bar,
+html[data-skin="glossy-platinum"][data-theme] .history-bar,
+html[data-skin="glossy-platinum"][data-theme] .report-card {
   border: 1.5px solid transparent !important;
-  background: linear-gradient(140deg, #ffffff, #fbfcfe) padding-box, var(--gp-gold-line) border-box !important;
-  box-shadow: inset 0 1px 0 #ffffff, 0 12px 30px -14px rgba(138,106,47,0.35) !important;
+  border-radius: 16px !important;
+  background:
+    var(--gp-sheen) padding-box,
+    var(--gp-diag) padding-box,
+    var(--gp-panel) padding-box,
+    var(--gp-gold-line) border-box !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 0 0 1px rgba(143,106,38,0.12), 0 18px 38px -20px rgba(201,154,62,0.30), 0 4px 14px rgba(0,0,0,0.55) !important;
   animation: none !important;
+  color: var(--color-text);
+}
+html[data-skin="glossy-platinum"][data-theme] .filter-bar, html[data-skin="glossy-platinum"][data-theme] .history-bar, html[data-skin="glossy-platinum"][data-theme] .report-card {
+  background:
+    var(--gp-sheen) padding-box,
+    var(--gp-panel) padding-box,
+    var(--gp-gold-soft) border-box !important;
+}
+html[data-skin="glossy-platinum"][data-theme] .chart-panel:hover, html[data-skin="glossy-platinum"][data-theme] .pro-table-card:hover {
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px rgba(143,106,38,0.22), 0 22px 42px -20px rgba(201,154,62,0.42), 0 6px 18px rgba(0,0,0,0.6) !important;
+}
+html[data-skin="glossy-platinum"][data-theme] .chart-panel::before, html[data-skin="glossy-platinum"][data-theme] .chart-panel::after { display: none !important; }
+html[data-skin="glossy-platinum"][data-theme] .chart-panel.live-map-panel { box-shadow: 0 18px 38px -20px rgba(201,154,62,0.35), 0 4px 14px rgba(0,0,0,0.55) !important; }
+
+/* Panel headers: dark gloss band with a gold hairline */
+html[data-skin="glossy-platinum"][data-theme] .chart-header,
+html[data-skin="glossy-platinum"][data-theme] .chart-panel-feature .chart-header,
+html[data-skin="glossy-platinum"][data-theme] .ridership-premium .chart-header,
+html[data-skin="glossy-platinum"][data-theme] .pro-table-head {
+  background: linear-gradient(180deg, rgba(255,255,255,0.045) 0%, rgba(255,255,255,0.01) 100%) !important;
+  border-bottom: 1px solid transparent !important;
+  border-image: linear-gradient(90deg, rgba(201,154,62,0.04), rgba(201,154,62,0.55) 20%, rgba(201,154,62,0.55) 80%, rgba(201,154,62,0.04)) 1 !important;
+  border-top-left-radius: 14px; border-top-right-radius: 14px;
+}
+html[data-skin="glossy-platinum"][data-theme] .chart-title, html[data-skin="glossy-platinum"][data-theme] .chart-title-lg, html[data-skin="glossy-platinum"][data-theme] .pro-table-title { color: #f6f1e6 !important; }
+html[data-skin="glossy-platinum"][data-theme] .chart-subtitle, html[data-skin="glossy-platinum"][data-theme] .pro-table-sub { color: #a9a59c !important; }
+html[data-skin="glossy-platinum"][data-theme] .chart-panel .chart-title, html[data-skin="glossy-platinum"][data-theme] .pro-table-title { position: relative; padding-left: 12px; }
+html[data-skin="glossy-platinum"][data-theme] .chart-panel .chart-title::before, html[data-skin="glossy-platinum"][data-theme] .pro-table-title::before {
+  content: "";
+  position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 1em; border-radius: 2px;
+  background: linear-gradient(180deg, #f3dc9f, #c99a3e 55%, #8f6a26);
 }
 
-/* Black-and-gold active controls */
+/* Weather strip text */
+html[data-skin="glossy-platinum"][data-theme] .weather-strip { color: #f3f1ec; }
+
+/* ---------- Tables: black rows, gold-tinted headers ---------- */
+html[data-skin="glossy-platinum"][data-theme] .pro-table { color: #e6e2d9; }
+html[data-skin="glossy-platinum"][data-theme] .pro-table thead th,
+html[data-skin="glossy-platinum"][data-theme] table thead th {
+  background: linear-gradient(180deg, #19191c, #111113) !important;
+  color: #d9bd80 !important;
+  border-bottom: 1px solid rgba(201,154,62,0.35) !important;
+}
+html[data-skin="glossy-platinum"][data-theme] .pro-table td { border-bottom: 1px solid #1d1d20 !important; }
+html[data-skin="glossy-platinum"][data-theme] .pro-table tbody tr td { background: transparent !important; }
+html[data-skin="glossy-platinum"][data-theme] .pro-table tbody tr:nth-child(even) td { background: rgba(255,255,255,0.018) !important; }
+html[data-skin="glossy-platinum"][data-theme] .pro-table tbody tr:hover td { background: rgba(201,154,62,0.07) !important; }
+html[data-skin="glossy-platinum"][data-theme] .pro-table tfoot td { background: #111113 !important; color: #f6f1e6 !important; border-top: 1px solid rgba(201,154,62,0.35) !important; }
+html[data-skin="glossy-platinum"][data-theme] .pro-strong { color: #ffffff !important; }
+html[data-skin="glossy-platinum"][data-theme] .pro-muted, html[data-skin="glossy-platinum"][data-theme] .pro-empty { color: #8a867d !important; }
+html[data-skin="glossy-platinum"][data-theme] .pro-status.live { background: rgba(16,185,129,0.14) !important; color: #34d399 !important; }
+
+/* ---------- Segmented controls and buttons ---------- */
+html[data-skin="glossy-platinum"][data-theme] .period-tabs,
+html[data-skin="glossy-platinum"][data-theme] .ridership-premium #ridershipViewTabs.period-tabs {
+  background: linear-gradient(180deg, #151517, #0b0b0d) !important;
+  border: 1px solid rgba(201,154,62,0.28) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+}
+html[data-skin="glossy-platinum"][data-theme] .period-tab, html[data-skin="glossy-platinum"][data-theme] .ridership-premium #ridershipViewTabs .period-tab { color: #a9a59c !important; background: transparent !important; }
+html[data-skin="glossy-platinum"][data-theme] .period-tab:hover { color: #ffffff !important; }
 html[data-skin="glossy-platinum"][data-theme] .period-tab.active,
 html[data-skin="glossy-platinum"][data-theme] .ridership-premium #ridershipViewTabs .period-tab.active,
 html[data-skin="glossy-platinum"][data-theme] .map-mode-tab.active,
@@ -355,124 +250,80 @@ html[data-skin="glossy-platinum"][data-theme] .history-preset.active,
 html[data-skin="glossy-platinum"][data-theme] .history-mode.active,
 html[data-skin="glossy-platinum"][data-theme] #routePresetGroup .btn-ghost.active,
 html[data-skin="glossy-platinum"][data-theme] .main .btn-primary {
-  background: linear-gradient(180deg, #1c1c1f, #000000) !important;
-  color: #fff6e0 !important;
-  border-color: var(--gp-gold-2) !important;
-  box-shadow: inset 0 0 0 1px rgba(201,164,92,0.6), 0 4px 10px -4px rgba(0,0,0,0.45) !important;
+  background: linear-gradient(180deg, #f3dc9f 0%, #d4a845 55%, #b8893a 100%) !important;
+  color: #120e06 !important;
+  border-color: #c99a3e !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.55), 0 4px 12px -4px rgba(201,154,62,0.55) !important;
+  text-shadow: none !important;
 }
-html[data-skin="glossy-platinum"][data-theme] .header .btn-secondary {
-  border: 1px solid var(--gp-gold-2) !important;
+html[data-skin="glossy-platinum"][data-theme] .main .btn-primary svg { color: #120e06 !important; }
+html[data-skin="glossy-platinum"][data-theme] .main .btn-secondary, html[data-skin="glossy-platinum"][data-theme] .main .btn-ghost {
+  background: linear-gradient(180deg, #1a1a1d, #0d0d0f) !important;
+  color: #ece8df !important;
+  border: 1px solid rgba(201,154,62,0.35) !important;
 }
+html[data-skin="glossy-platinum"][data-theme] .main .btn-secondary:hover, html[data-skin="glossy-platinum"][data-theme] .main .btn-ghost:hover { border-color: #c99a3e !important; color: #ffffff !important; }
 
-/* Stronger gold on the KPI cards */
-html[data-skin="glossy-platinum"][data-theme] :is(#view-overview, .main) .kpi-card {
-  border-width: 2px !important;
-  background:
-    linear-gradient(125deg, rgba(255,255,255,0.85) 0%, rgba(255,255,255,0.2) 34%, rgba(255,255,255,0) 35%) padding-box,
-    linear-gradient(180deg, #fafbfc 0%, #e1e4e9 49%, #d3d8df 50%, #eceef2 100%) padding-box,
-    linear-gradient(135deg, #f9e7b3 0%, #d4a845 30%, #9a7020 55%, #e2bd62 80%, #f6dd9c 100%) border-box !important;
-  box-shadow: inset 0 1px 0 #ffffff, 0 0 0 1px rgba(154,112,32,0.18), 0 12px 26px -10px rgba(154,112,32,0.55), 0 2px 6px rgba(24,33,47,0.06) !important;
-}
-html[data-skin="glossy-platinum"][data-theme] :is(#view-overview, .main) .kpi-card:hover {
-  box-shadow: inset 0 1px 0 #ffffff, 0 0 0 1px rgba(154,112,32,0.28), 0 18px 32px -10px rgba(154,112,32,0.65), 0 3px 8px rgba(24,33,47,0.08) !important;
-}
-html[data-skin="glossy-platinum"][data-theme] :is(#view-overview, .main) .kpi-card::before {
-  height: 3px !important;
-  background: linear-gradient(90deg, transparent, #f6dd9c, #d4a845, #f6dd9c, transparent) !important;
-}
-html[data-skin="glossy-platinum"][data-theme] :is(#view-overview, .main) .kpi-icon {
-  box-shadow: inset 0 0 0 1.5px #d4a845, 0 6px 14px -5px rgba(0,0,0,0.5) !important;
-}
-
-/* Premium gold frames on all charts, graphs and table cards */
-html[data-skin="glossy-platinum"][data-theme] .chart-panel,
-html[data-skin="glossy-platinum"][data-theme] .chart-panel.chart-panel-feature,
-html[data-skin="glossy-platinum"][data-theme] .pro-table-card {
-  border: 1.5px solid transparent !important;
-  border-radius: 16px !important;
-  background:
-    linear-gradient(140deg, #ffffff, #fbfcfe) padding-box,
-    linear-gradient(135deg, #f3dc9f 0%, #c99a3e 28%, #8f6a26 52%, #d8b25c 76%, #f1d896 100%) border-box !important;
-  box-shadow: inset 0 1px 0 #ffffff, 0 0 0 1px rgba(143,106,38,0.10), 0 14px 32px -16px rgba(143,106,38,0.45), 0 2px 6px rgba(24,33,47,0.05) !important;
-  animation: none !important;
-}
-html[data-skin="glossy-platinum"][data-theme] .chart-panel:hover,
-html[data-skin="glossy-platinum"][data-theme] .pro-table-card:hover {
-  box-shadow: inset 0 1px 0 #ffffff, 0 0 0 1px rgba(143,106,38,0.18), 0 18px 36px -16px rgba(143,106,38,0.55), 0 3px 8px rgba(24,33,47,0.06) !important;
-}
-/* Gold hairline under the panel header and a small gold accent beside the title */
-html[data-skin="glossy-platinum"][data-theme] .chart-panel .chart-header {
-  border-bottom: 1px solid transparent !important;
-  border-image: linear-gradient(90deg, rgba(201,154,62,0.05), rgba(201,154,62,0.6) 20%, rgba(201,154,62,0.6) 80%, rgba(201,154,62,0.05)) 1 !important;
-  border-top-left-radius: 14px; border-top-right-radius: 14px;
-}
-html[data-skin="glossy-platinum"][data-theme] .chart-panel .chart-title {
-  position: relative;
-  padding-left: 12px;
-}
-html[data-skin="glossy-platinum"][data-theme] .chart-panel .chart-title::before {
-  content: "";
-  position: absolute; left: 0; top: 50%; transform: translateY(-50%);
-  width: 3px; height: 1em; border-radius: 2px;
-  background: linear-gradient(180deg, #f3dc9f, #c99a3e 55%, #8f6a26);
-}
-/* The live map panel is a full-bleed map: keep the frame, skip the inner glow */
-html[data-skin="glossy-platinum"][data-theme] .chart-panel.live-map-panel { box-shadow: 0 14px 32px -16px rgba(143,106,38,0.45) !important; }
-
-/* ==========================================================================
-   Brighter whites with a premium gloss finish
-   ========================================================================== */
-html[data-skin="glossy-platinum"][data-theme] {
-  --color-bg: #f8f9fb;
-  --color-surface: #ffffff;
-  --color-surface-2: #fafbfc;
-  --color-surface-offset: #fbfcfd;
-}
-html[data-skin="glossy-platinum"][data-theme] body { background: #f8f9fb; }
-/* Page canvas: near-white with a soft top light */
-html[data-skin="glossy-platinum"][data-theme] .main {
-  background:
-    radial-gradient(ellipse 80% 50% at 50% -10%, #ffffff 0%, rgba(255,255,255,0) 70%),
-    linear-gradient(180deg, #fdfdfe 0%, #f6f7f9 55%, #f1f3f6 100%) !important;
-}
-/* Panels: pure white with a glossy top sheen and diagonal highlight (gold frame kept) */
-html[data-skin="glossy-platinum"][data-theme] .chart-panel,
-html[data-skin="glossy-platinum"][data-theme] .chart-panel.chart-panel-feature,
-html[data-skin="glossy-platinum"][data-theme] .pro-table-card,
-html[data-skin="glossy-platinum"][data-theme] .weather-strip {
-  background:
-    linear-gradient(180deg, rgba(255,255,255,1) 0%, rgba(255,255,255,0) 38%) padding-box,
-    linear-gradient(118deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.9) 22%, rgba(255,255,255,0) 40%) padding-box,
-    linear-gradient(180deg, #ffffff 0%, #fdfdfe 60%, #f9fafb 100%) padding-box,
-    linear-gradient(135deg, #f3dc9f 0%, #c99a3e 28%, #8f6a26 52%, #d8b25c 76%, #f1d896 100%) border-box !important;
-  box-shadow: inset 0 1px 0 #ffffff, inset 0 -1px 0 rgba(24,33,47,0.03), 0 0 0 1px rgba(143,106,38,0.10), 0 16px 34px -18px rgba(143,106,38,0.42), 0 2px 6px rgba(24,33,47,0.04) !important;
-}
-/* Panel headers: bright white gloss band */
-html[data-skin="glossy-platinum"][data-theme] .chart-header,
-html[data-skin="glossy-platinum"][data-theme] .chart-panel-feature .chart-header,
-html[data-skin="glossy-platinum"][data-theme] .ridership-premium .chart-header {
-  background: linear-gradient(180deg, #ffffff 0%, #ffffff 45%, #f8f9fb 100%) !important;
-}
-/* Tables and inner tiles: clean white */
-html[data-skin="glossy-platinum"][data-theme] table thead th,
-html[data-skin="glossy-platinum"][data-theme] .pro-table thead th { background: linear-gradient(180deg, #ffffff, #f7f8fa) !important; }
-html[data-skin="glossy-platinum"][data-theme] .pro-table tbody tr:nth-child(even) td { background: #fbfcfd !important; }
-html[data-skin="glossy-platinum"][data-theme] .pro-table tbody tr:hover td { background: #f6f7f9 !important; }
-html[data-skin="glossy-platinum"][data-theme] .period-tabs { background: linear-gradient(180deg, #ffffff, #f3f4f6) !important; }
-/* Filter bar and inputs: white gloss */
-html[data-skin="glossy-platinum"][data-theme] .filter-bar {
-  background: linear-gradient(180deg, #ffffff 0%, #fbfcfd 100%) !important;
-  box-shadow: inset 0 1px 0 #ffffff, 0 2px 8px rgba(24,33,47,0.04) !important;
-}
+/* ---------- Forms ---------- */
 html[data-skin="glossy-platinum"][data-theme] .main input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
 html[data-skin="glossy-platinum"][data-theme] .main select,
+html[data-skin="glossy-platinum"][data-theme] .main textarea,
 html[data-skin="glossy-platinum"][data-theme] .filter-select {
-  background-color: #ffffff !important;
-  box-shadow: inset 0 1px 0 #ffffff, 0 1px 2px rgba(24,33,47,0.05);
+  background-color: #0b0b0d !important;
+  color: #f3f1ec !important;
+  border: 1px solid #3a3428 !important;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.6);
 }
-html[data-skin="glossy-platinum"][data-theme] .report-card {
-  background:
-    linear-gradient(118deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.9) 22%, rgba(255,255,255,0) 40%),
-    linear-gradient(180deg, #ffffff 0%, #fdfdfe 60%, #f9fafb 100%) !important;
-  box-shadow: inset 0 1px 0 #ffffff, 0 10px 24px -16px rgba(24,33,47,0.25) !important;
+html[data-skin="glossy-platinum"][data-theme] .main input:focus, html[data-skin="glossy-platinum"][data-theme] .main select:focus, html[data-skin="glossy-platinum"][data-theme] .main textarea:focus { border-color: #c99a3e !important; }
+html[data-skin="glossy-platinum"][data-theme] .main select option { background: #111113; color: #f3f1ec; }
+html[data-skin="glossy-platinum"][data-theme] .filter-label { color: #d9bd80 !important; }
+
+/* ---------- Maps: dark tiles, gold-trimmed controls ---------- */
+html[data-skin="glossy-platinum"][data-theme] .leaflet-container, html[data-skin="glossy-platinum"][data-theme] #routeMap { background: #0b0b0d !important; }
+html[data-skin="glossy-platinum"][data-theme] .leaflet-control-zoom a {
+  background: #111113 !important;
+  color: #f3dc9f !important;
+  border-color: rgba(201,154,62,0.45) !important;
 }
+html[data-skin="glossy-platinum"][data-theme] .leaflet-popup-content-wrapper, html[data-skin="glossy-platinum"][data-theme] .leaflet-popup-tip {
+  background: #111113; color: #f3f1ec;
+  box-shadow: 0 0 0 1px rgba(201,154,62,0.45), 0 10px 24px rgba(0,0,0,0.6);
+}
+
+/* ---------- Login ---------- */
+html[data-skin="glossy-platinum"][data-theme] .login-screen { background: radial-gradient(ellipse at top, #26231d, #050506 72%) !important; }
+html[data-skin="glossy-platinum"][data-theme] .login-card {
+  border: 1.5px solid transparent !important;
+  border-radius: 20px !important;
+  background: var(--gp-sheen) padding-box, var(--gp-panel) padding-box, var(--gp-gold-line) border-box !important;
+  box-shadow: 0 30px 90px rgba(0,0,0,0.7), 0 0 0 1px rgba(201,154,62,0.12) !important;
+}
+
+/* ---------- Scrollbars ---------- */
+html[data-skin="glossy-platinum"][data-theme] .main::-webkit-scrollbar-thumb { background: #2a2620; border-radius: 8px; }
+html[data-skin="glossy-platinum"][data-theme] .main::-webkit-scrollbar-thumb:hover { background: #4a3f2a; }
+
+/* ---------- Accessibility ---------- */
+html[data-skin="glossy-platinum"][data-theme] *:focus-visible { outline: 2px solid #d4b06a !important; outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) {
+  html[data-skin="glossy-platinum"][data-theme] :is(#view-overview, .main) .kpi-card { transition: none !important; }
+  html[data-skin="glossy-platinum"][data-theme] :is(#view-overview, .main) .kpi-card:hover { transform: none !important; }
+}
+
+/* Table progress bars on black */
+html[data-skin="glossy-platinum"][data-theme] .pro-bar { background: #222226 !important; box-shadow: inset 0 1px 1px rgba(0,0,0,0.6); }
+html[data-skin="glossy-platinum"][data-theme] .pro-bar i.share { background: linear-gradient(90deg, #8f6a26, #d4a845) !important; }
+html[data-skin="glossy-platinum"][data-theme] .pro-bar-lbl { color: #cfcac0 !important; }
+html[data-skin="glossy-platinum"][data-theme] .pro-bar-lbl.ok { color: #34d399 !important; }
+html[data-skin="glossy-platinum"][data-theme] .pro-bar-lbl.busy { color: #fbbf24 !important; }
+html[data-skin="glossy-platinum"][data-theme] .pro-bar-lbl.full { color: #f87171 !important; }
+
+/* Filter bars nested inside a framed panel: no second frame */
+html[data-skin="glossy-platinum"][data-theme] .chart-panel .filter-bar {
+  background: rgba(255,255,255,0.02) !important;
+  border: 1px solid #1f1f22 !important;
+  box-shadow: none !important;
+}
+/* Reports title bar: give the heading room inside its frame */
+html[data-skin="glossy-platinum"][data-theme] #view-reports > .filter-bar:first-child { padding: 14px 20px !important; }
+html[data-skin="glossy-platinum"][data-theme] #view-reports > .filter-bar:first-child h3 { color: #f6f1e6 !important; }
