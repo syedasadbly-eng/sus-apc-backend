@@ -237,7 +237,7 @@ function startDemoFeed() {
     seedBusPositionsFromAPI().then(() => { try { updateLiveKPIs(); } catch (e) { /* view not ready */ } });
   };
   poll();
-  setInterval(poll, 5000);
+  setInterval(poll, 2500);   // matches the demo GPS cadence (stop-and-go motion)
   setInterval(() => seedKPIsFromAPI(), 15000);
 }
 
@@ -1109,7 +1109,8 @@ function rkFocusRoute(map, mapKey, rk) {
   const f = ROUTE_FOCUS[mapKey];
   Object.entries(layers).forEach(([k, l]) => {
     const on = !f || k === f;
-    if (l.line) { l.line.setStyle({ opacity: on ? 0.9 : 0.15, weight: f && on ? 6 : 4 }); if (f && on) l.line.bringToFront(); }
+    if (l.line && mapKey === 'liveMap') { l.line.setStyle({ opacity: f && on ? 0.55 : 0 }); }
+    else if (l.line) { l.line.setStyle({ opacity: on ? 0.9 : 0.15, weight: f && on ? 6 : 4 }); if (f && on) l.line.bringToFront(); }
     l.markers.forEach((m) => { const el = m.getElement && m.getElement(); if (el) el.style.opacity = on ? '' : '0.2'; const t = m.getTooltip && m.getTooltip(); const te = t && t.getElement && t.getElement(); if (te) te.style.opacity = on ? '' : '0'; });
   });
   const box = ROUTE_KEYS[mapKey] && ROUTE_KEYS[mapKey].getContainer();
@@ -1239,7 +1240,13 @@ async function renderStopsOnMap(map, mapKey) {
     const color = mapRouteHex(routeKey, idx);
     idx++;
     if (line.roads && line.pts.length > 1) {
-      rl.line = L.polyline(line.pts, { color, weight: 4, opacity: 0.85, interactive: false, lineJoin: 'round' }).addTo(map);
+      // Live map: no permanent route lines (they cluttered the view); the
+      // buses' trails show where they have been. The line stays as an
+      // invisible layer for framing, and shows as a faint guide on focus.
+      const live = mapKey === 'liveMap';
+      rl.line = L.polyline(line.pts, live
+        ? { color, weight: 3, opacity: 0, dashArray: '1 7', lineCap: 'round', interactive: false, lineJoin: 'round', className: 'route-guide' }
+        : { color, weight: 4, opacity: 0.85, interactive: false, lineJoin: 'round' }).addTo(map);
       stopMarkers[mapKey].push(rl.line);
     }
     (route.stops || []).forEach((s, sIdx) => {
@@ -1384,9 +1391,11 @@ const mapAutoFitted = {};
 // arrives the marker glides to it over the poll interval, following the
 // route's road path when one exists, and leaves a fading coloured trail.
 const BUS_ANIM = {};           // mapKey -> busId -> { marker, trail[], segs[], from, path, t0, dur }
-const BUS_ANIM_MS = 5000;      // matches the demo feed poll / simulator tick
-const TRAIL_MS = 3 * 60 * 1000; // how much history the trail shows
-const TRAIL_SEGS = 6;          // trail drawn as segments of falling opacity
+const BUS_ANIM_MS = 2500;      // matches the demo feed poll / GPS cadence
+const TRAIL_MS = 3 * 60 * 1000; // backfill span on first sight
+const TRAIL_MAX_MS = 8 * 60 * 1000; // hard cap on trail age
+const TRAIL_M = 2400;          // trail length in metres (kept while the bus is stopped)
+const TRAIL_SEGS = 16;         // trail drawn as segments of falling opacity
 let busAnimRaf = null;
 
 // Stop registry from either the Routes page or the map loader.
@@ -1423,7 +1432,7 @@ function busRoadPath(busId, from, to) {
 }
 
 // On first sight, backfill the trail with the road the bus has just
-// driven (~700 m behind it) so the trail is visible straight away.
+// driven (one trail length behind it) so the trail is visible straight away.
 function busBackfillTrail(busId, pos, now) {
   try {
     const route = busRouteFor(busId);
@@ -1433,7 +1442,7 @@ function busBackfillTrail(busId, pos, now) {
     pts.forEach((p, i) => { const d = geoDist(pos, p); if (d < bd) { bd = d; bi = i; } });
     if (bd > 80) return [[pos[0], pos[1], now]];
     const back = [pos]; let len = 0, i = bi;
-    for (let g = 0; g < pts.length && len < 700; g++) { i = (i - 1 + pts.length) % pts.length; len += geoDist(back[back.length - 1], pts[i]); back.push(pts[i]); }
+    for (let g = 0; g < pts.length && len < TRAIL_M; g++) { i = (i - 1 + pts.length) % pts.length; len += geoDist(back[back.length - 1], pts[i]); back.push(pts[i]); }
     const span = TRAIL_MS * 0.9; let acc = 0; const out = [[pos[0], pos[1], now]];
     for (let k = 1; k < back.length; k++) { acc += geoDist(back[k - 1], back[k]); out.push([back[k][0], back[k][1], now - span * (acc / Math.max(len, 1))]); }
     return out.reverse();
@@ -1456,28 +1465,68 @@ function pathPointAt(path, f) {
   return path[path.length - 1];
 }
 
-// Bright cyan so the trail stands out against the gold/purple route lines.
-function busTrailColor() { return '#2563eb'; }
+// Trail in the bus's own route colour (same colours as the route key).
+function busTrailColor(bus) {
+  const reg = STOPS_REGISTRY || STOP_REGISTRY_CACHE;
+  if (reg && bus) {
+    let idx = 0;
+    for (const [k, r] of Object.entries(reg)) {
+      if (String(k) === String(bus.id) || (r.bus_ids || []).map(String).includes(String(bus.id))) return mapRouteHex(k, idx);
+      idx++;
+    }
+  }
+  return '#2563eb';
+}
 
+// Fading comet trail: the last ~2.4 km the bus drove, split by distance into
+// segments that fade and taper towards the tail. Distance-based, so it stays
+// put while the bus is paused instead of shrinking away.
 function drawBusTrail(map, st, now) {
-  st.trail = st.trail.filter((p) => now - p[2] <= TRAIL_MS);
-  st.segs.forEach((l) => map.removeLayer(l)); st.segs = [];
-  if (st.trail.length < 2) return;
   const ll = st.marker.getLatLng();
-  const pts = st.trail.concat([[ll.lat, ll.lng, now]]);
-  const per = Math.ceil(pts.length / TRAIL_SEGS);
+  const head = [ll.lat, ll.lng, now];
+  // Trim by distance from the head, then by a generous age cap.
+  let acc = 0, cut = 0;
+  for (let i = st.trail.length - 1; i > 0; i--) {
+    acc += geoDist(st.trail[i], st.trail[i - 1]);
+    if (acc > TRAIL_M) { cut = i - 1; break; }
+  }
+  if (cut > 0) st.trail = st.trail.slice(cut);
+  st.trail = st.trail.filter((p) => now - p[2] <= TRAIL_MAX_MS);
+  st.segs.forEach((l) => map.removeLayer(l)); st.segs = [];
+  if (st.trail.length < 1) return;
+  const pts = st.trail.concat([head]);
+  // Cumulative distance from tail to head.
+  const cum = [0];
+  for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + geoDist(pts[i - 1], pts[i]));
+  const total = cum[cum.length - 1];
+  if (total < 5) return;
+  const glow = L.polyline(pts.map((p) => [p[0], p[1]]), {
+    color: st.color, weight: 16, opacity: 0.12, lineCap: 'round', lineJoin: 'round', interactive: false, className: 'bus-trail bus-trail-glow',
+  }).addTo(map);
+  st.segs.push(glow);
+  let j = 0;
   for (let s = 0; s < TRAIL_SEGS; s++) {
-    const chunk = pts.slice(s * per, Math.min(pts.length, (s + 1) * per + 1));
-    if (chunk.length < 2) continue;
-    const f = (s + 1) / TRAIL_SEGS;          // older -> fainter, thinner
-    // Soft glow underneath, crisp core on top.
-    st.segs.push(L.polyline(chunk.map((p) => [p[0], p[1]]), {
-      color: st.color, weight: 10 + 6 * f, opacity: 0.08 + 0.17 * f, lineCap: 'round', lineJoin: 'round', interactive: false, className: 'bus-trail',
-    }).addTo(map));
-    st.segs.push(L.polyline(chunk.map((p) => [p[0], p[1]]), {
-      color: st.color, weight: 3 + 5 * f, opacity: 0.15 + 0.8 * f, lineCap: 'round', lineJoin: 'round', interactive: false, className: 'bus-trail',
+    const d0 = total * s / TRAIL_SEGS, d1 = total * (s + 1) / TRAIL_SEGS;
+    const chunk = [];
+    while (j < pts.length - 1 && cum[j + 1] < d0) j++;
+    const at = (d) => { let k = j; while (k < pts.length - 1 && cum[k + 1] < d) k++; const seg = cum[k + 1] - cum[k] || 1; const t = Math.max(0, Math.min(1, (d - cum[k]) / seg)); const q = pts[Math.min(k + 1, pts.length - 1)]; return [pts[k][0] + (q[0] - pts[k][0]) * t, pts[k][1] + (q[1] - pts[k][1]) * t]; };
+    chunk.push(at(d0));
+    for (let k = j + 1; k < pts.length && cum[k] < d1; k++) chunk.push([pts[k][0], pts[k][1]]);
+    chunk.push(at(d1));
+    const f = (s + 1) / TRAIL_SEGS;          // tail -> head: fainter/thinner -> solid
+    const e = f * f;
+    st.segs.push(L.polyline(chunk, {
+      color: st.color, weight: 1.5 + 5 * f, opacity: 0.04 + 0.9 * e, lineCap: s === TRAIL_SEGS - 1 ? 'round' : 'butt', lineJoin: 'round', interactive: false, className: 'bus-trail',
     }).addTo(map));
   }
+}
+
+// Mark the bus marker as moving or stopped (pulse ring while stopped).
+function busSetMoving(st, moving) {
+  if (st.moving === moving) return;
+  st.moving = moving;
+  const el = st.marker.getElement && st.marker.getElement();
+  if (el) { el.classList.toggle('bus-is-moving', moving); el.classList.toggle('bus-is-stopped', !moving); }
 }
 
 function busAnimFrame() {
@@ -1553,22 +1602,27 @@ function updateMapBusMarkers(map, mapKey) {
     if (!st) {
       const marker = L.marker(target, { icon: L.divIcon({ className: 'live-bus-icon', html: iconHtml, iconSize: [32, 32], iconAnchor: [16, 16] }), zIndexOffset: 1000 }).addTo(map);
       st = state[bus.id] = { marker, iconHtml, trail: busBackfillTrail(bus.id, target, now), backfilled: !!busRouteFor(bus.id), segs: [], path: null, color: busTrailColor(bus), target };
+      busSetMoving(st, false);
+      const ring = marker.getElement && marker.getElement(); if (ring) ring.style.setProperty('--bus-route', st.color);
       marker.bindPopup(busPopupHtml(bus));
       drawBusTrail(map, st, now);
     } else {
-      if (st.iconHtml !== iconHtml) { st.marker.setIcon(L.divIcon({ className: 'live-bus-icon', html: iconHtml, iconSize: [32, 32], iconAnchor: [16, 16] })); st.iconHtml = iconHtml; }
+      if (st.iconHtml !== iconHtml) { st.marker.setIcon(L.divIcon({ className: 'live-bus-icon', html: iconHtml, iconSize: [32, 32], iconAnchor: [16, 16] })); st.iconHtml = iconHtml; const m0 = st.moving; st.moving = undefined; busSetMoving(st, !!m0); }
       st.marker.setPopupContent(busPopupHtml(bus));
       st.color = busTrailColor(bus);
+      { const el = st.marker.getElement && st.marker.getElement(); if (el) el.style.setProperty('--bus-route', st.color); }
       if (!st.backfilled && busRouteFor(bus.id)) {
         const cur = st.marker.getLatLng();
         const bf = busBackfillTrail(bus.id, [cur.lat, cur.lng], now);
         if (bf.length > 1) st.trail = bf;
         st.backfilled = true;
       }
+      busSetMoving(st, Number(bus.speed) > 0.3);
       if (!st.target || geoDist(st.target, target) > 1) {
         const cur = st.marker.getLatLng(); const from = [cur.lat, cur.lng];
         const hop = geoDist(from, target);
         if (hop > 3000) { st.marker.setLatLng(target); st.trail = [[target[0], target[1], now]]; st.path = null; }
+        else if (hop < 1.5) { st.marker.setLatLng(target); }
         else { st.path = busRoadPath(bus.id, from, target) || [from, target]; st.t0 = now; st.dur = BUS_ANIM_MS; }
         st.target = target;
       }

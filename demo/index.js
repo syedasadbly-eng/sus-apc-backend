@@ -83,7 +83,8 @@ const CFG = {
   // Minutes a bus waits at its terminus between loops.
   layoverMin: Number(process.env.DEMO_LAYOVER_MIN || 3),
   tickMs: 5000,
-  gpsEveryMs: 20000,
+  // GPS cadence: short enough that drive bursts and pauses read clearly.
+  gpsEveryMs: Number(process.env.DEMO_GPS_EVERY_MS || 2500),
   badge: process.env.DEMO_BADGE !== 'false',
   openAccess: process.env.DEMO_OPEN_ACCESS === 'true',
   // White-label: hide the pilot client's name and logo (on by default).
@@ -606,6 +607,81 @@ function send(topic, payload) {
   }
 }
 
+// Stop-and-go motion. Each leg between stops is split into drive bursts of
+// ~30-60 s separated by short 5-10 s pauses (lights, junctions, traffic),
+// plus a 5-10 s dwell at the stop itself. Fully deterministic per bus and
+// leg so every server instance and restart shows the same motion; the
+// timetable (and so the counts emitted at visit times) is unchanged.
+function seededRng(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return () => {
+    h = (h + 0x6D2B79F5) | 0;
+    let t = Math.imul(h ^ (h >>> 15), 1 | h);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const legPlanCache = new Map();
+function legPlan(busId, a, b) {
+  const key = `${busId}|${a.ts}`;
+  const hit = legPlanCache.get(key);
+  if (hit) return hit;
+  const rnd = seededRng(key);
+  const dwell = 5000 + rnd() * 5000;                 // at the stop
+  const start = a.ts + dwell, win = Math.max(1, b.ts - start);
+  // Pick drive/pause pairs, then scale the drives so the bus still arrives
+  // exactly on time. Pauses keep their 5-10 s length.
+  const drives = [], pauses = [];
+  let est = 0;
+  for (let g = 0; g < 400; g++) {
+    const d = 30000 + rnd() * 30000;
+    if (drives.length && est + d > win) break;
+    drives.push(d); est += d;
+    const p = 5000 + rnd() * 5000;
+    if (est + p + 30000 > win) break;
+    pauses.push(p); est += p;
+  }
+  pauses.length = Math.max(0, drives.length - 1);
+  const pauseTotal = pauses.reduce((x, y) => x + y, 0);
+  const driveRaw = drives.reduce((x, y) => x + y, 0) || 1;
+  const k = Math.max(0.2, (win - pauseTotal) / driveRaw);
+  const segs = []; let t = start, done = 0;
+  drives.forEach((d, i) => {
+    const dur = d * k, share = d / driveRaw;
+    segs.push({ t0: t, t1: t + dur, f0: done, f1: done + share, drive: true });
+    t += dur; done += share;
+    if (i < pauses.length) { segs.push({ t0: t, t1: t + pauses[i], f0: done, f1: done, drive: false }); t += pauses[i]; }
+  });
+  const plan = { dwell, start, segs, driveMs: driveRaw * k };
+  legPlanCache.set(key, plan);
+  if (legPlanCache.size > 500) legPlanCache.delete(legPlanCache.keys().next().value);
+  return plan;
+}
+// Fraction of the leg covered at `now`, plus whether the bus is moving.
+// Each burst eases in and out (zero speed at both ends) so starts and
+// stops look natural rather than sudden.
+function legProgress(lp, now) {
+  if (now <= lp.start) return { f: 0, moving: false, u: 0, seg: null };
+  for (const sg of lp.segs) {
+    if (now < sg.t1) {
+      if (!sg.drive) return { f: sg.f0, moving: false, seg: sg };
+      const u = (now - sg.t0) / Math.max(1, sg.t1 - sg.t0);
+      const e = u - Math.sin(2 * Math.PI * u) / (2 * Math.PI);
+      return { f: sg.f0 + (sg.f1 - sg.f0) * e, moving: true, u, seg: sg };
+    }
+  }
+  return { f: 1, moving: false, seg: null };
+}
+function pathLengthM(path) {
+  let L = 0;
+  for (let i = 1; i < path.length; i++) {
+    const p = path[i - 1], q = path[i];
+    L += Math.hypot((q[0] - p[0]) * 111320, (q[1] - p[1]) * 111320 * Math.cos(p[0] * Math.PI / 180));
+  }
+  return L;
+}
+
 function positionAt(busId, plan, now) {
   const vs = plan.visits;
   if (!vs.length || now < vs[0].ts - 5 * 60000 || now > plan.resetTs) {
@@ -615,22 +691,29 @@ function positionAt(busId, plan, now) {
   let i = 0;
   while (i < vs.length - 1 && vs[i + 1].ts <= now) i++;
   const a = vs[i], b = vs[Math.min(i + 1, vs.length - 1)];
-  const dwellMs = 45000;
-  if (now <= a.ts + dwellMs || a === b) return { lat: a.lat, lng: a.lng, speed: 0, inService: true };
-  const f = Math.min(1, (now - a.ts - dwellMs) / Math.max(1, b.ts - a.ts - 2 * dwellMs));
-  if (f >= 1) return { lat: b.lat, lng: b.lng, speed: 0, inService: true };
+  if (now <= a.ts || a === b) return { lat: a.lat, lng: a.lng, speed: 0, inService: true };
   // Terminus layover (last stop back to the first, same place): parked.
   if (Math.abs(a.lat - b.lat) < 0.0003 && Math.abs(a.lng - b.lng) < 0.0003) return { lat: a.lat, lng: a.lng, speed: 0, inService: true };
-  const speed = 22 + 8 * Math.sin(now / 13000);
+  const lp = legPlan(busId, a, b);
+  const pr = legProgress(lp, now);
+  if (pr.f <= 0) return { lat: a.lat, lng: a.lng, speed: 0, inService: true };
+  if (pr.f >= 1) return { lat: b.lat, lng: b.lng, speed: 0, inService: true };
   // Follow the road path for this leg when the stop file has one.
   const stops = STOPS[busId] || [];
   const leg = stops[a.stopIdx];
-  if (leg && leg.path && leg.path.length >= 2 && b.stopIdx === (a.stopIdx + 1) % stops.length) {
-    const p = pointAlong(leg.path, f);
+  const onPath = leg && leg.path && leg.path.length >= 2 && b.stopIdx === (a.stopIdx + 1) % stops.length;
+  const lenM = onPath ? pathLengthM(leg.path) : pathLengthM([[a.lat, a.lng], [b.lat, b.lng]]);
+  let speed = 0;
+  if (pr.moving && pr.seg) {
+    const segMs = Math.max(1, pr.seg.t1 - pr.seg.t0);
+    const avg = (lenM * (pr.seg.f1 - pr.seg.f0)) / (segMs / 1000);   // m/s
+    speed = Math.round(avg * (1 - Math.cos(2 * Math.PI * pr.u)) * 3.6 * 10) / 10;
+  }
+  if (onPath) {
+    const p = pointAlong(leg.path, pr.f);
     return { lat: p[0], lng: p[1], speed, inService: true };
   }
-  const jitter = (Math.sin(now / 9000) * 0.00008);
-  return { lat: a.lat + (b.lat - a.lat) * f + jitter, lng: a.lng + (b.lng - a.lng) * f - jitter, speed, inService: true };
+  return { lat: a.lat + (b.lat - a.lat) * pr.f, lng: a.lng + (b.lng - a.lng) * pr.f, speed, inService: true };
 }
 
 // Where a bus is on its timetable right now, for map popups and labels:
@@ -651,7 +734,7 @@ function busStatus(busId, now = Date.now()) {
   const same = Math.abs(a.lat - b.lat) < 0.0003 && Math.abs(a.lng - b.lng) < 0.0003;
   if (a === b) return { state: 'at_stop', stop: clean(a.name), nextStop: null };
   if (same) return { state: 'layover', stop: clean(a.name), nextStop: clean((vs[i + 2] || b).name) };
-  if (now <= a.ts + 45000) return { state: 'at_stop', stop: clean(a.name), nextStop: clean(b.name) };
+  if (now <= legPlan(busId, a, b).start) return { state: 'at_stop', stop: clean(a.name), nextStop: clean(b.name) };
   return { state: 'en_route', stop: clean(a.name), nextStop: clean(b.name) };
 }
 
@@ -672,6 +755,12 @@ function pointAlong(path, f) {
   return path[path.length - 1];
 }
 
+function gpsTickBus(bus, busId, today, now) {
+  if (now - (lastGpsAt[busId] || 0) < CFG.gpsEveryMs - 50) return;
+  lastGpsAt[busId] = now;
+  const pos = positionAt(busId, planDay(busId, today, ctx.capacity), now);
+  if (pos) send(bus.gpsTopic, gpsPayload(pos.lat, pos.lng, pos.speed));
+}
 function tick() {
   const now = Date.now();
   const today = ctx.displayDateStr();
@@ -700,11 +789,7 @@ function tick() {
     }
     lastEmitted[busId] = now;
 
-    if (now - (lastGpsAt[busId] || 0) >= CFG.gpsEveryMs) {
-      lastGpsAt[busId] = now;
-      const pos = positionAt(busId, planDay(busId, today, ctx.capacity), now);
-      if (pos) send(bus.gpsTopic, gpsPayload(pos.lat, pos.lng, pos.speed));
-    }
+    gpsTickBus(bus, busId, today, now);
   }
   welfareTick(now, today);
 }
@@ -743,6 +828,14 @@ function start() {
     try { tick(); } catch (err) { console.error('[DEMO] tick error:', err.message); }
   }, CFG.tickMs);
   if (t.unref) t.unref();
+  // GPS runs on its own faster timer so the map sees stop-and-go clearly.
+  const g = setInterval(() => {
+    try {
+      const now = Date.now(), today = ctx.displayDateStr();
+      for (const busId of Object.keys(BUSES)) if (STOPS[busId]) gpsTickBus(BUSES[busId], busId, today, now);
+    } catch (err) { console.error('[DEMO] gps tick error:', err.message); }
+  }, CFG.gpsEveryMs);
+  if (g.unref) g.unref();
   console.log('[DEMO] Live simulator running');
 }
 
