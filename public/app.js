@@ -6835,8 +6835,16 @@ const spTargetPlugin = {
     ctx.strokeStyle = 'rgba(74,222,128,0.9)'; ctx.lineWidth = 1.5; ctx.setLineDash([6, 4]);
     ctx.beginPath(); ctx.moveTo(chartArea.left, py); ctx.lineTo(chartArea.right, py); ctx.stroke();
     ctx.setLineDash([]);
-    ctx.font = '600 11px Inter, sans-serif'; ctx.fillStyle = '#86efac'; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
-    ctx.fillText((chart.$spTargetLabel || 'Timetable') + ' ' + spMin(t) + ' min', chartArea.right - 4, py - 4);
+    ctx.font = '600 11px Inter, sans-serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
+    const label = (chart.$spTargetLabel || 'Timetable') + ' ' + spMin(t) + ' min';
+    const w = ctx.measureText(label).width;
+    // Dark pill behind the label so it stays readable over the bars.
+    ctx.fillStyle = 'rgba(15,16,24,0.88)';
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(chartArea.right - w - 10, py - 19, w + 8, 16, 4); else ctx.rect(chartArea.right - w - 10, py - 19, w + 8, 16);
+    ctx.fill();
+    ctx.fillStyle = '#86efac';
+    ctx.fillText(label, chartArea.right - 6, py - 5);
     ctx.restore();
   },
 };
