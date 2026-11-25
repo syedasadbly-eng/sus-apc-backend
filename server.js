@@ -1391,6 +1391,11 @@ app.get('/api/gps-debug', (req, res) => {
 // --- Stop registry endpoints ---
 // Full registry: every route with its ordered stop list. Used by the map to
 // render stop pins along each route.
+// Load profile, crowding and time between buses (Routes & Stops > Service performance).
+app.use('/api', require('./analytics/service').createServiceRouter({
+  express, db, getRegistry: () => STOP_REGISTRY, capacity: BUS_CAPACITY, tz: DISPLAY_TZ,
+}));
+
 app.get('/api/stops', (req, res) => {
   const routes = {};
   for (const [k, v] of Object.entries(STOP_REGISTRY.routes || {})) {

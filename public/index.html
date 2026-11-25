@@ -959,6 +959,75 @@
           </div>
         </div>
 
+        <!-- ===== Service performance: load profile, crowding, time between buses ===== -->
+        <section class="sp-section" id="servicePerf" aria-labelledby="spTitle">
+          <div class="sp-head">
+            <div>
+              <h2 class="sp-title" id="spTitle">Service performance</h2>
+              <div class="chart-subtitle" id="spSubtitle">How full each bus gets along the route, and how long passengers wait</div>
+            </div>
+            <div class="period-tabs" id="spRouteTabs" role="tablist" aria-label="Route"></div>
+          </div>
+
+          <!-- Load profile -->
+          <div class="chart-panel">
+            <div class="chart-header">
+              <div>
+                <div class="chart-title">Load along the route</div>
+                <div class="chart-subtitle" id="spLoadSub">Average on board leaving each stop, in the order the bus drives</div>
+              </div>
+              <div class="sp-callout" id="spBusiest" hidden></div>
+            </div>
+            <div class="chart-body" style="min-height:360px">
+              <canvas id="chartLoadProfile"></canvas>
+            </div>
+          </div>
+
+          <div class="sp-grid">
+            <!-- Crowding -->
+            <div class="chart-panel">
+              <div class="chart-header">
+                <div>
+                  <div class="chart-title">Crowding</div>
+                  <div class="chart-subtitle" id="spCrowdSub">How full buses were, against capacity</div>
+                </div>
+              </div>
+              <div class="chart-body">
+                <div class="sp-kpis">
+                  <div class="sp-kpi"><div class="sp-kpi-v" id="spPlf">--</div><div class="sp-kpi-l">Average peak load</div><div class="sp-kpi-s" id="spPlfSub">fullest point of each loop</div></div>
+                  <div class="sp-kpi"><div class="sp-kpi-v" id="spFull">--</div><div class="sp-kpi-l">Loops that filled up</div><div class="sp-kpi-s" id="spFullSub">--</div></div>
+                  <div class="sp-kpi"><div class="sp-kpi-v" id="spBusy">--</div><div class="sp-kpi-l">Time 80%+ full</div><div class="sp-kpi-s" id="spBusySub">--</div></div>
+                </div>
+                <div class="sp-heat-title">How full buses left stops, by day and hour</div>
+                <div class="sp-heat" id="spHeat"></div>
+                <div class="sp-heat-legend"><span>Empty</span><span class="sp-heat-grad"></span><span>Full</span></div>
+              </div>
+            </div>
+
+            <!-- Time between buses -->
+            <div class="chart-panel">
+              <div class="chart-header">
+                <div>
+                  <div class="chart-title">Time between buses</div>
+                  <div class="chart-subtitle" id="spGapSub">Gap between buses at each stop, against the timetable</div>
+                </div>
+              </div>
+              <div class="chart-body">
+                <div class="sp-kpis">
+                  <div class="sp-kpi"><div class="sp-kpi-v" id="spGapTyp">--</div><div class="sp-kpi-l">Typical gap</div><div class="sp-kpi-s" id="spGapTypSub">--</div></div>
+                  <div class="sp-kpi"><div class="sp-kpi-v" id="spWait">--</div><div class="sp-kpi-l">Average wait</div><div class="sp-kpi-s">for someone arriving at random</div></div>
+                  <div class="sp-kpi"><div class="sp-kpi-v" id="spOnTarget">--</div><div class="sp-kpi-l">Gaps on target</div><div class="sp-kpi-s" id="spOnTargetSub">--</div></div>
+                </div>
+                <div style="position:relative;height:220px"><canvas id="chartGapByHour"></canvas></div>
+                <div class="sp-table-wrap"><table class="data-table sp-gap-table">
+                  <thead><tr><th style="text-align:left">Stop</th><th style="text-align:right">Typical</th><th style="text-align:right" title="1 in 10 gaps were longer than this">Worst 10%</th><th style="text-align:right">Avg wait</th><th style="text-align:right">On target</th></tr></thead>
+                  <tbody id="spGapBody"></tbody>
+                </table></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <!-- Street-level footfall heatmap (demo road routes) -->
         <div class="chart-panel" id="footfallPanel" style="margin-top:var(--space-4)" hidden>
           <div class="chart-header ff-header">
