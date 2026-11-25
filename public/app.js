@@ -200,17 +200,71 @@ function loadDemoMapLibs() {
     });
   return _demoMapLibs;
 }
+// Which vector tile endpoint can this browser reach? Some networks / blockers
+// allow the OpenFreeMap style but block its tile endpoint, which left every
+// map blank. Try the direct endpoint first, then our own same-origin relay
+// (/maptiles/*). Checked once per page; each probe = TileJSON + one tile.
+let _tileSource = null;
+function probeTiles(tileJsonUrl, ms) {
+  const withTimeout = (p) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error('timeout')), ms))]);
+  return withTimeout((async () => {
+    const r0 = await fetch(tileJsonUrl);
+    if (!r0.ok) return false;
+    const tj = await r0.json();
+    const u = String((tj.tiles || [])[0] || '').replace('{z}', '0').replace('{x}', '0').replace('{y}', '0');
+    if (!u) return false;
+    const r = await fetch(u);
+    return r.ok;
+  })()).catch(() => false);
+}
+function vectorTileSource() {
+  if (_tileSource) return _tileSource;
+  const RELAY = location.origin + '/maptiles/tilejson';
+  _tileSource = probeTiles('https://tiles.openfreemap.org/planet', 5000)
+    .then((ok) => ok ? 'direct' : probeTiles(RELAY, 8000).then((ok2) => ok2 ? RELAY : null));
+  return _tileSource;
+}
+// Last-resort raster street map (Esri World Street Map, no key needed).
+function addRasterFallback(map) {
+  if (map._rasterFallback) return;
+  map._rasterFallback = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 19, attribution: 'Tiles &copy; Esri',
+  }).addTo(map);
+  map._rasterFallback.bringToBack && map._rasterFallback.bringToBack();
+}
 function addBaseLayer(map, url, opts) {
-  // Every map (demo and live) uses the free white OpenFreeMap vector style.
+  // Every map (demo and live) uses the free OpenFreeMap vector style. If the
+  // tile host is blocked we route tiles through our server; a raster map is
+  // the last resort, so a map is never left blank.
   L.control.attribution({ prefix: false }).addAttribution('&copy; OpenMapTiles &copy; OpenStreetMap contributors').addTo(map);
-  loadDemoMapLibs().then((style) => {
+  Promise.all([loadDemoMapLibs(), vectorTileSource()]).then(([baseStyle, src]) => {
+    if (!src) throw new Error('vector tiles unreachable');
     if (!L.maplibreGL) throw new Error('maplibre-gl-leaflet missing');
-    L.maplibreGL({ style, interactive: false }).addTo(map);
+    let style = baseStyle;
+    if (src !== 'direct') {
+      style = { ...baseStyle, sources: { ...baseStyle.sources } };
+      Object.keys(style.sources).forEach((k) => {
+        const s = style.sources[k];
+        if (s && s.type === 'vector' && /openfreemap\.org\/planet/.test(String(s.url || ''))) style.sources[k] = { ...s, url: src };
+      });
+      console.info('[map] using tile relay');
+    }
+    const layer = L.maplibreGL({ style, interactive: false }).addTo(map);
+    // Watchdog: if the vector map hasn't drawn within 12 s, swap to raster.
+    let drawn = false;
+    try {
+      const gl = layer.getMaplibreMap();
+      gl.once('idle', () => { drawn = true; });
+      setTimeout(() => {
+        if (drawn || (gl.isStyleLoaded() && gl.areTilesLoaded())) return;
+        console.warn('[map] vector map did not load, using raster tiles');
+        try { map.removeLayer(layer); } catch (e) { /* noop */ }
+        addRasterFallback(map);
+      }, 12000);
+    } catch (e) { /* layer not ready: leave it */ }
   }).catch((e) => {
-    // Never leave the map blank: fall back to the normal tiles.
-    console.warn('[DEMO] label-free map unavailable, using default tiles', e);
-    document.documentElement.classList.remove('demo-nolabel-map');
-    L.tileLayer(url, opts).addTo(map);
+    console.warn('[map] vector map unavailable, using raster tiles', e && e.message);
+    addRasterFallback(map);
   });
 }
 if (DEMO_WHITE_LABEL) document.documentElement.classList.add('demo-nolabel-map');
