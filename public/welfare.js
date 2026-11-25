@@ -582,7 +582,7 @@
     const alerting = active.length;
     setText('wDriversSubtitle', `${buses.size} screen${buses.size === 1 ? '' : 's'} \u00b7 `
       + (alerting ? `${alerting} alert${alerting > 1 ? 's' : ''} showing in a cab` : 'no alerts showing in any cab')
-      + (showTests ? ' \u00b7 test events are not counted here' : ''));
+      + (showTests ? ' \u00b7 test alerts are shown, marked TEST' : ''));
 
     grid.querySelectorAll('.w-copy-driver').forEach((b) => {
       b.addEventListener('click', async () => {
