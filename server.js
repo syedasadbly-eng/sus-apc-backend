@@ -1395,6 +1395,9 @@ app.get('/api/gps-debug', (req, res) => {
 app.use('/api', require('./analytics/service').createServiceRouter({
   express, db, getRegistry: () => STOP_REGISTRY, capacity: BUS_CAPACITY, tz: DISPLAY_TZ,
 }));
+app.use('/api', require('./analytics/scorecard').createScorecardRouter({
+  express, db, getRegistry: () => STOP_REGISTRY, capacity: BUS_CAPACITY, tz: DISPLAY_TZ,
+}));
 
 app.get('/api/stops', (req, res) => {
   const routes = {};

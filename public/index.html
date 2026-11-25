@@ -230,6 +230,10 @@
           <i data-lucide="git-compare"></i>
           Comparison
         </button>
+        <button class="nav-item" data-view="scorecard">
+          <i data-lucide="gauge"></i>
+          Scorecard
+        </button>
       </div>
 
       <div class="nav-section">
@@ -1232,6 +1236,98 @@
     </div>
 
     <!-- ===== FLEET STATUS VIEW ===== -->
+    <!-- ===== Service scorecard: productivity, service quality, welfare ===== -->
+    <div class="view" id="view-scorecard">
+      <div class="filter-bar sc-filters">
+        <div class="filter-group">
+          <label class="filter-label" for="scRoute">Show</label>
+          <select class="filter-select" id="scRoute"><option value="fleet">Whole fleet</option></select>
+        </div>
+        <div class="filter-group">
+          <span class="filter-label">Period</span>
+          <div class="period-tabs" id="scPeriod" role="tablist">
+            <button type="button" class="period-tab" data-sc-days="7">7 days</button>
+            <button type="button" class="period-tab active" data-sc-days="30">30 days</button>
+            <button type="button" class="period-tab" data-sc-days="90">90 days</button>
+            <button type="button" class="period-tab" data-sc-days="month">Last month</button>
+          </div>
+        </div>
+        <div class="filter-group">
+          <label class="filter-label" for="scCost">Cost per hour</label>
+          <div class="sc-cost"><span id="scCurrency">&pound;</span><input type="number" class="filter-input" id="scCost" min="0" step="1" placeholder="e.g. 65" aria-label="Operating cost per service hour"></div>
+        </div>
+        <div class="filter-group" style="margin-left:auto">
+          <button type="button" class="btn btn-ghost btn-sm" id="scPrint">Print</button>
+          <button type="button" class="btn btn-primary btn-sm" id="scExport">Export CSV</button>
+        </div>
+      </div>
+
+      <div class="sc-head">
+        <div>
+          <h2 class="sc-title" id="scTitle">Service scorecard</h2>
+          <div class="sc-subtitle" id="scSubtitle">Loading&hellip;</div>
+        </div>
+        <div class="sc-legend" aria-label="Status key">
+          <span><i class="sc-dot green"></i>On target</span>
+          <span><i class="sc-dot amber"></i>Watch</span>
+          <span><i class="sc-dot red"></i>Off target</span>
+        </div>
+      </div>
+
+      <div class="sc-hero" id="scHero"></div>
+
+      <div class="sc-cols">
+        <section class="chart-panel sc-panel">
+          <div class="chart-header"><div><div class="chart-title">Productivity</div><div class="chart-subtitle">How well the service is used</div></div></div>
+          <table class="data-table sc-table"><thead><tr><th>Measure</th><th>This period</th><th class="sc-s">Target</th></tr></thead><tbody id="scProd"></tbody></table>
+        </section>
+        <section class="chart-panel sc-panel">
+          <div class="chart-header"><div><div class="chart-title">Service quality</div><div class="chart-subtitle">Waiting, reliability and crowding</div></div></div>
+          <table class="data-table sc-table"><thead><tr><th>Measure</th><th>This period</th><th class="sc-s">Target</th></tr></thead><tbody id="scServ"></tbody></table>
+        </section>
+        <section class="chart-panel sc-panel">
+          <div class="chart-header"><div><div class="chart-title">Passenger welfare</div><div class="chart-subtitle">Incidents and how fast they were handled</div></div></div>
+          <table class="data-table sc-table"><thead><tr><th>Measure</th><th>This period</th><th class="sc-s">Target</th></tr></thead><tbody id="scWelf"></tbody></table>
+        </section>
+      </div>
+
+      <div class="sc-grid2">
+        <section class="chart-panel">
+          <div class="chart-header">
+            <div><div class="chart-title">Trend</div><div class="chart-subtitle" id="scTrendSub">--</div></div>
+            <div class="period-tabs" id="scTrendTabs" role="tablist">
+              <button type="button" class="period-tab active" data-sc-trend="pax_per_hour">Passengers / hour</button>
+              <button type="button" class="period-tab" data-sc-trend="on_target">Gaps on target</button>
+              <button type="button" class="period-tab" data-sc-trend="incidents_per_k">Incidents / 1,000</button>
+              <button type="button" class="period-tab" data-sc-trend="response_median">Response time</button>
+            </div>
+          </div>
+          <div style="position:relative;height:280px;padding:0 var(--space-4) var(--space-4)"><canvas id="chartScTrend"></canvas></div>
+        </section>
+        <section class="chart-panel">
+          <div class="chart-header"><div><div class="chart-title">Incidents by type</div><div class="chart-subtitle" id="scTypesSub">Passenger welfare incidents in the period</div></div></div>
+          <div class="sc-types" id="scTypes"></div>
+        </section>
+      </div>
+
+      <section class="chart-panel" id="scRoutesPanel">
+        <div class="chart-header"><div><div class="chart-title">Routes side by side</div><div class="chart-subtitle">This period, coloured against target</div></div></div>
+        <div class="sc-table-wrap"><table class="data-table sc-routes"><thead><tr>
+          <th>Route</th><th>Passengers</th><th>Per hour</th><th>Seats used</th><th>Gaps on target</th><th>Avg wait</th><th>Fullest point</th><th>Incidents / 1,000</th><th>Response</th><th>Urgent in 5 min</th>
+        </tr></thead><tbody id="scRoutes"></tbody></table></div>
+      </section>
+
+      <div class="sc-notes" id="scNotes">
+        <b>How these are measured.</b> Passengers are boardings counted at the doors. Hours in service count each hour a bus was reporting.
+        Passengers per hour is the industry's main productivity measure; around 20 an hour is a common guide for a full-size bus
+        (<a href="https://www.samtrans.com/media/6169/download" target="_blank" rel="noopener">SamTrans</a>), so 10 is used here for 16-seat vehicles.
+        Waiting time is what a passenger arriving at random would expect, compared with half the timetable gap; timeliness is the biggest driver of passenger satisfaction
+        (<a href="https://d3cez36w5wymxj.cloudfront.net/wp-content/uploads/2024/11/19132149/MAKING-GREAT-BUS-JOURNEYS-final-191124.pdf" target="_blank" rel="noopener">Transport Focus</a>).
+        Incidents exclude sensor faults and test alerts; with no national benchmark, incident rates are compared with the previous period.
+        Response time is the first of control-room acknowledgement or driver answer. Urgent alerts are Level 4, with a 5-minute target.
+      </div>
+    </div>
+
     <div class="view" id="view-fleet">
       <div class="kpi-grid" style="margin-bottom:var(--space-4)">
         <div class="kpi-card green">
