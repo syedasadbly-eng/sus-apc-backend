@@ -34,7 +34,8 @@ const crypto = require('crypto');
 const express = require('express');
 
 /** Alert types that reach a cab. Everything else stays on the console:
- *  sensor health, count drift, dwell, and a sound on its own. */
+ *  sensor health, count drift and dwell counts. Overcrowding, a loud noise
+ *  and a lone passenger are amber: worth a look, nothing urgent. */
 const DRIVER_TYPES = new Set([
   'fall',
   'violence',
@@ -43,7 +44,21 @@ const DRIVER_TYPES = new Set([
   'terminus_occupancy',
   'lone_traveller_late_night',
   'stationary_with_occupants',
+  'dwell_distress_unresponsive',
+  'overcrowding',
+  'sound_classification',
+  'lone_traveller',
 ]);
+
+/** Test alerts (source 'simulated', from the console's Rules & Testing page)
+ *  reach the cab whenever this instance allows simulation, so a test sent from
+ *  the console actually shows on the screen. They are always marked TEST.
+ *  ?test=1 forces them on, ?test=0 hides them. */
+function testsFor(req) {
+  if (req.query.test === '1') return true;
+  if (req.query.test === '0') return false;
+  return process.env.WELFARE_ALLOW_SIM === 'true';
+}
 
 const WINDOW_MIN = Number(process.env.WELFARE_DRIVER_WINDOW_MIN || 10);
 const MAX_FAILS = 5;
@@ -115,7 +130,7 @@ function createDriverRouter(engine, store) {
 
   router.get('/driver/:bus', requirePin, (req, res) => {
     const bus = String(req.params.bus);
-    const includeTests = req.query.test === '1';
+    const includeTests = testsFor(req);
     let health = null;
     try {
       health = (engine.fleetHealth() || []).find((h) => String(h.bus_id) === bus) || null;
