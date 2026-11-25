@@ -4470,6 +4470,7 @@ async function loadRoutesData() {
 
   rsPopulateStopSelect();
   rsRender();
+  spLoad();
 }
 
 function rsRender() {
@@ -6782,3 +6783,262 @@ async function exportWelfareAuditCSV(from, to, busId) {
     location.reload();
   });
 })();
+
+// ============================================
+// SERVICE PERFORMANCE (Routes & Stops): load profile, crowding, time between buses
+// ============================================
+// Data: /api/service-analytics (analytics/service.js). One route at a time,
+// picked with the tabs in the section header; follows the page's period.
+const SP = { data: null, route: null, req: 0 };
+
+function spStopLabel(name) {
+  const ret = /\((return|rtn)\)\s*$/i.test(name || '');
+  return shortStopName(rsBaseStop(name)) + (ret ? ' (return)' : '');
+}
+function spMin(v) { return v == null ? '--' : (v >= 100 ? Math.round(v) : Math.round(v * 10) / 10).toLocaleString(); }
+function spSetHtml(id, v) { const el = document.getElementById(id); if (el) el.innerHTML = v; }
+function spTone(id, tone) {
+  const el = document.getElementById(id);
+  const card = el && el.closest('.sp-kpi');
+  if (card) { card.classList.remove('tone-good', 'tone-warn', 'tone-bad'); if (tone) card.classList.add('tone-' + tone); }
+}
+
+// Capacity line drawn straight onto the load chart (no annotation plugin needed).
+const spCapacityPlugin = {
+  id: 'spCapacity',
+  afterDatasetsDraw(chart) {
+    const cap = chart.$spCap;
+    const y = chart.scales.y;
+    if (!cap || !y) return;
+    const { ctx, chartArea } = chart;
+    const py = y.getPixelForValue(cap);
+    if (py < chartArea.top - 1) return;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(248,113,113,0.85)'; ctx.lineWidth = 1.5; ctx.setLineDash([6, 4]);
+    ctx.beginPath(); ctx.moveTo(chartArea.left, py); ctx.lineTo(chartArea.right, py); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.font = '600 11px Inter, sans-serif'; ctx.fillStyle = '#fca5a5'; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
+    ctx.fillText('Capacity ' + cap, chartArea.right - 4, py - 4);
+    ctx.restore();
+  },
+};
+// Dashed target line on the gap-by-hour chart.
+const spTargetPlugin = {
+  id: 'spTarget',
+  afterDatasetsDraw(chart) {
+    const t = chart.$spTarget;
+    const y = chart.scales.y;
+    if (!t || !y) return;
+    const { ctx, chartArea } = chart;
+    const py = y.getPixelForValue(t);
+    ctx.save();
+    ctx.strokeStyle = 'rgba(74,222,128,0.9)'; ctx.lineWidth = 1.5; ctx.setLineDash([6, 4]);
+    ctx.beginPath(); ctx.moveTo(chartArea.left, py); ctx.lineTo(chartArea.right, py); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.font = '600 11px Inter, sans-serif'; ctx.fillStyle = '#86efac'; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
+    ctx.fillText('Timetable ' + spMin(t) + ' min', chartArea.right - 4, py - 4);
+    ctx.restore();
+  },
+};
+
+function spInitCharts() {
+  if (charts.loadProfile || !window.Chart) return;
+  const tick = { color: '#c9cad8', font: { size: 11, family: 'Inter', weight: '500' } };
+  const grid = { color: 'rgba(255,255,255,0.06)', drawTicks: false };
+  const lp = document.getElementById('chartLoadProfile');
+  if (lp) {
+    charts.loadProfile = new Chart(lp.getContext('2d'), {
+      type: 'bar',
+      plugins: [spCapacityPlugin],
+      data: { labels: [], datasets: [
+        { type: 'line', label: 'Average on board', data: [], order: 0, borderColor: '#38bdf8', backgroundColor: 'rgba(56,189,248,0.16)', fill: true, tension: 0.25, cubicInterpolationMode: 'monotone', borderWidth: 3, pointRadius: 5, pointHoverRadius: 7, pointBackgroundColor: '#38bdf8', pointBorderColor: '#0b0c12', pointBorderWidth: 2, yAxisID: 'y' },
+        { type: 'line', label: 'Highest on board', data: [], order: 1, borderColor: 'rgba(251,191,36,0.9)', borderDash: [5, 4], borderWidth: 2, pointRadius: 3, pointBackgroundColor: '#fbbf24', fill: false, tension: 0, yAxisID: 'y' },
+        { label: 'Got on (avg per visit)', data: [], order: 2, backgroundColor: ROUTE_WHITE, borderRadius: 5, maxBarThickness: 26, yAxisID: 'y' },
+        { label: 'Got off (avg per visit)', data: [], order: 3, backgroundColor: ROUTE_GOLD, borderRadius: 5, maxBarThickness: 26, yAxisID: 'y' },
+      ]},
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        animation: { duration: 450 },
+        plugins: {
+          legend: { labels: { color: '#dbdce6', font: { size: 12, family: 'Inter', weight: '500' }, usePointStyle: true, pointStyle: 'circle', boxWidth: 10, padding: 14 } },
+          tooltip: { ...tooltipDefaults(), callbacks: {
+            label: (c) => ' ' + c.dataset.label + ': ' + (Math.round(c.parsed.y * 10) / 10).toLocaleString(),
+            afterBody: (items) => {
+              const s = SP.cur && SP.cur.load.stops[items[0].dataIndex];
+              return s ? ['', s.visits.toLocaleString() + ' stop visits', 'Left 80%+ full on ' + s.busy_share + '% of visits'] : [];
+            },
+          } },
+        },
+        scales: {
+          x: { grid: { display: false }, ticks: { ...tick, maxRotation: 0, autoSkip: false } },
+          y: { beginAtZero: true, grid, ticks: { ...tick, padding: 6 }, title: { display: true, text: 'Passengers', color: '#8b8ea5', font: { size: 11, family: 'Inter' } } },
+        },
+      },
+    });
+  }
+  const gh = document.getElementById('chartGapByHour');
+  if (gh) {
+    charts.gapByHour = new Chart(gh.getContext('2d'), {
+      type: 'bar',
+      plugins: [spTargetPlugin],
+      data: { labels: [], datasets: [{ label: 'Average gap (min)', data: [], backgroundColor: [], borderRadius: 4, maxBarThickness: 22 }] },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        animation: { duration: 400 },
+        plugins: {
+          legend: { display: false },
+          tooltip: { ...tooltipDefaults(), callbacks: { title: (it) => it[0].label + ':00', label: (c) => ' Average gap: ' + spMin(c.parsed.y) + ' min' } },
+        },
+        scales: {
+          x: { grid: { display: false }, ticks: { ...tick, maxRotation: 0 } },
+          y: { beginAtZero: true, grid, ticks: { ...tick, callback: (v) => v + 'm' } },
+        },
+      },
+    });
+  }
+}
+
+async function spLoad() {
+  if (!document.getElementById('servicePerf')) return;
+  spInitCharts();
+  const id = ++SP.req;
+  const data = await apiFetch('/api/service-analytics', { from: RS.from, to: RS.to });
+  if (id !== SP.req) return;
+  SP.data = data;
+  const routes = (data && data.routes) || [];
+  routes.sort((a, b) => (b.visits || 0) - (a.visits || 0));
+  if (RS.route && RS.route !== 'all') SP.route = rsRouteKeyForBus(RS.route);
+  if (!routes.some((r) => r.route === SP.route)) SP.route = routes.length ? routes[0].route : null;
+  spRenderTabs();
+  spRender();
+}
+
+function spRenderTabs() {
+  const wrap = document.getElementById('spRouteTabs');
+  if (!wrap) return;
+  const routes = (SP.data && SP.data.routes) || [];
+  wrap.hidden = routes.length < 2;
+  wrap.innerHTML = routes.map((r) => '<button type="button" class="period-tab' + (r.route === SP.route ? ' active' : '') + '" data-sp-route="' + escapeHtml(r.route) + '" role="tab" aria-selected="' + (r.route === SP.route) + '">Route ' + escapeHtml(r.route) + '</button>').join('');
+  wrap.querySelectorAll('[data-sp-route]').forEach((b) => b.addEventListener('click', () => {
+    SP.route = b.getAttribute('data-sp-route');
+    spRenderTabs(); spRender();
+  }));
+}
+
+function spHeatColor(p) {
+  if (p == null) return 'rgba(255,255,255,0.04)';
+  const t = Math.max(0, Math.min(1, p / 100));
+  // light blue -> blue -> amber -> red
+  const stops = [[0, [56, 189, 248, 0.18]], [0.35, [56, 189, 248, 0.85]], [0.7, [251, 191, 36, 0.95]], [1, [239, 68, 68, 1]]];
+  let a = stops[0]; let b = stops[stops.length - 1];
+  for (let i = 1; i < stops.length; i++) if (t <= stops[i][0]) { a = stops[i - 1]; b = stops[i]; break; }
+  const k = (t - a[0]) / ((b[0] - a[0]) || 1);
+  const c = a[1].map((v, i) => v + (b[1][i] - v) * k);
+  return 'rgba(' + Math.round(c[0]) + ',' + Math.round(c[1]) + ',' + Math.round(c[2]) + ',' + c[3].toFixed(2) + ')';
+}
+
+function spRender() {
+  const r = ((SP.data && SP.data.routes) || []).find((x) => x.route === SP.route);
+  SP.cur = r || null;
+  const range = rsRangeLabel();
+  const section = document.getElementById('servicePerf');
+  if (!section) return;
+  if (!r || !r.visits) {
+    rsSetText('spSubtitle', 'No stop visits recorded for ' + (r ? 'Route ' + r.route : 'any route') + ' \u00b7 ' + range);
+    if (charts.loadProfile) { charts.loadProfile.data.labels = []; charts.loadProfile.data.datasets.forEach((d) => { d.data = []; }); charts.loadProfile.update(); }
+    if (charts.gapByHour) { charts.gapByHour.data.labels = []; charts.gapByHour.data.datasets[0].data = []; charts.gapByHour.update(); }
+    spSetHtml('spHeat', '<div class="sp-empty">No data in this period</div>');
+    spSetHtml('spGapBody', '');
+    ['spPlf', 'spFull', 'spBusy', 'spGapTyp', 'spWait', 'spOnTarget'].forEach((id) => rsSetText(id, '--'));
+    const bc = document.getElementById('spBusiest'); if (bc) bc.hidden = true;
+    return;
+  }
+  const cap = r.load.capacity;
+  rsSetText('spSubtitle', 'Route ' + r.route + (rsRouteShortName(STOPS_REGISTRY && STOPS_REGISTRY[r.route] || {}) ? ' \u00b7 ' + rsRouteShortName(STOPS_REGISTRY[r.route]) : '') + ' \u00b7 ' + range + ' \u00b7 ' + r.visits.toLocaleString() + ' stop visits');
+
+  // ---- Load profile ----
+  const st = r.load.stops;
+  if (charts.loadProfile) {
+    const ch = charts.loadProfile;
+    ch.$spCap = cap;
+    ch.data.labels = st.map((s) => { const l = spStopLabel(s.name); return l.length > 18 ? l.replace(/ \(return\)$/, '').split(/\s+(?=\S+$)/).concat(/\(return\)$/.test(l) ? ['(return)'] : []) : l; });
+    ch.data.datasets[0].data = st.map((s) => s.avg_load);
+    ch.data.datasets[1].data = st.map((s) => s.max_load);
+    ch.data.datasets[2].data = st.map((s) => s.avg_on);
+    ch.data.datasets[3].data = st.map((s) => s.avg_off);
+    ch.options.scales.y.suggestedMax = cap + 2;
+    ch.update();
+  }
+  const b = r.load.stops[r.load.busiest];
+  const bc = document.getElementById('spBusiest');
+  if (bc && b) {
+    const next = st[(r.load.busiest + 1) % st.length];
+    bc.hidden = false;
+    bc.innerHTML = 'Busiest point: leaving <b>' + escapeHtml(spStopLabel(b.name)) + '</b>' + (next ? ' towards ' + escapeHtml(spStopLabel(next.name)) : '')
+      + '<br>' + (Math.round(b.avg_load * 10) / 10) + ' on board on average (' + Math.round((b.avg_load / cap) * 100) + '% of ' + cap + ' seats), up to ' + b.max_load;
+  }
+  rsSetText('spLoadSub', 'Average on board leaving each stop, in the order the bus drives \u00b7 bars show people getting on and off per visit');
+
+  // ---- Crowding ----
+  const c = r.crowding;
+  spSetHtml('spPlf', c.peak_load_factor == null ? '--' : c.peak_load_factor + '<small>%</small>');
+  rsSetText('spPlfSub', 'fullest point of each loop \u00b7 ' + c.loops.toLocaleString() + ' loops');
+  spTone('spPlf', c.peak_load_factor >= 85 ? 'bad' : c.peak_load_factor >= 65 ? 'warn' : 'good');
+  spSetHtml('spFull', c.loops_full.toLocaleString());
+  rsSetText('spFullSub', c.loops ? Math.round((c.loops_full / c.loops) * 100) + '% of loops \u00b7 ' + c.loops_busy + ' reached 80%+' : '--');
+  spTone('spFull', c.loops && c.loops_full / c.loops > 0.1 ? 'bad' : c.loops_full ? 'warn' : 'good');
+  spSetHtml('spBusy', c.busy_hours == null ? '--' : spMin(c.busy_hours) + '<small>h</small>');
+  rsSetText('spBusySub', c.busy_share == null ? '--' : c.busy_share + '% of ' + spMin(c.service_hours) + 'h in service');
+  spTone('spBusy', c.busy_share >= 20 ? 'bad' : c.busy_share >= 5 ? 'warn' : 'good');
+  rsSetText('spCrowdSub', 'Against a capacity of ' + cap + ' \u00b7 ' + range);
+  const hours = c.heat.hours;
+  const heat = document.getElementById('spHeat');
+  if (heat) {
+    heat.style.gridTemplateColumns = '34px repeat(' + hours.length + ', minmax(0, 1fr))';
+    let h = '<div></div>' + hours.map((x) => '<div class="h-lab">' + (x % 3 === 0 ? String(x).padStart(2, '0') : '') + '</div>').join('');
+    c.heat.days.forEach((d, di) => {
+      h += '<div class="d-lab">' + d + '</div>';
+      hours.forEach((hr) => {
+        const v = c.heat.avg[di][hr]; const pk = c.heat.peak[di][hr];
+        const tip = d + ' ' + String(hr).padStart(2, '0') + ':00 \u2013 ' + (v == null ? 'no service' : 'average ' + v + '% full, fullest ' + pk + '%');
+        h += '<div class="cell" style="background:' + spHeatColor(v) + '" title="' + tip + '">' + (v == null ? '' : v) + '</div>';
+      });
+    });
+    heat.innerHTML = h;
+  }
+
+  // ---- Time between buses ----
+  const g = r.gaps;
+  spSetHtml('spGapTyp', g.median == null ? '--' : spMin(g.median) + '<small>min</small>');
+  rsSetText('spGapTypSub', g.target ? 'timetable every ' + spMin(g.target) + ' min' : 'no timetable set');
+  spTone('spGapTyp', g.target && g.median != null ? (g.median <= g.target + 2 ? 'good' : g.median <= g.target + 5 ? 'warn' : 'bad') : null);
+  spSetHtml('spWait', g.wait == null ? '--' : spMin(g.wait) + '<small>min</small>');
+  spTone('spWait', null);
+  spSetHtml('spOnTarget', g.on_target == null ? '--' : g.on_target + '<small>%</small>');
+  rsSetText('spOnTargetSub', g.target ? 'within ' + spMin(g.target + 5) + ' min \u00b7 ' + g.count.toLocaleString() + ' gaps' : '--');
+  spTone('spOnTarget', g.on_target == null ? null : g.on_target >= 90 ? 'good' : g.on_target >= 75 ? 'warn' : 'bad');
+  rsSetText('spGapSub', (g.buses > 1 ? g.buses + ' buses' : 'One bus') + ' on this route \u00b7 ' + (g.buses > 1 && g.bunched != null ? g.bunched + ' bunched arrivals \u00b7 ' : '') + 'loop takes ' + spMin(r.loops.median) + ' min typically (timetable ' + spMin(r.loops.scheduled) + ')');
+  if (charts.gapByHour) {
+    const ch = charts.gapByHour;
+    const hrs = []; for (let i = 0; i < 24; i++) if (g.by_hour[i] != null) hrs.push(i);
+    ch.$spTarget = g.target;
+    ch.data.labels = hrs.map((x) => String(x).padStart(2, '0'));
+    ch.data.datasets[0].data = hrs.map((x) => g.by_hour[x]);
+    ch.data.datasets[0].backgroundColor = hrs.map((x) => {
+      const v = g.by_hour[x];
+      if (!g.target) return 'rgba(56,189,248,0.8)';
+      return v <= g.target + 2 ? 'rgba(74,222,128,0.75)' : v <= g.target + 5 ? 'rgba(251,191,36,0.85)' : 'rgba(248,113,113,0.9)';
+    });
+    ch.options.scales.y.suggestedMax = g.target ? g.target * 1.4 : undefined;
+    ch.update();
+  }
+  spSetHtml('spGapBody', g.by_stop.map((s) => {
+    const tone = s.on_target == null ? '' : s.on_target >= 90 ? '#4ade80' : s.on_target >= 75 ? '#fbbf24' : '#f87171';
+    return '<tr><td style="color:var(--color-text);font-weight:500">' + escapeHtml(spStopLabel(s.name)) + '</td>'
+      + '<td style="text-align:right">' + spMin(s.median) + 'm</td>'
+      + '<td style="text-align:right">' + spMin(s.p90) + 'm</td>'
+      + '<td style="text-align:right">' + spMin(s.wait) + 'm</td>'
+      + '<td style="text-align:right;color:' + tone + ';font-weight:600">' + (s.on_target == null ? '--' : s.on_target + '%') + '</td></tr>';
+  }).join(''));
+}
