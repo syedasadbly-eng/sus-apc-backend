@@ -4394,3 +4394,31 @@ html[data-skin="glossy-platinum"][data-theme] #view-welfare-console .wc-top-weat
 .pb-stop.pb-stop-visited .pb-stop-ring { opacity: 1; background: var(--c, #7c3aed); }
 .pb-stop.pb-stop-here .pb-stop-ring { opacity: 1; background: var(--c, #7c3aed); transform: scale(1.35); box-shadow: 0 0 0 4px rgba(255,255,255,0.85), 0 0 0 7px var(--c, #7c3aed); }
 @media (prefers-reduced-motion: reduce) { .pb-bus.pb-bus-stopped .pb-bus-dot::after { animation: none; opacity: 0.6; } }
+
+/* ===== ridership-charts-v2: clean trend, route trends, weekday compare ===== */
+.ridership-premium .rid-legend { display: flex; flex-wrap: wrap; gap: 8px 16px; font: 500 12.5px/1.2 Inter, system-ui, sans-serif; color: #c9cad8; align-items: center; justify-content: flex-end; }
+.rid-lg i.rid-lg-line { height: 3px; width: 20px; background: #f4f5fb; }
+.rid-lg i.rid-lg-dash { width: 20px; border-top: 2px dashed rgba(201,202,216,0.6); }
+.rid-lg i.rid-lg-avg { height: 0; width: 20px; border-top: 2px dashed; border-radius: 0; background: none; }
+.rid-lg i.rid-lg-open { width: 10px; height: 10px; border-radius: 50%; border: 2px solid #f4f5fb; background: transparent; }
+.ridership-premium .ridership-hero .chart-feature-canvas { height: 400px !important; }
+.rid-rt-list { display: flex; flex-direction: column; gap: 14px; padding: 16px 20px 20px; min-height: 300px; }
+.rid-rt-card { position: relative; border: 1px solid rgba(255,255,255,0.07); border-radius: 14px; padding: 14px 16px 10px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--rc) 9%, transparent) 0%, rgba(255,255,255,0.015) 100%); overflow: hidden; }
+.rid-rt-card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--rc); }
+.rid-rt-head { display: flex; align-items: center; gap: 12px; }
+.rid-rt-badge { min-width: 38px; height: 26px; padding: 0 8px; border-radius: 8px; background: var(--rc); color: #fff; font: 700 13px/26px Inter, system-ui, sans-serif; text-align: center; text-shadow: 0 1px 1px rgba(0,0,0,0.25); }
+.rid-rt-name { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.rid-rt-name b { font: 600 14px/1.25 Inter, system-ui, sans-serif; color: #f1f2f7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rid-rt-name span { font-size: 12px; color: #9a9cb0; margin-top: 2px; }
+.rid-rt-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 12px 0 4px; }
+.rid-rt-stats div { display: flex; flex-direction: column; }
+.rid-rt-stats b { font: 700 18px/1.2 Inter, system-ui, sans-serif; color: #fff; font-variant-numeric: tabular-nums; }
+.rid-rt-stats span { font-size: 11.5px; color: #8b8ea5; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rid-rt-spark { height: 84px; margin: 0 -4px; }
+.rid-empty { color: #8b8ea5; font-size: 13px; padding: 24px 0; text-align: center; }
+html[data-skin="glossy-platinum"][data-theme] .rid-rt-card { border-color: rgba(217,184,102,0.16); }
+.ridership-premium .ridership-row-2 > .chart-panel { display: flex; flex-direction: column; }
+.ridership-premium .ridership-row-2 .rid-share-body { flex: 1; }
+.ridership-premium .ridership-row-2 .chart-header { align-items: flex-start; gap: 12px; }
+.ridership-premium #ridDowLegend { flex-direction: column; align-items: flex-start; gap: 6px; flex-shrink: 0; }

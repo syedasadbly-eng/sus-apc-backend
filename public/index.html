@@ -780,23 +780,7 @@
         </div>
       </div>
 
-      <!-- Busiest times: day x hour -->
-      <div class="chart-grid" style="margin-top:var(--space-5)">
-        <div class="chart-panel ridership-companion">
-          <div class="chart-header">
-            <div>
-              <div class="chart-title">Busiest Times</div>
-              <div class="chart-subtitle" id="ridHeatSubtitle">Average boardings by day and hour</div>
-            </div>
-            <div class="rid-heat-scale"><span>Quiet</span><span class="rid-heat-grad"></span><span>Busy</span></div>
-          </div>
-          <div class="chart-body" style="height:330px">
-            <canvas id="chartRidHeat"></canvas>
-          </div>
-        </div>
-      </div>
-
-      <!-- Route share + day of week -->
+      <!-- Routes: share + per-route trends -->
       <div class="chart-grid cols-2 ridership-row-2" style="margin-top:var(--space-5)">
         <div class="chart-panel ridership-companion">
           <div class="chart-header">
@@ -813,18 +797,28 @@
         <div class="chart-panel ridership-companion">
           <div class="chart-header">
             <div>
-              <div class="chart-title">Ridership by Day of Week</div>
-              <div class="chart-subtitle" id="ridDowSubtitle">Average boardings per day</div>
+              <div class="chart-title">Route Trends</div>
+              <div class="chart-subtitle" id="ridRouteTrendsSubtitle">Boardings per day for each route</div>
             </div>
           </div>
-          <div class="chart-body chart-body-companion">
-            <canvas id="chartDayOfWeek" class="chart-companion-canvas"></canvas>
-          </div>
+          <div class="chart-body rid-rt-list" id="ridRouteTrends"></div>
         </div>
       </div>
 
-      <!-- Boardings vs Alightings -->
-      <div class="chart-grid" style="margin-top:var(--space-5)">
+      <!-- Weekday pattern + boardings vs alightings -->
+      <div class="chart-grid cols-2 ridership-row-2" style="margin-top:var(--space-5)">
+        <div class="chart-panel ridership-companion">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Day of Week</div>
+              <div class="chart-subtitle" id="ridDowSubtitle">Average boardings on each weekday</div>
+            </div>
+            <div class="rid-legend" id="ridDowLegend"></div>
+          </div>
+          <div class="chart-body" style="height:300px;padding:12px 18px 16px">
+            <canvas id="chartDayOfWeek"></canvas>
+          </div>
+        </div>
         <div class="chart-panel ridership-companion">
           <div class="chart-header">
             <div>
@@ -832,8 +826,24 @@
               <div class="chart-subtitle" id="boardAlightSubtitle">Daily balance across the selected period</div>
             </div>
           </div>
-          <div class="chart-body" style="height:280px">
+          <div class="chart-body" style="height:300px;padding:4px 18px 16px">
             <canvas id="chartBoardAlightRidership"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Busiest times: day x hour -->
+      <div class="chart-grid" style="margin-top:var(--space-5)">
+        <div class="chart-panel ridership-companion">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Busiest Times</div>
+              <div class="chart-subtitle" id="ridHeatSubtitle">Average boardings by day and hour</div>
+            </div>
+            <div class="rid-heat-scale"><span>Quiet</span><span class="rid-heat-grad"></span><span>Busy</span></div>
+          </div>
+          <div class="chart-body" style="height:330px">
+            <canvas id="chartRidHeat"></canvas>
           </div>
         </div>
       </div>

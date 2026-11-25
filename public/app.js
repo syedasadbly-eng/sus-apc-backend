@@ -2951,29 +2951,46 @@ function initRidership() {
   charts.boardAlight = new Chart(baCtx, {
     type: 'bar',
     data: { labels: [], datasets: [
-      { label: 'Boardings', data: [], backgroundColor: RID_WHITE, hoverBackgroundColor: 'rgba(255,255,255,1)', borderRadius: 8, borderSkipped: false, maxBarThickness: 36 },
-      { label: 'Alightings', data: [], backgroundColor: RID_GOLD, hoverBackgroundColor: 'rgba(232,193,73,1)', borderRadius: 8, borderSkipped: false, maxBarThickness: 36 },
+      { label: 'Boardings', data: [], backgroundColor: 'rgba(244,245,251,0.88)', hoverBackgroundColor: 'rgba(255,255,255,1)', borderRadius: 5, borderSkipped: false, maxBarThickness: 18, categoryPercentage: 0.7, barPercentage: 0.88 },
+      { label: 'Alightings', data: [], backgroundColor: 'rgba(212,175,55,0.85)', hoverBackgroundColor: 'rgba(232,193,73,1)', borderRadius: 5, borderSkipped: false, maxBarThickness: 18, categoryPercentage: 0.7, barPercentage: 0.88 },
     ]},
-    options: companionOpts('Passengers'),
+    plugins: [{ id: 'ridBADensity', beforeUpdate(chart) {
+      // Paired bars for short ranges; two smooth lines once there are many points.
+      const line = (chart.data.labels || []).length > 14;
+      chart.data.datasets.forEach((ds, i) => {
+        const col = i === 0 ? 'rgba(244,245,251,0.92)' : 'rgba(212,175,55,0.9)';
+        ds.type = line ? 'line' : 'bar';
+        ds.borderColor = line ? col : undefined; ds.borderWidth = line ? 2.25 : 0;
+        ds.tension = 0.35; ds.pointRadius = 0; ds.pointHoverRadius = 4; ds.fill = false;
+        ds.pointBackgroundColor = col;
+        if (line && i === 1) ds.borderDash = [5, 4]; else delete ds.borderDash;
+      });
+    } }],
+    options: (() => { const o = companionOpts('Passengers'); o.scales.x.ticks.maxRotation = 0; o.scales.x.grid = { display: false };
+      o.scales.y.title.display = false; o.scales.y.ticks.maxTicksLimit = 6; o.scales.y.ticks.font = { size: 12, family: 'Inter' }; o.scales.y.ticks.color = '#9a9cb0';
+      o.plugins.legend.position = 'top'; o.plugins.legend.align = 'end'; o.plugins.legend.labels.font = { size: 12.5, family: 'Inter', weight: '500' }; o.plugins.legend.labels.boxWidth = 8; o.plugins.legend.labels.boxHeight = 8; o.plugins.legend.labels.padding = 14;
+      return o; })(),
   });
 
-  // Day of week: indigo-amethyst weekdays, gold weekends
+  // Day of week: this period (accent) beside the previous period (muted)
   const dowCtx = document.getElementById('chartDayOfWeek').getContext('2d');
   charts.dayOfWeek = new Chart(dowCtx, {
     type: 'bar',
-    data: { labels: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'], datasets: [{
-      label: 'Avg Passengers', data: [0,0,0,0,0,0,0],
-      backgroundColor: [RID_PURPLE, RID_PURPLE, RID_PURPLE, RID_PURPLE, RID_PURPLE, RID_GOLD, RID_GOLD],
-      hoverBackgroundColor: ['rgba(159,138,221,0.95)','rgba(159,138,221,0.95)','rgba(159,138,221,0.95)','rgba(159,138,221,0.95)','rgba(159,138,221,0.95)','rgba(232,193,73,1)','rgba(232,193,73,1)'],
-      borderRadius: 10, borderSkipped: false, maxBarThickness: 64,
-    }] },
-    options: { ...companionOpts('Avg Passengers'),
+    data: { labels: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'], datasets: [
+      { label: 'This period', data: [0,0,0,0,0,0,0], backgroundColor: 'rgba(167,139,250,0.62)', borderRadius: 6, borderSkipped: false, maxBarThickness: 34, categoryPercentage: 0.72, barPercentage: 0.9, order: 1 },
+      { label: 'Previous period', data: [], backgroundColor: 'rgba(201,202,216,0.22)', hoverBackgroundColor: 'rgba(201,202,216,0.32)', borderRadius: 6, borderSkipped: false, maxBarThickness: 34, categoryPercentage: 0.72, barPercentage: 0.9, order: 2, hidden: true },
+    ] },
+    options: { ...companionOpts('Avg boardings'),
       plugins: {
         legend: { display: false },
+        datalabels: { display: (c) => c.datasetIndex === 0 && c.dataset.data[c.dataIndex] > 0, anchor: 'end', align: 'top', offset: 2, color: '#c9cad8', font: { family: 'Inter', size: 11, weight: '600' }, formatter: (v) => Number(v).toLocaleString() },
         tooltip: { ...tooltipDefaults(),
-          callbacks: { label: (c) => ' ' + Number(c.parsed.y).toLocaleString() + ' avg boardings' }
+          callbacks: { label: (c) => ' ' + c.dataset.label + ': ' + (c.parsed.y == null ? 'no data' : Number(c.parsed.y).toLocaleString() + ' avg boardings') }
         }
-      }
+      },
+      scales: { ...companionOpts('').scales,
+        x: { grid: { display: false }, border: { color: 'rgba(255,255,255,0.08)' }, ticks: { color: '#c9cad8', font: { size: 12, family: 'Inter', weight: '600' }, padding: 8 } },
+        y: { beginAtZero: true, grace: '10%', grid: { color: 'rgba(255,255,255,0.05)', drawTicks: false }, border: { display: false }, ticks: { color: '#9a9cb0', font: { size: 12, family: 'Inter' }, padding: 8, maxTicksLimit: 6, callback: (v) => Number(v).toLocaleString() } } },
     },
   });
 
@@ -3032,139 +3049,318 @@ function ridDelta(p) {
   return `<span class="rid-delta ${cls}">${arrow} ${Math.abs(p)}%</span>`;
 }
 
+// Theme-aware accents: champagne gold on Glossy Platinum, violet on dark.
+function ridIsGlossy() { return document.documentElement.getAttribute('data-skin') === 'glossy-platinum'; }
+function ridAccent() { return ridIsGlossy() ? '#d9b866' : '#a78bfa'; }
+const RID_MAIN = '#f4f5fb';          // "this period" line: near-white platinum
+const RID_PREV = 'rgba(201,202,216,0.42)';
+const RID_PREV_BAR = 'rgba(201,202,216,0.22)';
+const RID_PANEL_BG = '#14151d';
+
+// Average line with a pill label, drawn on top of the trend.
+const ridAvgPlugin = {
+  id: 'ridAvgLine',
+  afterDatasetsDraw(chart) {
+    const m = chart._ridMeta; if (!m || !m.avg) return;
+    const { ctx, chartArea: a, scales: { y } } = chart; if (!a || !y) return;
+    const py = y.getPixelForValue(m.avg); if (py < a.top || py > a.bottom) return;
+    const col = ridAccent();
+    ctx.save();
+    ctx.strokeStyle = ridAlpha(col, 0.85); ctx.lineWidth = 1.5; ctx.setLineDash([6, 6]);
+    ctx.beginPath(); ctx.moveTo(a.left, py); ctx.lineTo(a.right, py); ctx.stroke();
+    ctx.setLineDash([]);
+    const txt = 'Avg ' + Math.round(m.avg).toLocaleString();
+    ctx.font = '600 11.5px Inter, system-ui, sans-serif';
+    const w = ctx.measureText(txt).width + 16, h = 22, x = a.right + 8, yy = Math.max(a.top - 4, py - h / 2);
+    ctx.fillStyle = ridAlpha(col, 0.16); ctx.strokeStyle = ridAlpha(col, 0.6); ctx.lineWidth = 1;
+    ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, yy, w, h, 11); else ctx.rect(x, yy, w, h); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = col; ctx.textBaseline = 'middle'; ctx.fillText(txt, x + 8, yy + h / 2 + 0.5);
+    ctx.restore();
+  },
+};
+// Soft vertical gradient under a line.
+function ridGradient(hex, top, bottom) {
+  return (c) => {
+    const { ctx, chartArea } = c.chart; if (!chartArea) return 'transparent';
+    const g = ctx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+    g.addColorStop(0, ridAlpha(hex, top)); g.addColorStop(1, ridAlpha(hex, bottom));
+    return g;
+  };
+}
+
 function initRidershipTrendChart() {
   const el = document.getElementById('chartRidershipTrend');
   if (!el) return;
-  const tick = { color: '#c9cad8', font: { size: 12, family: 'Inter', weight: '500' }, padding: 8 };
+  const tick = { color: '#9a9cb0', font: { size: 12, family: 'Inter', weight: '500' }, padding: 10 };
   charts.ridershipTrend = new Chart(el.getContext('2d'), {
-    type: 'bar',
+    type: 'line',
     data: { labels: [], datasets: [] },
+    plugins: [ridAvgPlugin],
     options: {
       responsive: true, maintainAspectRatio: false,
+      layout: { padding: { top: 26, right: 92, left: 4 } },
       interaction: { mode: 'index', intersect: false },
-      animation: { duration: 700, easing: 'easeOutQuart' },
-      elements: { point: { radius: 0, hoverRadius: 4 } },
+      animation: { duration: 750, easing: 'easeOutQuart' },
       plugins: {
         legend: { display: false },
-        tooltip: { ...tooltipDefaults(), padding: 12,
-          titleFont: { family: 'Inter', size: 13, weight: '600' }, bodyFont: { family: 'Inter', size: 12 },
+        datalabels: {
+          display: (c) => c.datasetIndex === 0 && (c.chart._ridMeta || {}).labels && c.dataset.data[c.dataIndex] != null,
+          align: 'top', anchor: 'end', offset: 6, clamp: true,
+          color: '#e6e7ef', font: { family: 'Inter', size: 11.5, weight: '600' },
+          formatter: (v) => Number(v || 0).toLocaleString(),
+        },
+        tooltip: { ...tooltipDefaults(), padding: 12, displayColors: false,
+          titleFont: { family: 'Inter', size: 13, weight: '600' }, bodyFont: { family: 'Inter', size: 12.5 }, footerFont: { family: 'Inter', size: 12, weight: '600' },
+          filter: (i) => i.datasetIndex === 0 || i.datasetIndex === 1,
           callbacks: {
-            label: (c) => ' ' + c.dataset.label + ': ' + Number(c.parsed.y || 0).toLocaleString(),
+            title: (items) => { const m = charts.ridershipTrend._ridMeta || {}; const i = items[0] ? items[0].dataIndex : 0; return (m.titles && m.titles[i]) || (items[0] && items[0].label) || ''; },
+            label: (c) => {
+              const m = charts.ridershipTrend._ridMeta || {};
+              if (c.datasetIndex === 0) return 'Boardings: ' + Number(c.parsed.y || 0).toLocaleString() + (m.partialIdx === c.dataIndex ? '  (so far)' : m.part && m.part.has(c.dataIndex) ? '  (part ' + (m.unit || 'period') + ')' : '');
+              return 'Previous: ' + Number(c.parsed.y || 0).toLocaleString() + (m.prevTitles && m.prevTitles[c.dataIndex] ? '  (' + m.prevTitles[c.dataIndex] + ')' : '');
+            },
             footer: (items) => {
-              const tot = items.filter((i) => i.dataset.stack === 'routes').reduce((a, i) => a + (i.parsed.y || 0), 0);
-              const meta = charts.ridershipTrend && charts.ridershipTrend._ridMeta;
-              const idx = items[0] ? items[0].dataIndex : -1;
-              const partial = meta && meta.partialIdx === idx ? ' (today so far)' : '';
-              return 'Total ' + tot.toLocaleString() + partial;
+              const m = charts.ridershipTrend._ridMeta || {};
+              const cur = items.find((i) => i.datasetIndex === 0), prev = items.find((i) => i.datasetIndex === 1);
+              if (!cur || !prev || m.partialIdx === cur.dataIndex) return '';
+              const p = ridPct(cur.parsed.y || 0, prev.parsed.y || 0);
+              return p == null ? '' : (p > 0 ? '\u25B2 ' : p < 0 ? '\u25BC ' : '') + Math.abs(p) + '% vs previous';
             },
           } },
       },
       scales: {
-        x: { stacked: true, grid: { display: false }, ticks: { ...tick, autoSkip: true, autoSkipPadding: 14, maxRotation: 0 } },
-        y: { stacked: true, beginAtZero: true, grid: { color: 'rgba(255,255,255,0.06)', drawTicks: false }, border: { display: false },
-          ticks: { ...tick, callback: (v) => Number(v).toLocaleString() } },
+        x: { grid: { display: false }, border: { color: 'rgba(255,255,255,0.08)' }, ticks: { ...tick, autoSkip: true, autoSkipPadding: 18, maxRotation: 0 } },
+        y: { beginAtZero: true, grace: '12%', grid: { color: 'rgba(255,255,255,0.05)', drawTicks: false }, border: { display: false },
+          ticks: { ...tick, maxTicksLimit: 6, callback: (v) => Number(v).toLocaleString() } },
       },
     },
   });
 }
 
+// Draws the trend: one clear line for this period, an optional faint
+// previous-period line and a labelled average. `opts` = { titles, prev,
+// prevTitles, partialIdx, avg, unit }.
+function ridDrawTrend(labels, series, opts) {
+  const ch = charts.ridershipTrend; if (!ch) return;
+  opts = opts || {};
+  const n = (series || []).length, pi = opts.partialIdx == null ? -1 : opts.partialIdx;
+  const part = new Set([pi, ...(opts.partial || [])].filter((i) => i >= 0));
+  const dense = n > 20;
+  // A second line over many points is noise; compare via the chips instead.
+  if (n > 14) opts.prev = null;
+  const ds = [{
+    label: 'This period', data: series || [], order: 1,
+    borderColor: RID_MAIN, borderWidth: 2.75, tension: 0.35, cubicInterpolationMode: 'monotone',
+    fill: 'origin', backgroundColor: ridGradient(ridAccent(), 0.32, 0.0),
+    pointRadius: (series || []).map((_, i) => (dense ? (part.has(i) ? 4 : 0) : (part.has(i) ? 5 : 3.5))),
+    pointHoverRadius: 6, pointBorderWidth: 2,
+    pointBackgroundColor: (series || []).map((_, i) => (part.has(i) ? RID_PANEL_BG : RID_MAIN)),
+    pointBorderColor: RID_MAIN,
+    // Today's partial total is not joined to the line, so it doesn't read as a drop.
+    segment: { borderColor: (c) => (part.has(c.p0DataIndex) || part.has(c.p1DataIndex) ? 'transparent' : undefined), backgroundColor: (c) => (part.has(c.p0DataIndex) || part.has(c.p1DataIndex) ? 'transparent' : undefined) },
+  }];
+  if (opts.prev) ds.push({
+    label: 'Previous period', data: opts.prev, order: 2,
+    borderColor: RID_PREV, borderWidth: 1.75, borderDash: [4, 4], tension: 0.35, cubicInterpolationMode: 'monotone',
+    fill: false, pointRadius: 0, pointHoverRadius: 4, pointBackgroundColor: RID_PREV,
+  });
+  ch.data.labels = labels || [];
+  ch.data.datasets = ds;
+  ch._ridMeta = { partialIdx: pi, part, titles: opts.titles, prevTitles: opts.prevTitles, avg: opts.avg, unit: opts.unit, labels: n > 0 && n <= 14 };
+  ch.update('active');
+  const lg = document.getElementById('ridTrendLegend');
+  if (lg) lg.innerHTML = n ? '<span class="rid-lg"><i class="rid-lg-line"></i>This period</span>'
+    + (opts.prev ? '<span class="rid-lg"><i class="rid-lg-dash"></i>Previous period</span>' : '')
+    + (opts.avg ? `<span class="rid-lg"><i class="rid-lg-avg" style="border-color:${ridAccent()}"></i>Average</span>` : '')
+    + (part.size ? '<span class="rid-lg"><i class="rid-lg-open"></i>' + (pi >= 0 && part.size === 1 ? 'In progress' : 'Incomplete') + '</span>' : '') : '';
+}
+
 // Single-series fallback (yearly / live-only).
 function ridTrendSimple(labels, series, subtitle, partialIdx) {
-  const ch = charts.ridershipTrend; if (!ch) return;
-  const pi = partialIdx == null ? -1 : partialIdx;
-  ch.data.labels = labels || [];
-  ch.data.datasets = [{ type: 'bar', label: 'Boardings', stack: 'routes', data: series || [],
-    backgroundColor: (series || []).map((_, i) => (i === pi ? 'rgba(139,116,209,0.4)' : 'rgba(139,116,209,0.9)')),
-    borderColor: (series || []).map((_, i) => (i === pi ? 'rgba(139,116,209,1)' : 'transparent')), borderWidth: 1.5,
-    borderRadius: 6, borderSkipped: false, maxBarThickness: 42 }];
-  ch._ridMeta = { partialIdx: pi };
-  ch.update('active');
-  const lg = document.getElementById('ridTrendLegend'); if (lg) lg.innerHTML = '';
+  const vals = (series || []).filter((v, i) => i !== partialIdx && v > 0);
+  const avg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+  ridDrawTrend(labels || [], series || [], { partialIdx, avg, unit: 'month' });
   const chips = document.getElementById('ridTrendChips'); if (chips) chips.innerHTML = '';
   if (subtitle) { const s = document.getElementById('ridershipTrendSubtitle'); if (s) s.textContent = subtitle; }
+}
+
+// Buckets for a date range: daily / weekly (Mon start) / monthly.
+function ridBucketsFor(dates, viewMode) {
+  const keyOf = (dt) => {
+    if (viewMode === 'daily') return dt;
+    if (viewMode === 'monthly' || viewMode === 'yearly') return dt.slice(0, 7);
+    const d = new Date(dt + 'T12:00:00Z'); const day = d.getUTCDay() || 7; d.setUTCDate(d.getUTCDate() - (day - 1)); return d.toISOString().slice(0, 10);
+  };
+  const keys = [...new Set(dates.map(keyOf))];
+  const idxOf = {}; keys.forEach((k, i) => { idxOf[k] = i; });
+  const fmt = (k, long) => {
+    if (viewMode === 'daily') return new Date(k + 'T12:00:00Z').toLocaleDateString('en-GB', { timeZone: 'UTC', weekday: long || dates.length <= 14 ? 'short' : undefined, day: 'numeric', month: 'short' });
+    if (viewMode === 'weekly') return (long ? 'Week of ' : 'w/c ') + new Date(k + 'T12:00:00Z').toLocaleDateString('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'short' });
+    return new Date(k + '-15T12:00:00Z').toLocaleDateString('en-GB', { timeZone: 'UTC', month: long ? 'long' : 'short', year: 'numeric' });
+  };
+  return { keys, keyOf, bucketOf: (dt) => idxOf[keyOf(dt)], labels: keys.map((k) => fmt(k, false)), titles: keys.map((k) => fmt(k, true)) };
 }
 
 function renderRidershipHero(allRows, viewMode, fromDate, now, windowDays) {
   const ch = charts.ridershipTrend; if (!ch) return;
   const from = displayDateStr(fromDate), to = displayDateStr(now);
-  const buses = [...new Set(allRows.map((r) => String(r.bus_id)))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-  const byDateBus = {}; const byDate = {};
-  allRows.forEach((r) => {
-    (byDateBus[r.date] = byDateBus[r.date] || {})[r.bus_id] = ((byDateBus[r.date] || {})[r.bus_id] || 0) + (r.total_in || 0);
-    byDate[r.date] = (byDate[r.date] || 0) + (r.total_in || 0);
-  });
-  // Dates in the current window and the previous window of equal length.
+  const byDate = {};
+  allRows.forEach((r) => { byDate[r.date] = (byDate[r.date] || 0) + (r.total_in || 0); });
   const dates = []; for (const d = new Date(fromDate); d <= now; d.setDate(d.getDate() + 1)) dates.push(displayDateStr(d));
-  const prevDates = dates.map((dt) => { const d = new Date(dt + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - windowDays); return d.toISOString().slice(0, 10); });
-  const partialIdx = dates.indexOf(to);
-
-  let labels, buckets, prevSeries = null, avgSeries = null, unit = 'day';
-  if (viewMode === 'daily') {
-    labels = dates.map((dt, i) => (i === partialIdx ? 'Today' : new Date(dt + 'T12:00:00Z').toLocaleDateString('en-GB', { timeZone: 'UTC', weekday: dates.length <= 14 ? 'short' : undefined, day: 'numeric', month: 'short' })));
-    buckets = dates.map((dt) => byDateBus[dt] || {});
-    prevSeries = prevDates.map((dt) => byDate[dt] || 0);
-    // Trailing 7-day average over complete days.
-    avgSeries = dates.map((dt, i) => {
-      if (i === partialIdx) return null;
-      let sum = 0, n = 0;
-      for (let k = 0; k < 7; k++) { const d = new Date(dt + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - k); const key = d.toISOString().slice(0, 10); if (key in byDate || key >= from) { sum += byDate[key] || 0; n++; } }
-      return n ? Math.round(sum / n) : null;
-    });
-  } else {
-    unit = viewMode === 'weekly' ? 'week' : 'month';
-    const keyOf = (dt) => {
-      if (viewMode === 'monthly') return dt.slice(0, 7);
-      const d = new Date(dt + 'T12:00:00Z'); const day = d.getUTCDay() || 7; d.setUTCDate(d.getUTCDate() - (day - 1)); return d.toISOString().slice(0, 10);
-    };
-    const keys = [...new Set(dates.map(keyOf))];
-    buckets = keys.map(() => ({}));
-    dates.forEach((dt) => { const bi = keys.indexOf(keyOf(dt)); Object.entries(byDateBus[dt] || {}).forEach(([b, v]) => { buckets[bi][b] = (buckets[bi][b] || 0) + v; }); });
-    labels = keys.map((k) => viewMode === 'monthly'
-      ? new Date(k + '-15T12:00:00Z').toLocaleDateString('en-GB', { timeZone: 'UTC', month: 'short', year: 'numeric' })
-      : 'w/c ' + new Date(k + 'T12:00:00Z').toLocaleDateString('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'short' }));
-  }
-
-  const lastIdx = viewMode === 'daily' ? partialIdx : buckets.length - 1;
-  const datasets = buses.map((b, i) => {
-    const col = ridRouteColor(b, i);
-    return {
-      type: 'bar', label: 'Bus ' + b, stack: 'routes', order: 2,
-      data: buckets.map((bk) => bk[b] || 0),
-      backgroundColor: buckets.map((_, j) => ridAlpha(col, j === lastIdx ? 0.4 : 0.9)),
-      borderColor: buckets.map((_, j) => (j === lastIdx ? col : 'transparent')),
-      borderWidth: buckets.map((_, j) => (j === lastIdx ? 1.5 : 0)),
-      borderRadius: 4, borderSkipped: false, maxBarThickness: 46,
-    };
+  const shift = (dt) => { const d = new Date(dt + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - windowDays); return d.toISOString().slice(0, 10); };
+  const prevDates = dates.map(shift);
+  const B = ridBucketsFor(dates, viewMode);
+  const cur = B.keys.map(() => 0), prev = B.keys.map(() => 0), daysIn = B.keys.map(() => 0);
+  const prevFirst = B.keys.map(() => null);
+  dates.forEach((dt, i) => {
+    const b = B.bucketOf(dt);
+    cur[b] += byDate[dt] || 0; daysIn[b]++;
+    if (dt !== to) { prev[b] += byDate[prevDates[i]] || 0; if (!prevFirst[b]) prevFirst[b] = prevDates[i]; }
   });
-  if (avgSeries) datasets.push({ type: 'line', label: '7-day average', stack: 'avg', order: 1, data: avgSeries, borderColor: '#ffffff', borderWidth: 2.5, pointRadius: 0, pointStyle: false, pointHoverRadius: 4, tension: 0.3, spanGaps: true });
-  if (prevSeries) datasets.push({ type: 'line', label: 'Previous ' + windowDays + ' days', stack: 'prev', order: 0, data: prevSeries, borderColor: 'rgba(201,202,216,0.55)', borderDash: [6, 5], borderWidth: 2, pointRadius: 0, pointStyle: false, pointHoverRadius: 3, tension: 0 });
-  ch.data.labels = labels; ch.data.datasets = datasets; ch._ridMeta = { partialIdx: lastIdx };
-  ch.update('active');
-
-  // Legend
-  const lg = document.getElementById('ridTrendLegend');
-  if (lg) lg.innerHTML = buses.map((b, i) => `<span class="rid-lg"><i style="background:${ridRouteColor(b, i)}"></i>Bus ${escapeHtml(b)}</span>`).join('')
-    + (avgSeries ? '<span class="rid-lg"><i class="rid-lg-line"></i>7-day average</span>' : '')
-    + (prevSeries ? '<span class="rid-lg"><i class="rid-lg-dash"></i>Previous period</span>' : '');
+  // Latest bucket is still filling up while it contains today.
+  const partialIdx = B.bucketOf(to);
+  const fullLen = (k) => (viewMode === 'weekly' ? 7 : viewMode === 'monthly' ? new Date(Date.UTC(+k.slice(0, 4), +k.slice(5, 7), 0)).getUTCDate() : 1);
+  const partial = B.keys.map((k, i) => (daysIn[i] < fullLen(k) ? i : -1)).filter((i) => i >= 0);
+  // Compare only when the previous period was (almost) fully counted.
+  const prevFull = prevDates.filter((_, i) => dates[i] !== to);
+  const prevCovered = prevFull.filter((dt) => (byDate[dt] || 0) > 0).length;
+  const prevOk = prevFull.length > 0 && prevCovered >= prevFull.length * 0.8;
+  const prevTitles = prevFirst.map((dt) => (dt ? (viewMode === 'daily' ? ridFmtDate(dt) : 'from ' + ridFmtDate(dt)) : ''));
+  // Average per bucket, over complete buckets.
+  const complete = cur.filter((_, i) => i !== partialIdx && !partial.includes(i));
+  const avg = complete.length ? complete.reduce((a, b) => a + b, 0) / complete.length : 0;
+  const unit = viewMode === 'daily' ? 'day' : viewMode === 'weekly' ? 'week' : 'month';
+  ridDrawTrend(B.labels.map((l, i) => (viewMode === 'daily' && i === partialIdx ? 'Today' : l)), cur,
+    { titles: B.titles, prev: prevOk ? prev.map((v, i) => (i === partialIdx || partial.includes(i) ? null : v)) : null, prevTitles, partialIdx, partial, avg, unit });
 
   // Insight chips (complete days only, so today's partial count doesn't skew them)
   const full = dates.filter((dt) => dt !== to);
   const curAvg = full.length ? Math.round(full.reduce((a, dt) => a + (byDate[dt] || 0), 0) / full.length) : 0;
-  const prevFull = prevDates.filter((_, i) => i !== partialIdx);
   const prevAvg = prevFull.length ? Math.round(prevFull.reduce((a, dt) => a + (byDate[dt] || 0), 0) / prevFull.length) : 0;
   let best = null, worst = null;
   full.forEach((dt) => { const v = byDate[dt] || 0; if (!best || v > best.v) best = { dt, v }; if (v > 0 && (!worst || v < worst.v)) worst = { dt, v }; });
   const chips = [];
-  // Only compare when the previous period was (almost) fully counted.
-  const prevCovered = prevFull.filter((dt) => (byDate[dt] || 0) > 0).length;
-  const prevOk = prevFull.length > 0 && prevCovered >= prevFull.length * 0.8;
-  chips.push(`<div class="rid-chip"><div class="rid-chip-lbl">Average per day</div><div class="rid-chip-val">${curAvg.toLocaleString()} ${prevOk ? ridDelta(ridPct(curAvg, prevAvg)) : ''}</div><div class="rid-chip-sub">${prevOk ? `vs ${prevAvg.toLocaleString()} previous ${windowDays} days` : 'no full previous period to compare'}</div></div>`);
+  chips.push(`<div class="rid-chip"><div class="rid-chip-lbl">Average per day</div><div class="rid-chip-val">${curAvg.toLocaleString()} ${prevOk ? ridDelta(ridPct(curAvg, prevAvg)) : ''}</div><div class="rid-chip-sub">${prevOk ? `vs ${prevAvg.toLocaleString()} in the previous ${windowDays} days` : 'no full previous period to compare'}</div></div>`);
   if (best && best.v > 0) chips.push(`<div class="rid-chip"><div class="rid-chip-lbl">Busiest day</div><div class="rid-chip-val">${best.v.toLocaleString()}</div><div class="rid-chip-sub">${ridFmtDate(best.dt)}</div></div>`);
   if (worst) chips.push(`<div class="rid-chip"><div class="rid-chip-lbl">Quietest day</div><div class="rid-chip-val">${worst.v.toLocaleString()}</div><div class="rid-chip-sub">${ridFmtDate(worst.dt)}</div></div>`);
-  if (partialIdx >= 0) chips.push(`<div class="rid-chip rid-chip-live"><div class="rid-chip-lbl"><span class="rid-live-dot"></span>Today so far</div><div class="rid-chip-val">${(byDate[to] || 0).toLocaleString()}</div><div class="rid-chip-sub">day in progress</div></div>`);
+  if (dates.includes(to)) chips.push(`<div class="rid-chip rid-chip-live"><div class="rid-chip-lbl"><span class="rid-live-dot"></span>Today so far</div><div class="rid-chip-val">${(byDate[to] || 0).toLocaleString()}</div><div class="rid-chip-sub">day in progress</div></div>`);
   const cEl = document.getElementById('ridTrendChips'); if (cEl) cEl.innerHTML = chips.join('');
   const sub = document.getElementById('ridershipTrendSubtitle');
-  if (sub) sub.textContent = (unit === 'day' ? 'Daily' : unit === 'week' ? 'Weekly' : 'Monthly') + ' boardings by route \u00b7 ' + ridFmtDate(from) + ' \u2013 ' + ridFmtDate(to) + (lastIdx >= 0 ? ' \u00b7 latest ' + unit + ' in progress (lighter bar)' : '');
+  const fmtY = (dt) => new Date(dt + 'T12:00:00Z').toLocaleDateString('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'short', year: 'numeric' });
+  if (sub) sub.textContent = 'Total boardings per ' + unit + ' \u00b7 ' + (windowDays > 60 ? fmtY(from) + ' \u2013 ' + fmtY(to) : ridFmtDate(from) + ' \u2013 ' + ridFmtDate(to));
+}
+
+// ---- Route trends: one card per route with its own sparkline ----
+function renderRouteTrends(allRows, from, to, viewMode, windowDays, noPrev) {
+  const host = document.getElementById('ridRouteTrends'); if (!host) return;
+  (charts._ridRT || []).forEach((c) => { try { c.destroy(); } catch (e) { /* noop */ } });
+  charts._ridRT = [];
+  const dates = []; for (let d = new Date(from + 'T12:00:00Z'); d.toISOString().slice(0, 10) <= to; d.setUTCDate(d.getUTCDate() + 1)) dates.push(d.toISOString().slice(0, 10));
+  const mode = viewMode === 'yearly' ? 'monthly' : viewMode;
+  const B = ridBucketsFor(dates, mode);
+  const prevFrom = (() => { const d = new Date(from + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - windowDays); return d.toISOString().slice(0, 10); })();
+  const cur = {}, prev = {}, series = {}, byBusDate = {};
+  allRows.forEach((r) => {
+    const b = String(r.bus_id), v = r.total_in || 0;
+    if (r.date >= from && r.date <= to) {
+      cur[b] = (cur[b] || 0) + v;
+      (series[b] = series[b] || B.keys.map(() => 0))[B.bucketOf(r.date)] += v;
+      (byBusDate[b] = byBusDate[b] || {})[r.date] = ((byBusDate[b] || {})[r.date] || 0) + v;
+    } else if (r.date >= prevFrom && r.date < from) prev[b] = (prev[b] || 0) + v;
+  });
+  const prevDays = new Set(allRows.filter((r) => r.date >= prevFrom && r.date < from && (r.total_in || 0) > 0).map((r) => r.date)).size;
+  if (prevDays < windowDays * 0.8) noPrev = true;
+  const today = displayDateStr();
+  const fullDays = dates.filter((d) => d !== today).length || 1;
+  const buses = Object.keys(cur).sort((a, b) => cur[b] - cur[a]);
+  const total = buses.reduce((a, b) => a + cur[b], 0);
+  const sub = document.getElementById('ridRouteTrendsSubtitle');
+  if (sub) sub.textContent = 'Boardings per ' + (mode === 'daily' ? 'day' : mode === 'weekly' ? 'week' : 'month') + ' for each route \u00b7 same scale';
+  if (!buses.length) { host.innerHTML = '<div class="rid-empty">No boardings in this period</div>'; return; }
+  const ymax = Math.max(1, ...buses.flatMap((b) => series[b]));
+  host.innerHTML = buses.map((b, i) => {
+    const rk = rsRouteKeyForBus ? rsRouteKeyForBus(b) : b;
+    const reg = (STOPS_REGISTRY || STOP_REGISTRY_CACHE || {})[rk];
+    const name = reg ? rsRouteShortName(reg) : 'Bus ' + b;
+    const col = ridRouteColor(b, i);
+    const share = total ? Math.round((cur[b] / total) * 100) : 0;
+    const todayV = (byBusDate[b] || {})[today] || 0;
+    const avgDay = Math.round((cur[b] - todayV) / fullDays);
+    let best = null; Object.entries(byBusDate[b] || {}).forEach(([dt, v]) => { if (dt !== today && (!best || v > best.v)) best = { dt, v }; });
+    return `<div class="rid-rt-card" style="--rc:${col}">
+      <div class="rid-rt-head"><span class="rid-rt-badge">${escapeHtml(b)}</span>
+        <div class="rid-rt-name"><b>${escapeHtml(name)}</b><span>Bus ${escapeHtml(b)} \u00b7 ${share}% of boardings</span></div>
+        ${noPrev ? '' : ridDelta(ridPct(cur[b], prev[b]))}</div>
+      <div class="rid-rt-stats">
+        <div><b>${cur[b].toLocaleString()}</b><span>boardings</span></div>
+        <div><b>${avgDay.toLocaleString()}</b><span>avg per day</span></div>
+        <div><b>${best ? best.v.toLocaleString() : '\u2014'}</b><span>${best ? 'best \u00b7 ' + ridFmtDate(best.dt) : 'best day'}</span></div>
+      </div>
+      <div class="rid-rt-spark"><canvas></canvas></div></div>`;
+  }).join('');
+  const partialIdx = B.bucketOf(today);
+  const daysIn = B.keys.map(() => 0); dates.forEach((d) => { daysIn[B.bucketOf(d)]++; });
+  const fullLen = (k) => (mode === 'weekly' ? 7 : mode === 'monthly' ? new Date(Date.UTC(+k.slice(0, 4), +k.slice(5, 7), 0)).getUTCDate() : 1);
+  const part = new Set(B.keys.map((k, i) => (daysIn[i] < fullLen(k) || i === partialIdx ? i : -1)).filter((i) => i >= 0));
+  host.querySelectorAll('.rid-rt-card').forEach((card, i) => {
+    const b = buses[i], col = ridRouteColor(b, i), data = series[b];
+    const cv = card.querySelector('canvas');
+    charts._ridRT.push(new Chart(cv.getContext('2d'), {
+      type: 'line',
+      data: { labels: B.labels, datasets: [{ data, borderColor: col, borderWidth: 2.25, tension: 0.35, cubicInterpolationMode: 'monotone',
+        fill: 'origin', backgroundColor: ridGradient(col, 0.35, 0.0),
+        pointRadius: data.map((_, j) => (part.has(j) || j === data.length - 1 ? 3.5 : 0)), pointHoverRadius: 4,
+        pointBackgroundColor: data.map((_, j) => (part.has(j) ? RID_PANEL_BG : col)), pointBorderColor: col, pointBorderWidth: 2,
+        segment: { borderColor: (c) => (part.has(c.p0DataIndex) || part.has(c.p1DataIndex) ? 'transparent' : undefined), backgroundColor: (c) => (part.has(c.p0DataIndex) || part.has(c.p1DataIndex) ? 'transparent' : undefined) } }] },
+      options: { responsive: true, maintainAspectRatio: false, animation: { duration: 600 },
+        layout: { padding: { top: 6, right: 6, bottom: 0, left: 0 } },
+        interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { display: false }, datalabels: { display: false },
+          tooltip: { ...tooltipDefaults(), displayColors: false, padding: 10,
+            callbacks: { title: (it) => (B.titles[it[0].dataIndex] || ''), label: (c) => Number(c.parsed.y || 0).toLocaleString() + ' boardings' + (c.dataIndex === partialIdx ? ' (so far)' : part.has(c.dataIndex) ? ' (part period)' : '') } } },
+        scales: { x: { display: true, grid: { display: false }, border: { display: false }, ticks: { color: '#7d8098', font: { size: 10.5, family: 'Inter' }, maxTicksLimit: 4, maxRotation: 0, autoSkip: true } },
+          y: { display: false, beginAtZero: true, max: Math.ceil(ymax * 1.1) } } },
+    }));
+  });
+}
+
+// ---- Day of week: this period vs previous period, side by side ----
+function renderDowCompare(allRows, from, to, windowDays) {
+  const ch = charts.dayOfWeek; if (!ch) return;
+  const today = displayDateStr();
+  const prevFrom = (() => { const d = new Date(from + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - windowDays); return d.toISOString().slice(0, 10); })();
+  const sum = (lo, hi) => {
+    const byDate = {};
+    allRows.forEach((r) => { if (r.date >= lo && r.date <= hi && r.date !== today) byDate[r.date] = (byDate[r.date] || 0) + (r.total_in || 0); });
+    const t = [0, 0, 0, 0, 0, 0, 0], n = [0, 0, 0, 0, 0, 0, 0];
+    // Count every calendar day in the window so a zero day still counts.
+    for (let d = new Date(lo + 'T12:00:00Z'); d.toISOString().slice(0, 10) <= hi; d.setUTCDate(d.getUTCDate() + 1)) {
+      const k = d.toISOString().slice(0, 10); if (k === today) continue;
+      const i = (d.getUTCDay() + 6) % 7; t[i] += byDate[k] || 0; n[i]++;
+    }
+    return { avg: t.map((v, i) => (n[i] ? Math.round(v / n[i]) : null)), days: Object.keys(byDate).length };
+  };
+  const prevTo = (() => { const d = new Date(from + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - 1); return d.toISOString().slice(0, 10); })();
+  const c = sum(from, to), p = sum(prevFrom, prevTo);
+  const prevOk = p.days >= windowDays * 0.8;
+  ridSetDow(c.avg, prevOk ? p.avg : null, windowDays);
+}
+function ridSetDow(curAvg, prevAvg, windowDays) {
+  const ch = charts.dayOfWeek; if (!ch) return;
+  const acc = ridAccent();
+  const mx = Math.max(0, ...curAvg.map((v) => v || 0));
+  ch.data.datasets[0].data = curAvg;
+  ch.data.datasets[0].backgroundColor = curAvg.map((v) => (v === mx && mx > 0 ? acc : ridAlpha(acc, 0.62)));
+  ch.data.datasets[0].hoverBackgroundColor = acc;
+  ch.data.datasets[0].label = 'This period';
+  ch.data.datasets[1].data = prevAvg || [];
+  ch.data.datasets[1].hidden = !prevAvg;
+  ch.update('active');
+  const lg = document.getElementById('ridDowLegend');
+  if (lg) lg.innerHTML = `<span class="rid-lg"><i style="background:${ridAlpha(acc, 0.62)}"></i>This period</span>` + (prevAvg ? `<span class="rid-lg"><i style="background:${RID_PREV_BAR}"></i>Previous ${windowDays ? windowDays + ' days' : 'period'}</span>` : '');
+  const best = curAvg.indexOf(mx);
+  const sub = document.getElementById('ridDowSubtitle');
+  if (sub) sub.textContent = mx > 0 ? 'Average boardings on each weekday \u00b7 busiest: ' + ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][best] + ' (' + mx.toLocaleString() + ')' : 'Average boardings on each weekday';
 }
 
 // ---- Busiest times: weekday x hour, average boardings ----
@@ -3305,12 +3501,8 @@ function ridSetAvgKpi(dailyRows, from, to) {
 }
 
 function ridHighlightBusiestDay(dowAvg) {
-  const ch = charts.dayOfWeek; if (!ch || !dowAvg) return;
-  const mx = Math.max(...dowAvg);
-  ch.data.datasets[0].backgroundColor = dowAvg.map((v, i) => (v === mx && mx > 0 ? 'rgba(212,175,55,0.95)' : (i >= 5 ? 'rgba(139,116,209,0.45)' : 'rgba(139,116,209,0.85)')));
-  const best = dowAvg.indexOf(mx);
-  const sub = document.getElementById('ridDowSubtitle');
-  if (sub) sub.textContent = mx > 0 ? 'Average boardings per day \u00b7 busiest: ' + ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][best] + ' (' + mx.toLocaleString() + ')' : 'Average boardings per day';
+  if (!charts.dayOfWeek || !dowAvg) return;
+  ridSetDow(dowAvg.map((v) => v || null), null);
 }
 
 /** Populate the Yearly tab's year selector from the backend (falls back to a
@@ -3435,6 +3627,8 @@ async function loadRidershipData() {
       renderRidershipHero(dailyAll.daily, viewMode, fromDate, now, windowDays);
       ridSetAvgKpi(dailyAll.daily, from, to);
       renderRouteShare(dailyAll.daily, from, to, windowDays);
+      renderRouteTrends(dailyAll.daily, from, to, viewMode, windowDays);
+      renderDowCompare(dailyAll.daily, from, to, windowDays);
       renderRidershipHeat(hourlyData && hourlyData.hourly, from, to);
     } catch (e) { console.warn('[ridership] chart render failed', e); }
   } else {
@@ -3503,8 +3697,8 @@ async function loadYearlyRidershipData(busId) {
   if (yearlyData && Array.isArray(yearlyData.months)) {
     renderRidershipChartsYearly(yearlyData.months, year);
     try {
-      ridTrendSimple(yearlyData.months.map((m) => m.month), yearlyData.months.map((m) => m.boardings), year + ' boardings by month' + (year === currentYear ? ' \u00b7 ' + yearlyData.months[new Date().getMonth()].month + ' in progress (lighter bar)' : ''), year === currentYear ? new Date().getMonth() : -1);
-      if (dailyData && dailyData.daily) { renderRouteShare(dailyData.daily, from, to, windowDays, true); ridSetAvgKpi(dailyData.daily, from, to); }
+      ridTrendSimple(yearlyData.months.map((m) => m.month), yearlyData.months.map((m, i) => (year === currentYear && i > new Date().getMonth() ? null : m.boardings)), 'Total boardings per month \u00b7 ' + year + (year === currentYear ? ' \u00b7 ' + yearlyData.months[new Date().getMonth()].month + ' still in progress' : ''), year === currentYear ? new Date().getMonth() : -1);
+      if (dailyData && dailyData.daily) { renderRouteShare(dailyData.daily, from, to, windowDays, true); renderRouteTrends(dailyData.daily, from, to, 'yearly', windowDays, true); ridSetAvgKpi(dailyData.daily, from, to); }
       const hy = await apiFetch('/api/hourly', { from, to, bus_id: busId !== 'all' ? busId : null });
       renderRidershipHeat(hy && hy.hourly, from, to);
     } catch (e) { console.warn('[ridership] yearly render failed', e); }
@@ -3604,7 +3798,7 @@ function renderRidershipCharts(rows, viewMode, fromDate, now) {
     }
     const labels = allDates.map(dt => {
       const dd = new Date(dt + 'T12:00:00Z');
-      return dd.toLocaleDateString('en-US', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' });
+      return dd.toLocaleDateString('en-GB', { timeZone: 'UTC', weekday: allDates.length <= 14 ? 'short' : undefined, day: 'numeric', month: 'short' });
     });
     const boardings = allDates.map(dt => byDate[dt] ? byDate[dt].boardings : 0);
     const alightings = allDates.map(dt => byDate[dt] ? byDate[dt].alightings : 0);
