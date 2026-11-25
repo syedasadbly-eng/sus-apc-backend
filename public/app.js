@@ -1995,6 +1995,7 @@ function updateHeader(view) {
     'ridership': ['Ridership Analytics', 'Analytics / Historical'],
     'routes': ['Routes & Stops', 'Analytics / Route Detail'],
     'comparison': ['Period Comparison', 'Analytics / Compare'],
+    'scorecard': ['Service Scorecard', 'Analytics / Productivity & Welfare'],
     'fleet': ['Fleet Status', 'Fleet / Management'],
     'reports': ['Reports', 'Output / Reports'],
     'data-table': ['Data Explorer', 'Output / Raw Data'],
@@ -2026,6 +2027,7 @@ function initView(view) {
       case 'ridership': initRidership(); break;
       case 'routes': initRoutes(); break;
       case 'comparison': initComparison(); break;
+      case 'scorecard': initScorecard(); break;
       case 'fleet': initFleet(); break;
       case 'reports': initReports(); break;
       case 'data-table': initDataTable(); break;
@@ -2035,6 +2037,7 @@ function initView(view) {
     switch (view) {
       case 'ridership': loadRidershipData(); break;
       case 'routes': loadRoutesData(); break;
+      case 'scorecard': scLoad(); break;
       case 'data-table': loadDataFromAPI(); break;
       case 'live-map': if (maps.liveMap) setTimeout(() => maps.liveMap.invalidateSize(), 100); break;
     }
@@ -7067,4 +7070,291 @@ function spRender() {
       + '<td style="text-align:right">' + (s.wait == null ? '--' : spMin(s.wait) + 'm') + '</td>'
       + '<td style="text-align:right;color:' + tone + ';font-weight:600">' + (s.on_target == null ? '--' : s.on_target + '%') + '</td></tr>';
   }).join(''));
+}
+
+// ============================================
+// SERVICE SCORECARD — productivity, service quality, passenger welfare
+// ============================================
+// Data: /api/scorecard (analytics/scorecard.js). Fleet or one route, this
+// period against the one before, with status against target.
+const SC = { days: '30', route: 'fleet', data: null, trend: 'pax_per_hour', req: 0 };
+const SC_TYPE_LABELS = {
+  fall: 'Possible fall', violence: 'Possible altercation', violence_disruption: 'Altercation (heard too)',
+  sound_classification: 'Unusual sound', overcrowding: 'Overcrowding', dwell_exceeded: 'Long time on board',
+  dwell_distress_unresponsive: 'Unresponsive passenger', lone_traveller: 'Lone traveller',
+  lone_traveller_late_night: 'Lone traveller, late', end_of_service_occupancy: 'On board at end of service',
+  terminus_occupancy: 'On board at terminus', stationary_with_occupants: 'Parked with people on board',
+  dwell_no_alighting: 'Nobody getting off', panic_button: 'Panic button', driver_help: 'Driver asked for help',
+};
+const SC_COST_KEY = 'sus-cost-per-hour:' + location.host;
+
+function scCurrency() { return APP_TZ === 'Europe/London' ? '\u00a3' : '$'; }
+function scRange() {
+  const today = displayDateStr();
+  if (SC.days === 'month') {
+    const [y, m] = today.split('-').map(Number);
+    const first = new Date(Date.UTC(y, m - 2, 1));
+    const last = new Date(Date.UTC(y, m - 1, 0));
+    return { from: first.toISOString().slice(0, 10), to: last.toISOString().slice(0, 10) };
+  }
+  const n = parseInt(SC.days, 10) || 30;
+  const f = new Date(); f.setDate(f.getDate() - (n - 1));
+  return { from: displayDateStr(f), to: today };
+}
+function scFmtDate(d) {
+  const [y, m, dd] = d.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, dd)).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+}
+function scNum(v, dp = 0) {
+  if (v == null || !isFinite(v)) return '--';
+  return Number(v).toLocaleString('en-GB', { minimumFractionDigits: dp, maximumFractionDigits: dp });
+}
+
+// Measure definitions: label, how to read the value, format, target text.
+const SC_MEASURES = {
+  prod: [
+    { k: 'passengers', g: 'productivity', label: 'Passengers', fmt: (v) => scNum(v), up: true },
+    { k: 'service_hours', g: 'productivity', label: 'Hours in service', fmt: (v) => scNum(v), up: true },
+    { k: 'pax_per_hour', g: 'productivity', label: 'Passengers per hour', fmt: (v) => scNum(v, 1), up: true, target: true },
+    { k: 'pax_per_loop', g: 'productivity', label: 'Passengers per loop', fmt: (v) => scNum(v, 1), up: true },
+    { k: 'seat_use', g: 'productivity', label: 'Seats used on average', fmt: (v) => v == null ? '--' : v + '%', up: true, target: true },
+    { k: 'cost_per_pax', g: 'derived', label: 'Cost per passenger', fmt: (v) => v == null ? '--' : scCurrency() + scNum(v, 2), up: false, hint: 'Add cost per hour' },
+  ],
+  serv: [
+    { k: 'gap_median', g: 'service', label: 'Typical gap between buses', fmt: (v) => v == null ? '--' : scNum(v, 1) + ' min', up: false },
+    { k: 'on_target', g: 'service', label: 'Gaps on target', fmt: (v) => v == null ? '--' : v + '%', up: true, target: true },
+    { k: 'wait', g: 'service', label: 'Average wait', fmt: (v) => v == null ? '--' : scNum(v, 1) + ' min', up: false, rag: 'wait_vs_timetable' },
+    { k: 'peak_load', g: 'service', label: 'Fullest point of each loop', fmt: (v) => v == null ? '--' : v + '%', up: false, target: true },
+    { k: 'loops_full', g: 'service', label: 'Loops that filled up', fmt: (v) => v == null ? '--' : scNum(v, 1) + '%', up: false, target: true },
+  ],
+  welf: [
+    { k: 'incidents', g: 'welfare', label: 'Welfare incidents', fmt: (v) => scNum(v), up: false },
+    { k: 'incidents_per_k', g: 'welfare', label: 'Incidents per 1,000 passengers', fmt: (v) => scNum(v, 1), up: false, target: true },
+    { k: 'serious_per_k', g: 'welfare', label: 'Serious per 1,000 passengers', fmt: (v) => scNum(v, 2), up: false, target: true },
+    { k: 'response_median', g: 'welfare', label: 'Time to first response', fmt: (v) => v == null ? '--' : scNum(v, 1) + ' min', up: false, target: true },
+    { k: 'urgent_in_sla', g: 'welfare', label: 'Urgent alerts answered in 5 min', fmt: (v) => v == null ? '--' : v + '%', up: true, target: true },
+    { k: 'close_median', g: 'welfare', label: 'Time to close', fmt: (v) => v == null ? '--' : scNum(v) + ' min', up: false, target: true },
+    { k: 'passenger_ok', g: 'welfare', label: 'Driver checks: passenger OK', fmt: (v) => v == null ? '--' : v + '%', up: true },
+  ],
+};
+
+function scTargetText(key, targets, cur) {
+  if (key === 'wait_vs_timetable') {
+    const tw = cur && cur.service.timetable_wait;
+    return tw == null ? '--' : '\u2264 ' + scNum(tw + targets.wait_vs_timetable.green, 1) + ' min';
+  }
+  const t = targets[key];
+  if (!t) return '';
+  if (t.mode === 'trend') return 'not worse than before';
+  const sign = t.dir === 'up' ? '\u2265 ' : '\u2264 ';
+  const unit = t.unit === '%' ? '%' : t.unit === 'min' ? ' min' : t.unit === '/h' ? ' / h' : '';
+  return sign + t.green + unit;
+}
+
+function scValue(m, def) {
+  if (!m) return null;
+  if (def.g === 'derived') {
+    const cost = parseFloat(localStorage.getItem(SC_COST_KEY));
+    return cost > 0 && m.productivity.pax_per_hour ? cost / m.productivity.pax_per_hour : null;
+  }
+  return m[def.g] ? m[def.g][def.k] : null;
+}
+
+function scChange(cur, prev, def) {
+  if (cur == null || prev == null || !isFinite(cur) || !isFinite(prev)) return '';
+  const d = cur - prev;
+  if (Math.abs(d) < 1e-9) return '<span class="sc-chg flat">no change</span>';
+  const better = def.up ? d > 0 : d < 0;
+  const pct = prev !== 0 ? Math.round((d / Math.abs(prev)) * 100) : null;
+  const arrow = d > 0 ? '\u25b2' : '\u25bc';
+  return '<span class="sc-chg ' + (better ? 'good' : 'bad') + '">' + arrow + ' ' + (pct != null ? Math.abs(pct) + '%' : '') + '</span>';
+}
+
+function scPill(r) {
+  if (!r) return '<span class="sc-pill none">--</span>';
+  const t = { green: 'On target', amber: 'Watch', red: 'Off target' }[r];
+  return '<span class="sc-pill ' + r + '"><i class="sc-dot ' + r + '"></i>' + t + '</span>';
+}
+
+function initScorecard() {
+  document.getElementById('scCurrency').textContent = scCurrency();
+  const cost = document.getElementById('scCost');
+  cost.value = localStorage.getItem(SC_COST_KEY) || '';
+  cost.addEventListener('input', () => {
+    const v = parseFloat(cost.value);
+    if (v > 0) localStorage.setItem(SC_COST_KEY, String(v)); else localStorage.removeItem(SC_COST_KEY);
+    scRender();
+  });
+  document.querySelectorAll('#scPeriod [data-sc-days]').forEach((b) => b.addEventListener('click', () => {
+    document.querySelectorAll('#scPeriod .period-tab').forEach((x) => x.classList.toggle('active', x === b));
+    SC.days = b.getAttribute('data-sc-days');
+    scLoad();
+  }));
+  document.querySelectorAll('#scTrendTabs [data-sc-trend]').forEach((b) => b.addEventListener('click', () => {
+    document.querySelectorAll('#scTrendTabs .period-tab').forEach((x) => x.classList.toggle('active', x === b));
+    SC.trend = b.getAttribute('data-sc-trend');
+    scRenderTrend();
+  }));
+  document.getElementById('scRoute').addEventListener('change', (e) => { SC.route = e.target.value; scRender(); });
+  document.getElementById('scPrint').addEventListener('click', () => { document.body.classList.add('sc-printing'); window.print(); setTimeout(() => document.body.classList.remove('sc-printing'), 500); });
+  document.getElementById('scExport').addEventListener('click', scExport);
+  scLoad();
+}
+
+async function scLoad() {
+  const id = ++SC.req;
+  const { from, to } = scRange();
+  document.getElementById('scSubtitle').textContent = 'Loading\u2026';
+  const data = await apiFetch('/api/scorecard', { from, to });
+  if (id !== SC.req) return;
+  SC.data = data;
+  const sel = document.getElementById('scRoute');
+  const routes = (data && data.routes) || [];
+  const keep = SC.route;
+  sel.innerHTML = '<option value="fleet">Whole fleet</option>' + routes.map((r) => '<option value="' + escapeHtml(r.route) + '">Route ' + escapeHtml(r.route) + ' \u2014 ' + escapeHtml(rsRouteShortName(r) || r.name) + '</option>').join('');
+  SC.route = routes.some((r) => r.route === keep) ? keep : 'fleet';
+  sel.value = SC.route;
+  scRender();
+}
+
+function scSelected() {
+  const d = SC.data;
+  if (!d) return null;
+  if (SC.route === 'fleet') return { label: 'Whole fleet', cur: d.fleet.current, prev: d.fleet.previous };
+  const r = d.routes.find((x) => x.route === SC.route);
+  return r ? { label: 'Route ' + r.route + ' \u2014 ' + (rsRouteShortName(r) || r.name), cur: r.current, prev: r.previous } : null;
+}
+
+function scRender() {
+  const d = SC.data;
+  const s = scSelected();
+  if (!d || !s) {
+    document.getElementById('scSubtitle').textContent = 'No data available for this period';
+    ['scHero', 'scProd', 'scServ', 'scWelf', 'scRoutes', 'scTypes'].forEach((id) => { document.getElementById(id).innerHTML = ''; });
+    return;
+  }
+  const { cur, prev } = s;
+  document.getElementById('scTitle').textContent = 'Service scorecard \u00b7 ' + s.label;
+  document.getElementById('scSubtitle').textContent = scFmtDate(d.from) + ' \u2013 ' + scFmtDate(d.to) + ' ' + d.to.slice(0, 4)
+    + ' (' + d.days + ' days) \u00b7 compared with ' + scFmtDate(d.previous.from) + ' \u2013 ' + scFmtDate(d.previous.to);
+
+  // ---- headline cards ----
+  const hero = [
+    { label: 'Passengers per hour', def: SC_MEASURES.prod[2], key: 'pax_per_hour', sub: scNum(cur.productivity.passengers) + ' passengers over ' + scNum(cur.productivity.service_hours) + ' hours' },
+    { label: 'Gaps on target', def: SC_MEASURES.serv[1], key: 'on_target', sub: cur.service.headway ? 'timetable every ' + scNum(cur.service.headway, 0) + ' min' : 'no timetable set' },
+    { label: 'Incidents per 1,000 passengers', def: SC_MEASURES.welf[1], key: 'incidents_per_k', sub: scNum(cur.welfare.incidents) + ' incidents, ' + scNum(cur.welfare.serious) + ' serious' },
+    { label: 'Urgent alerts answered in 5 min', def: SC_MEASURES.welf[4], key: 'urgent_in_sla', sub: cur.welfare.urgent ? scNum(cur.welfare.urgent) + ' urgent alerts' : 'no urgent alerts' },
+  ];
+  document.getElementById('scHero').innerHTML = hero.map((h) => {
+    const v = scValue(cur, h.def); const pv = scValue(prev, h.def); const r = cur.rag[h.key];
+    return '<div class="sc-card ' + (r || 'none') + '"><div class="sc-card-top"><span class="sc-card-l">' + h.label + '</span>' + scPill(r) + '</div>'
+      + '<div class="sc-card-v">' + h.def.fmt(v) + '</div>'
+      + '<div class="sc-card-s">' + scChange(v, pv, h.def) + ' <span>vs ' + h.def.fmt(pv) + ' before</span></div>'
+      + '<div class="sc-card-s muted">' + escapeHtml(h.sub) + ' \u00b7 target ' + escapeHtml(scTargetText(h.key, d.targets, cur)) + '</div></div>';
+  }).join('');
+
+  // ---- measure tables ----
+  const rows = (defs) => defs.map((def) => {
+    const v = scValue(cur, def); const pv = scValue(prev, def);
+    const rk = def.rag || (def.target ? def.k : null);
+    const tgt = rk ? scTargetText(rk, d.targets, cur) : '';
+    const valHtml = v == null && def.hint ? '<span class="sc-hint">' + def.hint + '</span>' : def.fmt(v);
+    return '<tr><td class="sc-m">' + def.label + '</td>'
+      + '<td class="sc-v"><div>' + valHtml + ' ' + scChange(v, pv, def) + '</div><div class="sc-was">was ' + def.fmt(pv) + '</div></td>'
+      + '<td class="sc-s">' + (rk ? scPill(cur.rag[rk]) + '<div class="sc-t">' + escapeHtml(tgt) + '</div>' : '') + '</td></tr>';
+  }).join('');
+  document.getElementById('scProd').innerHTML = rows(SC_MEASURES.prod);
+  document.getElementById('scServ').innerHTML = rows(SC_MEASURES.serv);
+  document.getElementById('scWelf').innerHTML = rows(SC_MEASURES.welf);
+
+  // ---- incidents by type ----
+  const types = cur.welfare.by_type || [];
+  const maxN = Math.max(1, ...types.map((t) => t.n));
+  document.getElementById('scTypesSub').textContent = types.length ? scNum(cur.welfare.incidents) + ' passenger welfare incidents \u00b7 ' + scNum(cur.welfare.open) + ' still open' : 'No passenger welfare incidents in this period';
+  document.getElementById('scTypes').innerHTML = types.slice(0, 8).map((t) => {
+    const label = SC_TYPE_LABELS[t.type] || t.type.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
+    return '<div class="sc-type"><span class="sc-type-l">' + escapeHtml(label) + '</span><span class="sc-type-bar"><i style="width:' + Math.round((t.n / maxN) * 100) + '%"></i></span><span class="sc-type-n">' + scNum(t.n) + '</span></div>';
+  }).join('') || '<div class="sp-empty">Nothing to show</div>';
+
+  // ---- routes side by side ----
+  const cell = (v, r) => '<td class="sc-rc ' + (r || '') + '">' + v + '</td>';
+  document.getElementById('scRoutes').innerHTML = d.routes.map((r) => {
+    const c = r.current;
+    return '<tr' + (r.route === SC.route ? ' class="sel"' : '') + '><td class="sc-m">Route ' + escapeHtml(r.route) + '<div class="sc-sub">' + escapeHtml(rsRouteShortName(r) || r.name) + '</div></td>'
+      + cell(scNum(c.productivity.passengers))
+      + cell(scNum(c.productivity.pax_per_hour, 1), c.rag.pax_per_hour)
+      + cell(c.productivity.seat_use == null ? '--' : c.productivity.seat_use + '%', c.rag.seat_use)
+      + cell(c.service.on_target == null ? '--' : c.service.on_target + '%', c.rag.on_target)
+      + cell(c.service.wait == null ? '--' : scNum(c.service.wait, 1) + ' min', c.rag.wait_vs_timetable)
+      + cell(c.service.peak_load == null ? '--' : c.service.peak_load + '%', c.rag.peak_load)
+      + cell(scNum(c.welfare.incidents_per_k, 1), c.rag.incidents_per_k)
+      + cell(c.welfare.response_median == null ? '--' : scNum(c.welfare.response_median, 1) + ' min', c.rag.response_median)
+      + cell(c.welfare.urgent_in_sla == null ? '--' : c.welfare.urgent_in_sla + '%', c.rag.urgent_in_sla) + '</tr>';
+  }).join('');
+  document.getElementById('scRoutesPanel').hidden = d.routes.length < 2;
+
+  scRenderTrend();
+}
+
+function scRenderTrend() {
+  const d = SC.data;
+  if (!d || !window.Chart) return;
+  const k = SC.trend;
+  const unit = d.trend[0] ? d.trend[0].unit : 'day';
+  const labels = d.trend.map((b) => unit === 'month' ? new Date(b.from + 'T00:00:00Z').toLocaleDateString('en-GB', { month: 'short', year: 'numeric', timeZone: 'UTC' }) : unit === 'week' ? 'w/c ' + scFmtDate(b.from) : scFmtDate(b.from));
+  const vals = d.trend.map((b) => b[k]);
+  const meta = {
+    pax_per_hour: { label: 'Passengers per hour', target: d.targets.pax_per_hour.green, suffix: '' },
+    on_target: { label: 'Gaps on target (%)', target: d.targets.on_target.green, suffix: '%' },
+    incidents_per_k: { label: 'Incidents per 1,000 passengers', target: null, suffix: '' },
+    response_median: { label: 'Time to first response (min)', target: d.targets.response_median.green, suffix: ' min' },
+  }[k];
+  document.getElementById('scTrendSub').textContent = meta.label + ' by ' + unit + ', whole fleet' + (meta.target != null ? ' \u00b7 dashed line is the target' : '');
+  const tick = { color: '#c9cad8', font: { size: 11, family: 'Inter', weight: '500' } };
+  const ds = [
+    { type: 'bar', label: 'Passengers', data: d.trend.map((b) => b.passengers), backgroundColor: 'rgba(255,255,255,0.10)', borderRadius: 4, yAxisID: 'y2', order: 2 },
+    { type: 'line', label: meta.label, data: vals, borderColor: '#38bdf8', backgroundColor: '#38bdf8', borderWidth: 3, pointRadius: 4, tension: 0.3, cubicInterpolationMode: 'monotone', spanGaps: true, yAxisID: 'y', order: 0 },
+  ];
+  if (meta.target != null) ds.push({ type: 'line', label: 'Target', data: vals.map(() => meta.target), borderColor: 'rgba(74,222,128,0.9)', borderDash: [6, 4], borderWidth: 1.5, pointRadius: 0, yAxisID: 'y', order: 1 });
+  if (charts.scTrend) charts.scTrend.destroy();
+  charts.scTrend = new Chart(document.getElementById('chartScTrend').getContext('2d'), {
+    data: { labels, datasets: ds },
+    options: {
+      responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { color: '#dbdce6', font: { size: 12, family: 'Inter', weight: '500' }, usePointStyle: true, boxWidth: 10, padding: 14 } },
+        tooltip: { ...tooltipDefaults(), callbacks: { label: (c) => ' ' + c.dataset.label + ': ' + (c.parsed.y == null ? '--' : scNum(c.parsed.y, c.dataset.yAxisID === 'y2' ? 0 : 1) + (c.dataset.yAxisID === 'y' ? meta.suffix : '')) } },
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { ...tick, maxRotation: 0, autoSkip: true } },
+        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.06)' }, ticks: tick, suggestedMax: k === 'on_target' ? 100 : undefined },
+        y2: { position: 'right', beginAtZero: true, grid: { display: false }, ticks: { ...tick, color: '#8b8ea5' }, title: { display: true, text: 'Passengers', color: '#8b8ea5', font: { size: 11, family: 'Inter' } } },
+      },
+    },
+  });
+}
+
+function scExport() {
+  const d = SC.data;
+  if (!d) return;
+  const q = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+  const lines = [['Scope', 'Group', 'Measure', 'This period', 'Previous period', 'Target', 'Status'].map(q).join(',')];
+  const scopes = [{ label: 'Whole fleet', cur: d.fleet.current, prev: d.fleet.previous }].concat(d.routes.map((r) => ({ label: 'Route ' + r.route, cur: r.current, prev: r.previous })));
+  const groups = { prod: 'Productivity', serv: 'Service quality', welf: 'Passenger welfare' };
+  for (const s of scopes) {
+    for (const [gk, defs] of Object.entries(SC_MEASURES)) {
+      for (const def of defs) {
+        const rk = def.rag || (def.target ? def.k : null);
+        const v = scValue(s.cur, def); const pv = scValue(s.prev, def);
+        lines.push([s.label, groups[gk], def.label, v == null ? '' : round2(v), pv == null ? '' : round2(pv), rk ? scTargetText(rk, d.targets, s.cur) : '', rk ? (s.cur.rag[rk] || '') : ''].map(q).join(','));
+      }
+    }
+  }
+  function round2(v) { return Math.round(v * 100) / 100; }
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'scorecard_' + d.from + '_' + d.to + '.csv';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
