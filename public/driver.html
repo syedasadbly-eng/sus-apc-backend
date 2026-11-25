@@ -33,7 +33,7 @@
     ?bus=515          vehicle this screen belongs to (required)
     &api=https://...  backend base URL (default: same origin)
     &window=10        minutes an alert stays on screen unless acknowledged
-    &test=1           also show simulated events, marked TEST
+    &test=1 / &test=0  force test alerts on / off (default: on when simulation is allowed)
     &sound=0          start muted
 -->
 <style>
@@ -196,7 +196,7 @@
   const q = new URLSearchParams(location.search);
   const API = (q.get('api') || '').replace(/\/$/, '') + '/api/welfare';
   const WINDOW_MIN = Math.max(1, Number(q.get('window')) || 10);
-  const SHOW_TESTS = q.get('test') === '1';
+  const TEST_Q = q.get('test') === '1' ? '?test=1' : q.get('test') === '0' ? '?test=0' : '';
   const POLL_MS = 5000;
   const OFFLINE_AFTER_MS = 30000;
   let BUS = q.get('bus') || store.get('sus-driver-bus') || '';
@@ -205,15 +205,19 @@
   let soundOn = q.get('sound') !== '0' && store.get('sus-driver-sound') !== '0';
 
   // Only what a driver can act on. Wording is deliberately short: it has to be
-  // read in a glance. Anything not in this table never reaches the cab.
+  // read in a glance. Anything not in this table never reaches the cab. Must match DRIVER_TYPES in welfare/driver.js.
   const DRIVER = {
     fall:                      { tone: 'bad',  icon: 'fall',  head: 'Passenger may have fallen', act: 'Stop when safe and check on them.' },
+    dwell_distress_unresponsive: { tone: 'bad', icon: 'alert', head: 'Passenger not responding', act: 'Stop when safe and check on them. Call control if needed.' },
     violence:                  { tone: 'bad',  icon: 'alert', head: 'Incident on board',          act: 'Follow the incident procedure. Call control when safe.' },
     violence_disruption:       { tone: 'bad',  icon: 'alert', head: 'Incident on board',          act: 'Follow the incident procedure. Call control when safe.' },
     end_of_service_occupancy:  { tone: 'bad',  icon: 'person',head: 'Someone still on board',     act: 'Walk the bus before you park up.' },
     terminus_occupancy:        { tone: 'warn', icon: 'person',head: 'Someone still on board',     act: 'Walk the bus before it turns around.' },
     lone_traveller_late_night: { tone: 'warn', icon: 'person',head: 'Lone passenger, late',       act: 'Check they are alright and know their stop.' },
     stationary_with_occupants: { tone: 'warn', icon: 'person',head: 'People on board, bus parked',act: 'Check nobody has been left on board.' },
+    overcrowding:              { tone: 'warn', icon: 'crowd', head: 'Bus is full',                act: 'Do not board more passengers until some get off.' },
+    sound_classification:      { tone: 'warn', icon: 'sound', head: 'Loud noise on board',        act: 'Check the saloon when safe.' },
+    lone_traveller:            { tone: 'warn', icon: 'person',head: 'Lone passenger',             act: 'Keep an eye on them. Check they know their stop.' },
   };
   const RANK = { bad: 2, warn: 1 };
 
@@ -223,6 +227,8 @@
     alert: '<svg viewBox="0 0 96 96" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><path d="M48 10L90 84H6z"/><path d="M48 38v20"/><circle cx="48" cy="70" r="1.5" fill="currentColor"/></svg>',
     fall: '<svg viewBox="0 0 96 96" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><circle cx="66" cy="22" r="8"/><path d="M60 34L40 50l-18-4M52 42l6 22 18 6M40 50l-8 22"/><path d="M8 88h80"/></svg>',
     person: '<svg viewBox="0 0 96 96" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><circle cx="48" cy="22" r="11"/><path d="M26 86V62c0-12 10-20 22-20s22 8 22 20v24"/></svg>',
+    crowd: '<svg viewBox="0 0 96 96" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><circle cx="30" cy="28" r="9"/><circle cx="66" cy="28" r="9"/><path d="M12 82V62c0-9 8-16 18-16s18 7 18 16v20M48 82V62c0-9 8-16 18-16s18 7 18 16v20"/></svg>',
+    sound: '<svg viewBox="0 0 96 96" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 38h14l20-16v52L28 58H14z"/><path d="M62 36c6 6 6 18 0 24M72 26c12 12 12 32 0 44"/></svg>',
     offline: '<svg viewBox="0 0 96 96" fill="none" stroke="#9aa4b5" stroke-width="7" stroke-linecap="round"><path d="M12 36c20-18 52-18 72 0M24 50c14-12 34-12 48 0M36 64c7-6 17-6 24 0"/><circle cx="48" cy="78" r="3" fill="#9aa4b5"/><path d="M14 14l68 68"/></svg>',
   };
 
@@ -238,7 +244,7 @@
   async function poll() {
     if (!$('start').hidden) return;   // waiting for the PIN
     try {
-      const r = await fetch(`${API}/driver/${encodeURIComponent(BUS)}${SHOW_TESTS ? '?test=1' : ''}`,
+      const r = await fetch(`${API}/driver/${encodeURIComponent(BUS)}${TEST_Q}`,
         { cache: 'no-store', headers: { 'X-Driver-Pin': PIN } });
       if (r.status === 401 || r.status === 429) { askPin(r.status === 429 ? 'Too many tries. Wait 5 minutes.' : (PIN ? 'Wrong PIN' : '')); return; }
       if (!r.ok) throw new Error(r.status);
@@ -247,8 +253,6 @@
       busHealth = data.monitoring;
       const active = (data.alerts || []).map((e) => ({ ...e, source: e.simulated ? 'simulated' : 'live' }))
         .filter((e) => DRIVER[e.event_type])
-        .filter((e) => SHOW_TESTS || e.source !== 'simulated')
-        .filter((e) => Date.now() - Date.parse(e.detected_at) <= WINDOW_MIN * 60000)
         .sort((a, b) => (RANK[DRIVER[b.event_type].tone] - RANK[DRIVER[a.event_type].tone])
                         || (Date.parse(b.detected_at) - Date.parse(a.detected_at)));
       lastActive = active;
@@ -378,7 +382,9 @@
   async function keepAwake() {
     try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch {}
   }
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') keepAwake(); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') { keepAwake(); if (running) poll(); }
+  });
 
   // Shown on first start if the server wants a PIN, and again whenever it
   // rejects the stored one. The screen underneath keeps its last state.

@@ -493,12 +493,16 @@
   // the cab is showing, or it is worse than no card at all.
   const DRIVER_SCREEN = {
     fall:                      { tone: 'bad',  head: 'Passenger may have fallen' },
+    dwell_distress_unresponsive: { tone: 'bad', head: 'Passenger not responding' },
     violence:                  { tone: 'bad',  head: 'Incident on board' },
     violence_disruption:       { tone: 'bad',  head: 'Incident on board' },
     end_of_service_occupancy:  { tone: 'bad',  head: 'Someone still on board' },
     terminus_occupancy:        { tone: 'warn', head: 'Someone still on board' },
     lone_traveller_late_night: { tone: 'warn', head: 'Lone passenger, late' },
     stationary_with_occupants: { tone: 'warn', head: 'People on board, bus parked' },
+    overcrowding:              { tone: 'warn', head: 'Bus is full' },
+    sound_classification:      { tone: 'warn', head: 'Loud noise on board' },
+    lone_traveller:            { tone: 'warn', head: 'Lone passenger' },
   };
   const DRIVER_WINDOW_MIN = 10;
 
@@ -526,7 +530,7 @@
 
     const showTests = Boolean(lastStatus && lastStatus.allow_sim);
     const active = (events || []).filter((e) => DRIVER_SCREEN[e.event_type]
-      && e.source !== 'simulated'
+      && (showTests || e.source !== 'simulated')
       && Date.now() - Date.parse(e.detected_at) <= DRIVER_WINDOW_MIN * 60000);
 
     const cards = [...buses.entries()]
@@ -541,7 +545,7 @@
           const e = mine[0];
           tone = DRIVER_SCREEN[e.event_type].tone;
           head = DRIVER_SCREEN[e.event_type].head;
-          sub = `${timeAgo(e.detected_at)} \u00b7 waiting for the driver to press SEEN`
+          sub = `${e.source === 'simulated' ? 'TEST \u00b7 ' : ''}${timeAgo(e.detected_at)} \u00b7 waiting for the driver to answer`
             + (mine.length > 1 ? ` \u00b7 +${mine.length - 1} more` : '');
         } else if (h && (!h.trustworthy || h.never_reported)) {
           tone = 'idle';
