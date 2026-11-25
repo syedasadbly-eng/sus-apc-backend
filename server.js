@@ -1402,6 +1402,10 @@ app.get('/api/stops', (req, res) => {
     routes[k] = {
       name: v.name,
       loop_minutes: v.loop_minutes,
+      // Published frequency at each stop, kept separate from one bus's loop time.
+      ...(v.headway_minutes != null ? { headway_minutes: v.headway_minutes } : {}),
+      ...(v.buses_in_service != null ? { buses_in_service: v.buses_in_service } : {}),
+      ...(v.timetable_source ? { timetable_source: v.timetable_source } : {}),
       bus_ids: v.bus_ids || [],
       stops: v.stops || [],
     };
