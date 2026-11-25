@@ -4499,7 +4499,7 @@ html[data-skin="glossy-platinum"][data-theme] .rid-rt-card { border-color: rgba(
 .sc-grid2 .chart-header { flex-wrap: wrap; gap: 10px; }
 .sc-types { padding: 4px var(--space-4) var(--space-4); display: flex; flex-direction: column; gap: 10px; }
 .sc-type { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) 44px; align-items: center; gap: 10px; font-size: 0.8rem; }
-.sc-type-l { color: var(--color-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sc-type-l { color: var(--color-text); line-height: 1.3; overflow-wrap: anywhere; }
 .sc-type-bar { height: 8px; background: rgba(255,255,255,0.06); border-radius: 4px; overflow: hidden; }
 .sc-type-bar i { display: block; height: 100%; background: #38bdf8; border-radius: 4px; }
 .sc-type-n { text-align: right; font-weight: 700; color: var(--color-text); font-variant-numeric: tabular-nums; }

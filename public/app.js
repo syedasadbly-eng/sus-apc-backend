@@ -7083,7 +7083,7 @@ const SC_TYPE_LABELS = {
   sound_classification: 'Unusual sound', overcrowding: 'Overcrowding', dwell_exceeded: 'Long time on board',
   dwell_distress_unresponsive: 'Unresponsive passenger', lone_traveller: 'Lone traveller',
   lone_traveller_late_night: 'Lone traveller, late', end_of_service_occupancy: 'On board at end of service',
-  terminus_occupancy: 'On board at terminus', stationary_with_occupants: 'Parked with people on board',
+  terminus_occupancy: 'On board at terminus', stationary_with_occupants: 'Parked, people on board',
   dwell_no_alighting: 'Nobody getting off', panic_button: 'Panic button', driver_help: 'Driver asked for help',
 };
 const SC_COST_KEY = 'sus-cost-per-hour:' + location.host;
