@@ -1237,6 +1237,61 @@ app.post('/api/demo/incident', (req, res) => {
   res.status(out.error ? 400 : 200).json(out);
 });
 
+// --- Map tile relay --------------------------------------------------------
+// Some browsers / networks can load the OpenFreeMap style but not its vector
+// tiles, which left every map blank. The dashboard falls back to fetching the
+// same tiles through this server. Small in-memory cache; upstream only.
+const OFM = 'https://tiles.openfreemap.org/planet';
+const tileCache = new Map(); // key -> { buf, type, at }
+const TILE_CACHE_MAX = 3000;
+let ofmTileJson = null, ofmTileJsonAt = 0;
+app.get('/maptiles/tilejson', async (req, res) => {
+  try {
+    if (!ofmTileJson || Date.now() - ofmTileJsonAt > 3600e3) {
+      const r = await fetch(OFM);
+      if (!r.ok) throw new Error('upstream ' + r.status);
+      ofmTileJson = await r.json(); ofmTileJsonAt = Date.now();
+    }
+    const tj = { ...ofmTileJson };
+    // .../planet/<version>/{z}/{x}/{y}.pbf -> /maptiles/t/<version>/{z}/{x}/{y}.pbf
+    const proto = (req.get('x-forwarded-proto') || req.protocol || 'https').split(',')[0];
+    const base = `${proto}://${req.get('host')}`;
+    tj.tiles = (ofmTileJson.tiles || []).map((u) => {
+      const m = String(u).match(/\/planet\/([\w.-]+)\/\{z\}\/\{x\}\/\{y\}\.pbf$/);
+      return m ? `${base}/maptiles/t/${m[1]}/{z}/{x}/{y}.pbf` : u;
+    });
+    res.set('Cache-Control', 'public, max-age=3600').json(tj);
+  } catch (err) {
+    res.status(502).json({ error: 'tile relay unavailable', detail: err.message });
+  }
+});
+app.get('/maptiles/t/:ver/:z/:x/:y.pbf', async (req, res) => {
+  const { ver, z, x, y } = req.params;
+  if (!/^[\w.-]{1,40}$/.test(ver) || ![z, x, y].every((n) => /^\d{1,7}$/.test(n)) || Number(z) > 16) return res.status(400).end();
+  const key = `${ver}/${z}/${x}/${y}`;
+  const hit = tileCache.get(key);
+  const send = (t) => {
+    res.set('Content-Type', t.type || 'application/x-protobuf');
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.set('Access-Control-Allow-Origin', '*');
+    if (t.enc) res.set('Content-Encoding', t.enc);
+    res.end(t.buf);
+  };
+  if (hit) return send(hit);
+  try {
+    const r = await fetch(`${OFM}/${key}.pbf`, { headers: { 'Accept-Encoding': 'identity' } });
+    if (r.status === 204 || r.status === 404) return res.status(204).end();
+    if (!r.ok) return res.status(502).end();
+    const buf = Buffer.from(await r.arrayBuffer());
+    const t = { buf, type: r.headers.get('content-type'), at: Date.now() };
+    tileCache.set(key, t);
+    if (tileCache.size > TILE_CACHE_MAX) tileCache.delete(tileCache.keys().next().value);
+    send(t);
+  } catch (err) {
+    res.status(502).end();
+  }
+});
+
 // Serve static dashboard files from public/ folder
 app.use(express.static(path.join(__dirname, 'public')));
 
