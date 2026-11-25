@@ -7118,6 +7118,7 @@ const SC_MEASURES = {
     { k: 'pax_per_hour', g: 'productivity', label: 'Passengers per hour', fmt: (v) => scNum(v, 1), up: true, target: true },
     { k: 'pax_per_loop', g: 'productivity', label: 'Passengers per loop', fmt: (v) => scNum(v, 1), up: true },
     { k: 'seat_use', g: 'productivity', label: 'Seats used on average', fmt: (v) => v == null ? '--' : v + '%', up: true, target: true },
+    { k: 'cost_total', g: 'derived', label: 'Cost to run', fmt: (v) => v == null ? '--' : scCurrency() + scNum(v), up: false, hint: 'Add cost per hour' },
     { k: 'cost_per_pax', g: 'derived', label: 'Cost per passenger', fmt: (v) => v == null ? '--' : scCurrency() + scNum(v, 2), up: false, hint: 'Add cost per hour' },
   ],
   serv: [
@@ -7151,11 +7152,43 @@ function scTargetText(key, targets, cur) {
   return sign + t.green + unit;
 }
 
+function scCostRate() {
+  const v = parseFloat(localStorage.getItem(SC_COST_KEY));
+  return v > 0 ? v : null;
+}
+
+// Cost summary line under the title: makes the cost per hour visibly do something.
+function scRenderCost(d, s) {
+  const el = document.getElementById('scCostStrip');
+  if (!el) return;
+  const rate = scCostRate();
+  const cur = scCurrency();
+  if (!rate) {
+    el.className = 'sc-cost-strip empty';
+    el.innerHTML = 'Enter the operating cost per bus hour above to see what the service costs to run and the cost per passenger. '
+      + (cur === '\u00a3' ? 'For reference, the average in Great Britain outside London is about \u00a360 an hour (CPT, Feb 2026).' : 'For reference, contracted US shuttle buses typically run about $130\u2013150 an hour.');
+    return;
+  }
+  const defs = { tot: SC_MEASURES.prod.find((x) => x.k === 'cost_total'), pp: SC_MEASURES.prod.find((x) => x.k === 'cost_per_pax') };
+  const tot = scValue(s.cur, defs.tot); const pp = scValue(s.cur, defs.pp); const ppPrev = scValue(s.prev, defs.pp);
+  const routes = SC.route === 'fleet' ? d.routes.map((r) => {
+    const v = scValue(r.current, defs.pp);
+    return '<span class="sc-cost-route">Route ' + escapeHtml(r.route) + ' <b>' + defs.pp.fmt(v) + '</b></span>';
+  }).join('') : '';
+  el.className = 'sc-cost-strip';
+  el.innerHTML = '<span class="sc-cost-lead">At ' + cur + scNum(rate, rate % 1 ? 2 : 0) + ' an hour</span>'
+    + '<span>Cost to run <b>' + defs.tot.fmt(tot) + '</b> over ' + scNum(s.cur.productivity.service_hours) + ' hours</span>'
+    + '<span>Cost per passenger <b>' + defs.pp.fmt(pp) + '</b> ' + scChange(pp, ppPrev, defs.pp) + '</span>'
+    + routes;
+}
+
 function scValue(m, def) {
   if (!m) return null;
   if (def.g === 'derived') {
-    const cost = parseFloat(localStorage.getItem(SC_COST_KEY));
-    return cost > 0 && m.productivity.pax_per_hour ? cost / m.productivity.pax_per_hour : null;
+    const cost = scCostRate();
+    if (!cost) return null;
+    if (def.k === 'cost_total') return m.productivity.service_hours ? cost * m.productivity.service_hours : null;
+    return m.productivity.pax_per_hour ? cost / m.productivity.pax_per_hour : null;
   }
   return m[def.g] ? m[def.g][def.k] : null;
 }
@@ -7180,11 +7213,11 @@ function initScorecard() {
   document.getElementById('scCurrency').textContent = scCurrency();
   const cost = document.getElementById('scCost');
   cost.value = localStorage.getItem(SC_COST_KEY) || '';
-  cost.addEventListener('input', () => {
+  ['input', 'change'].forEach((ev) => cost.addEventListener(ev, () => {
     const v = parseFloat(cost.value);
     if (v > 0) localStorage.setItem(SC_COST_KEY, String(v)); else localStorage.removeItem(SC_COST_KEY);
     scRender();
-  });
+  }));
   document.querySelectorAll('#scPeriod [data-sc-days]').forEach((b) => b.addEventListener('click', () => {
     document.querySelectorAll('#scPeriod .period-tab').forEach((x) => x.classList.toggle('active', x === b));
     SC.days = b.getAttribute('data-sc-days');
@@ -7267,6 +7300,8 @@ function scRender() {
   document.getElementById('scServ').innerHTML = rows(SC_MEASURES.serv);
   document.getElementById('scWelf').innerHTML = rows(SC_MEASURES.welf);
 
+  scRenderCost(d, s);
+
   // ---- incidents by type ----
   const types = cur.welfare.by_type || [];
   const maxN = Math.max(1, ...types.map((t) => t.n));
@@ -7283,6 +7318,7 @@ function scRender() {
     return '<tr' + (r.route === SC.route ? ' class="sel"' : '') + '><td class="sc-m">Route ' + escapeHtml(r.route) + '<div class="sc-sub">' + escapeHtml(rsRouteShortName(r) || r.name) + '</div></td>'
       + cell(scNum(c.productivity.passengers))
       + cell(scNum(c.productivity.pax_per_hour, 1), c.rag.pax_per_hour)
+      + cell(SC_MEASURES.prod.find((x) => x.k === 'cost_per_pax').fmt(scValue(c, { g: 'derived', k: 'cost_per_pax' })))
       + cell(c.productivity.seat_use == null ? '--' : c.productivity.seat_use + '%', c.rag.seat_use)
       + cell(c.service.on_target == null ? '--' : c.service.on_target + '%', c.rag.on_target)
       + cell(c.service.wait == null ? '--' : scNum(c.service.wait, 1) + ' min', c.rag.wait_vs_timetable)

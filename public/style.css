@@ -4518,6 +4518,15 @@ html[data-skin="glossy-platinum"][data-theme] .rid-rt-card { border-color: rgba(
 .sc-notes b { color: var(--color-text); }
 .sc-notes a { color: #38bdf8; }
 #scRoutesPanel[hidden] { display: none; }
+.sc-cost-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 22px; margin-bottom: var(--space-4); padding: 10px 16px; border-radius: 10px; font-size: 0.85rem; color: var(--color-text); background: rgba(56,189,248,0.08); border: 1px solid rgba(56,189,248,0.3); }
+.sc-cost-strip b { font-weight: 700; font-variant-numeric: tabular-nums; }
+.sc-cost-strip .sc-cost-lead { font-weight: 700; color: #38bdf8; }
+.sc-cost-strip .sc-cost-route { color: var(--color-text-muted); }
+.sc-cost-strip .sc-cost-route b { color: var(--color-text); }
+.sc-cost-strip.empty { background: transparent; border-style: dashed; border-color: var(--color-border, rgba(255,255,255,0.15)); color: var(--color-text-muted); font-size: 0.8rem; }
+html[data-skin="glossy-platinum"][data-theme] .sc-cost-strip { background: rgba(201,154,62,0.10); border-color: rgba(217,189,128,0.4); }
+html[data-skin="glossy-platinum"][data-theme] .sc-cost-strip .sc-cost-lead { color: #d9bd80; }
+html[data-skin="glossy-platinum"][data-theme] .sc-cost-strip.empty { background: transparent; border-color: rgba(217,189,128,0.3); }
 @media (max-width: 1400px) { .sc-hero { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 1200px) { .sc-cols, .sc-grid2 { grid-template-columns: 1fr; } }
 @media (max-width: 640px) { .sc-hero { grid-template-columns: 1fr; } }
