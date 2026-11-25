@@ -3107,6 +3107,7 @@ function initRidershipTrendChart() {
           display: (c) => c.datasetIndex === 0 && (c.chart._ridMeta || {}).labels && c.dataset.data[c.dataIndex] != null,
           align: 'top', anchor: 'end', offset: 6, clamp: true,
           color: '#e6e7ef', font: { family: 'Inter', size: 11.5, weight: '600' },
+          backgroundColor: 'rgba(14,15,22,0.88)', borderRadius: 6, padding: { top: 3, bottom: 2, left: 6, right: 6 },
           formatter: (v) => Number(v || 0).toLocaleString(),
         },
         tooltip: { ...tooltipDefaults(), padding: 12, displayColors: false,
