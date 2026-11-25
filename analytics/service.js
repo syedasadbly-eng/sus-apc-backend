@@ -82,7 +82,10 @@ function toVisits(rows) {
 
 /**
  * Pure analysis for one route.
- * @param {object} route   { key, name, loop_minutes, bus_ids, stops:[{name}] }
+ * @param {object} route   { key, name, loop_minutes, headway_minutes?, buses_in_service?, bus_ids, stops:[{name}] }
+ *                          loop_minutes      one bus's time round the loop
+ *                          headway_minutes   published frequency at each stop (optional)
+ *                          buses_in_service  buses running the route, sensors or not (optional)
  * @param {Array}  rows    records for this route, any order
  * @param {object} opts    { capacity, tz }
  */
@@ -179,9 +182,17 @@ function analyseRoute(route, rows, { capacity, tz }) {
   };
 
   // ---------------- time between buses ----------------
+  // Buses with sensors (the only ones whose gaps we can see) vs buses running
+  // the route. When they differ, observed gaps are judged against the tracked
+  // buses' own spacing (loop / tracked) and the published frequency is
+  // reported separately.
   const nBuses = Math.max(1, (route.bus_ids && route.bus_ids.length) || buses.length || 1);
   const loopMin = Number(route.loop_minutes) || null;
-  const target = loopMin ? loopMin / nBuses : null;
+  const headwayCfg = Number(route.headway_minutes) || null;
+  const fleetCfg = Number(route.buses_in_service) || null;
+  const inService = Math.max(nBuses, fleetCfg || (headwayCfg && loopMin ? Math.round(loopMin / headwayCfg) : nBuses));
+  const headway = headwayCfg || (loopMin ? loopMin / inService : null);
+  const target = loopMin ? loopMin / nBuses : headway;
   // Anything longer than this is a break in service, not a gap a passenger waits through.
   const breakMin = Math.max(90, target ? target * 3 : 0);
   const gapAll = [];
@@ -214,6 +225,11 @@ function analyseRoute(route, rows, { capacity, tz }) {
   const sumSqAll = gapAll.reduce((s, x) => s + x * x, 0);
   const gaps = {
     buses: nBuses,
+    buses_in_service: inService,
+    partial: inService > nBuses,
+    headway: headway != null ? round(headway, 1) : null,
+    // Wait if every bus on the route keeps to the published frequency.
+    timetable_wait: headway != null ? round(headway / 2, 1) : null,
     target: target != null ? round(target, 1) : null,
     count: gapAll.length,
     avg: round(mean(gapAll), 1),

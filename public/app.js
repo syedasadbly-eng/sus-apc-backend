@@ -6836,7 +6836,7 @@ const spTargetPlugin = {
     ctx.beginPath(); ctx.moveTo(chartArea.left, py); ctx.lineTo(chartArea.right, py); ctx.stroke();
     ctx.setLineDash([]);
     ctx.font = '600 11px Inter, sans-serif'; ctx.fillStyle = '#86efac'; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
-    ctx.fillText('Timetable ' + spMin(t) + ' min', chartArea.right - 4, py - 4);
+    ctx.fillText((chart.$spTargetLabel || 'Timetable') + ' ' + spMin(t) + ' min', chartArea.right - 4, py - 4);
     ctx.restore();
   },
 };
@@ -6962,7 +6962,15 @@ function spRender() {
   if (charts.loadProfile) {
     const ch = charts.loadProfile;
     ch.$spCap = cap;
-    ch.data.labels = st.map((s) => { const l = spStopLabel(s.name); return l.length > 18 ? l.replace(/ \(return\)$/, '').split(/\s+(?=\S+$)/).concat(/\(return\)$/.test(l) ? ['(return)'] : []) : l; });
+    ch.data.labels = st.map((s) => {
+      const l = spStopLabel(s.name);
+      if (l.length <= 18) return l;
+      const ret = /\(return\)$/.test(l);
+      const base = l.replace(/ \(return\)$/, '');
+      // Break at an em dash if there is one, otherwise before the last word.
+      const parts = base.includes(' \u2014 ') ? base.split(' \u2014 ') : base.split(/\s+(?=\S+$)/);
+      return parts.concat(ret ? ['(return)'] : []);
+    });
     ch.data.datasets[0].data = st.map((s) => s.avg_load);
     ch.data.datasets[1].data = st.map((s) => s.max_load);
     ch.data.datasets[2].data = st.map((s) => s.avg_on);
@@ -7011,18 +7019,28 @@ function spRender() {
   // ---- Time between buses ----
   const g = r.gaps;
   spSetHtml('spGapTyp', g.median == null ? '--' : spMin(g.median) + '<small>min</small>');
-  rsSetText('spGapTypSub', g.target ? 'timetable every ' + spMin(g.target) + ' min' : 'no timetable set');
+  rsSetText('spGapTypSub', g.partial
+    ? 'tracked bus every ' + spMin(g.target) + ' min \u00b7 route every ' + spMin(g.headway)
+    : (g.target ? 'timetable every ' + spMin(g.target) + ' min' : 'no timetable set'));
   spTone('spGapTyp', g.target && g.median != null ? (g.median <= g.target + 2 ? 'good' : g.median <= g.target + 5 ? 'warn' : 'bad') : null);
-  spSetHtml('spWait', g.wait == null ? '--' : spMin(g.wait) + '<small>min</small>');
+  // With only some of the route's buses tracked, observed gaps overstate the
+  // wait, so show the timetable figure and keep the tracked-bus wait as context.
+  const waitV = g.partial ? g.timetable_wait : g.wait;
+  spSetHtml('spWait', waitV == null ? '--' : spMin(waitV) + '<small>min</small>');
+  rsSetText('spWaitSub', g.partial
+    ? 'if all ' + g.buses_in_service + ' buses keep to time \u00b7 tracked bus alone ' + spMin(g.wait) + ' min'
+    : 'for someone arriving at random');
   spTone('spWait', null);
   spSetHtml('spOnTarget', g.on_target == null ? '--' : g.on_target + '<small>%</small>');
   rsSetText('spOnTargetSub', g.target ? 'within ' + spMin(g.target + 5) + ' min \u00b7 ' + g.count.toLocaleString() + ' gaps' : '--');
   spTone('spOnTarget', g.on_target == null ? null : g.on_target >= 90 ? 'good' : g.on_target >= 75 ? 'warn' : 'bad');
-  rsSetText('spGapSub', (g.buses > 1 ? g.buses + ' buses' : 'One bus') + ' on this route \u00b7 ' + (g.buses > 1 && g.bunched != null ? g.bunched + ' bunched arrivals \u00b7 ' : '') + 'loop takes ' + spMin(r.loops.median) + ' min typically (timetable ' + spMin(r.loops.scheduled) + ')');
+  if (g.partial) rsSetText('spGapSub', 'Route timetable every ' + spMin(g.headway) + ' min with ' + g.buses_in_service + ' buses \u00b7 ' + g.buses + ' has sensors, so gaps shown are for the tracked bus (every ' + spMin(g.target) + ' min) \u00b7 loop takes ' + spMin(r.loops.median) + ' min typically (timetable ' + spMin(r.loops.scheduled) + ')');
+  else rsSetText('spGapSub', (g.buses > 1 ? g.buses + ' buses' : 'One bus') + ' on this route \u00b7 ' + (g.buses > 1 && g.bunched != null ? g.bunched + ' bunched arrivals \u00b7 ' : '') + 'loop takes ' + spMin(r.loops.median) + ' min typically (timetable ' + spMin(r.loops.scheduled) + ')');
   if (charts.gapByHour) {
     const ch = charts.gapByHour;
     const hrs = []; for (let i = 0; i < 24; i++) if (g.by_hour[i] != null) hrs.push(i);
     ch.$spTarget = g.target;
+    ch.$spTargetLabel = g.partial ? 'Tracked bus' : 'Timetable';
     ch.data.labels = hrs.map((x) => String(x).padStart(2, '0'));
     ch.data.datasets[0].data = hrs.map((x) => g.by_hour[x]);
     ch.data.datasets[0].backgroundColor = hrs.map((x) => {
@@ -7036,9 +7054,9 @@ function spRender() {
   spSetHtml('spGapBody', g.by_stop.map((s) => {
     const tone = s.on_target == null ? '' : s.on_target >= 90 ? '#4ade80' : s.on_target >= 75 ? '#fbbf24' : '#f87171';
     return '<tr><td style="color:var(--color-text);font-weight:500">' + escapeHtml(spStopLabel(s.name)) + '</td>'
-      + '<td style="text-align:right">' + spMin(s.median) + 'm</td>'
-      + '<td style="text-align:right">' + spMin(s.p90) + 'm</td>'
-      + '<td style="text-align:right">' + spMin(s.wait) + 'm</td>'
+      + '<td style="text-align:right">' + (s.median == null ? '--' : spMin(s.median) + 'm') + '</td>'
+      + '<td style="text-align:right">' + (s.p90 == null ? '--' : spMin(s.p90) + 'm') + '</td>'
+      + '<td style="text-align:right">' + (s.wait == null ? '--' : spMin(s.wait) + 'm') + '</td>'
       + '<td style="text-align:right;color:' + tone + ';font-weight:600">' + (s.on_target == null ? '--' : s.on_target + '%') + '</td></tr>';
   }).join(''));
 }

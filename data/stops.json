@@ -26,7 +26,10 @@
     },
     "419": {
       "name": "Bus 419 — Mayo NW Patient Parking Shuttle (Building B ↔ Baldwin)",
-      "loop_minutes": 50,
+      "loop_minutes": 60,
+      "headway_minutes": 30,
+      "buses_in_service": 2,
+      "timetable_source": "https://www.mayoclinic.org/rochester-construction/patient-shuttle — every 30 min on the hour and half hour, ~25 min each way to Baldwin; 2 buses inferred",
       "bus_ids": ["419"],
       "stops": [
         { "id": "419-01", "name": "Medical Complex NW — Building B (3033 41st St NW)", "lat": 44.07770, "lng": -92.50580 },
