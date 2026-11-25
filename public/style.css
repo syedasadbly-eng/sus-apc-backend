@@ -4373,3 +4373,24 @@ html[data-skin="glossy-platinum"][data-theme] #view-welfare-console .wc-top-weat
 @media (prefers-reduced-motion: reduce) {
   .live-bus-icon.bus-is-stopped .bus-marker::after { animation: none; opacity: 0.6; }
 }
+
+/* ==== HISTORY PLAYBACK — road-following buses, contrast trails (playback-trails-v1) ==== */
+.pb-bus-dot {
+  width: 30px; height: 30px; border-radius: 50%; background: var(--c, #2563eb); color: #fff;
+  display: flex; align-items: center; justify-content: center; position: relative;
+  font: 700 12px/1 Inter, system-ui, sans-serif; border: 3px solid #fff;
+  box-shadow: 0 0 0 1px rgba(15,23,42,0.35), 0 3px 10px rgba(15,23,42,0.4);
+}
+.pb-bus-dot::after {
+  content: ''; position: absolute; inset: -7px; border-radius: 50%; border: 2px solid var(--c, #2563eb); opacity: 0; pointer-events: none;
+}
+.pb-bus.pb-bus-stopped .pb-bus-dot::after { animation: busStopPulse 1.8s ease-out infinite; }
+/* Stops in the replay: hollow until visited, filled once passed, pulse while a bus is there */
+.pb-stop-ring {
+  width: 12px; height: 12px; margin: 3px; border-radius: 50%; box-sizing: border-box;
+  background: #fff; border: 2.5px solid var(--c, #7c3aed); opacity: 0.55;
+  box-shadow: 0 1px 3px rgba(15,23,42,0.3); transition: opacity 0.3s, background 0.3s, transform 0.3s;
+}
+.pb-stop.pb-stop-visited .pb-stop-ring { opacity: 1; background: var(--c, #7c3aed); }
+.pb-stop.pb-stop-here .pb-stop-ring { opacity: 1; background: var(--c, #7c3aed); transform: scale(1.35); box-shadow: 0 0 0 4px rgba(255,255,255,0.85), 0 0 0 7px var(--c, #7c3aed); }
+@media (prefers-reduced-motion: reduce) { .pb-bus.pb-bus-stopped .pb-bus-dot::after { animation: none; opacity: 0.6; } }

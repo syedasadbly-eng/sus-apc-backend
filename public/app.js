@@ -1399,9 +1399,23 @@ const TRAIL_SEGS = 16;         // trail drawn as segments of falling opacity
 let busAnimRaf = null;
 // Leaflet rounds marker positions to whole pixels; at city zoom a bus moves
 // well under a pixel per frame, so that made it hop. Keep sub-pixel.
+// Buses sit in their own pane above stop-name labels (tooltipPane is 650)
+// but below popups (700), so a label never covers a bus.
+function busPane(map) {
+  if (!map.getPane('busPane')) { const p = map.createPane('busPane'); p.style.zIndex = 660; }
+  return 'busPane';
+}
 const SmoothBusMarker = L.Marker.extend({
   update() {
-    if (this._icon && this._map) this._setPos(this._map.project(this._latlng)._subtract(this._map.getPixelOrigin()));
+    if (this._icon && this._map) {
+      const pos = this._map.project(this._latlng)._subtract(this._map.getPixelOrigin());
+      this._setPos(pos);
+      // Leaflet derives z-index from pos.y; a fractional value is invalid CSS
+      // and would drop the bus below stop markers, so round it.
+      const z = Math.round(pos.y + (this.options.zIndexOffset || 0));
+      this._icon.style.zIndex = z;
+      if (this._shadow) this._shadow.style.zIndex = z;
+    }
     return this;
   },
 });
@@ -1608,7 +1622,7 @@ function updateMapBusMarkers(map, mapKey) {
     const target = [bus.lat, bus.lng];
     let st = state[bus.id];
     if (!st) {
-      const marker = new SmoothBusMarker(target, { icon: L.divIcon({ className: 'live-bus-icon', html: iconHtml, iconSize: [32, 32], iconAnchor: [16, 16] }), zIndexOffset: 1000 }).addTo(map);
+      const marker = new SmoothBusMarker(target, { pane: busPane(map), icon: L.divIcon({ className: 'live-bus-icon', html: iconHtml, iconSize: [32, 32], iconAnchor: [16, 16] }), zIndexOffset: 1000 }).addTo(map);
       st = state[bus.id] = { marker, iconHtml, trail: busBackfillTrail(bus.id, target, now), backfilled: !!busRouteFor(bus.id), segs: [], path: null, color: busTrailColor(bus), target };
       busSetMoving(st, false);
       const ring = marker.getElement && marker.getElement(); if (ring) ring.style.setProperty('--bus-route', st.color);
@@ -6002,6 +6016,10 @@ function clearHistoryLayers() {
     try { map.removeLayer(HISTORY.playback.trails[k]); } catch (e) {}
     delete HISTORY.playback.trails[k];
   }
+  HISTORY.playback.trailLines = {};
+  HISTORY.playback.stops = {};
+  HISTORY.playback.byBus = null;
+  HISTORY.playback.t0 = null;
   stopPlayback();
   const scrubber = document.getElementById('playbackScrubber');
   if (scrubber) scrubber.style.display = 'none';
@@ -6081,44 +6099,220 @@ function renderHeatmap() {
   HISTORY.layers['heat'] = heat;
 }
 
+// ----- Playback: smooth replay clock, road-following buses, comet trails ---
+// The replay runs on its own clock (replay ms per real ms = speed x 30), so
+// buses glide continuously between recorded points instead of hopping from
+// stop to stop. Between two points a bus dwells briefly, then follows the
+// route's road path with eased acceleration. Each bus leaves a high-contrast
+// trail (white casing + route-colour core, fading towards the tail), and the
+// stops it visits light up as it passes them.
+const PB_RATE = 30;               // replay speed at "1x" (30x real time)
+const PB_GAP_PARK_MS = 30 * 60000; // gaps longer than this: bus is parked
+const PB_TRAIL_WINDOW = 20 * 60000; // replay time sampled for the trail
+const PB_TRAIL_M = 2600;           // trail length (metres)
+const PB_TRAIL_SEGS = 14;
+
+function pbColor(busId) { return busTrailColor({ id: busId }) || busColor(busId); }
+
+// Forward road path between two points along the bus's route loop (no length
+// cap, unlike the live helper). Cached per point pair.
+const PB_PATH_CACHE = new Map();
+function pbRoadPath(busId, from, to) {
+  const key = busId + '|' + from[0].toFixed(5) + ',' + from[1].toFixed(5) + '|' + to[0].toFixed(5) + ',' + to[1].toFixed(5);
+  if (PB_PATH_CACHE.has(key)) return PB_PATH_CACHE.get(key);
+  let out = null;
+  try {
+    const route = busRouteFor(busId);
+    const line = route && routeLinePoints(route);
+    if (line && line.roads && line.pts.length > 1) {
+      const pts = line.pts;
+      const nearest = (p) => { let bi = 0, bd = Infinity; for (let i = 0; i < pts.length; i++) { const d = geoDist(p, pts[i]); if (d < bd) { bd = d; bi = i; } } return [bi, bd]; };
+      const [i0, d0] = nearest(from), [i1, d1] = nearest(to);
+      if (d0 < 120 && d1 < 120 && i0 !== i1) {
+        out = [from]; let i = i0, g = 0, len = 0;
+        while (i !== i1 && g++ < pts.length) { i = (i + 1) % pts.length; len += geoDist(out[out.length - 1], pts[i]); out.push(pts[i]); }
+        out.push(to);
+        const direct = geoDist(from, to);
+        if (len > Math.max(12000, direct * 6)) out = null;   // wrong way round
+      }
+    }
+  } catch (e) { out = null; }
+  if (!out) out = [from, to];
+  // Precompute cumulative lengths for fast lookup.
+  const cum = [0];
+  for (let i = 1; i < out.length; i++) cum.push(cum[i - 1] + geoDist(out[i - 1], out[i]));
+  const res = { pts: out, cum, len: cum[cum.length - 1] };
+  PB_PATH_CACHE.set(key, res);
+  if (PB_PATH_CACHE.size > 2000) PB_PATH_CACHE.delete(PB_PATH_CACHE.keys().next().value);
+  return res;
+}
+function pbPointOn(path, f) {
+  if (path.len <= 0) return path.pts[path.pts.length - 1];
+  const want = path.len * Math.max(0, Math.min(1, f));
+  let lo = 0, hi = path.cum.length - 1;
+  while (lo < hi - 1) { const mid = (lo + hi) >> 1; if (path.cum[mid] <= want) lo = mid; else hi = mid; }
+  const seg = path.cum[hi] - path.cum[lo] || 1, k = (want - path.cum[lo]) / seg;
+  const p = path.pts[lo], q = path.pts[hi];
+  return [p[0] + (q[0] - p[0]) * k, p[1] + (q[1] - p[1]) * k];
+}
+
+// Where bus `busId` is at replay time t. Returns { pos, moving, at }.
+function pbPositionAt(busId, t) {
+  const arr = HISTORY.playback.byBus[busId];
+  if (!arr || !arr.length) return null;
+  if (t <= arr[0].t) return { pos: [arr[0].lat, arr[0].lng], moving: false, at: arr[0] };
+  let lo = 0, hi = arr.length - 1;
+  if (t >= arr[hi].t) return { pos: [arr[hi].lat, arr[hi].lng], moving: false, at: arr[hi] };
+  while (lo < hi - 1) { const mid = (lo + hi) >> 1; if (arr[mid].t <= t) lo = mid; else hi = mid; }
+  const a = arr[lo], b = arr[hi];
+  const gap = b.t - a.t;
+  if (gap > PB_GAP_PARK_MS || (a.lat === b.lat && a.lng === b.lng)) return { pos: [a.lat, a.lng], moving: false, at: a };
+  // Dwell at the stop for a short share of the gap, then drive.
+  const dwell = Math.min(gap * 0.12, 45000);
+  if (t < a.t + dwell) return { pos: [a.lat, a.lng], moving: false, at: a };
+  const u = (t - a.t - dwell) / Math.max(1, gap - dwell);
+  const e = u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;   // ease in-out
+  const path = pbRoadPath(busId, [a.lat, a.lng], [b.lat, b.lng]);
+  return { pos: pbPointOn(path, e), moving: true, at: null };
+}
+
 function renderPlayback() {
   const map = maps.liveMap;
   const scrubber = document.getElementById('playbackScrubber');
   if (scrubber) scrubber.style.display = 'flex';
-
-  // Faint trail polylines for context (per bus).
-  const byBus = {};
+  const pb = HISTORY.playback;
+  // Per-bus, time-sorted points (depot resets excluded from motion).
+  pb.byBus = {};
   for (const p of HISTORY.points) {
-    if (!byBus[p.bus_id]) byBus[p.bus_id] = [];
-    byBus[p.bus_id].push(p);
+    if (!p.lat || !p.lng || p.stop === '-') continue;
+    (pb.byBus[p.bus_id] = pb.byBus[p.bus_id] || []).push({ ...p, t: new Date(p.timestamp).getTime() });
   }
-  Object.keys(byBus).forEach(busId => {
-    const pts = byBus[busId];
-    const color = busColor(busId);
-    const trail = L.polyline(pts.map(p => [p.lat, p.lng]), {
-      color, weight: 2, opacity: 0.22, dashArray: '4,4',
-    }).addTo(map);
-    HISTORY.playback.trails[busId] = trail;
-    // Initial marker at first point.
-    const first = pts[0];
-    const marker = L.circleMarker([first.lat, first.lng], {
-      radius: 9, color: '#fff', weight: 3, fillColor: color, fillOpacity: 1,
-    }).addTo(map);
-    marker.bindTooltip(`Bus ${busId}`, { direction: 'top', permanent: true, className: 'history-bus-label', offset: [0, -14] });
-    HISTORY.playback.markers[busId] = marker;
+  Object.values(pb.byBus).forEach((a) => a.sort((x, y) => x.t - y.t));
+  const all = Object.values(pb.byBus).flat();
+  pb.t0 = Math.min(...all.map((p) => p.t));
+  pb.t1 = Math.max(...all.map((p) => p.t));
+  pb.t = pb.t0;
+
+  // Stops visited in this range: a ring that lights up once a bus has been
+  // there, and pulses while a bus is dwelling at it.
+  const stopsGroup = L.layerGroup().addTo(map);
+  HISTORY.layers['pb-stops'] = stopsGroup;
+  pb.stops = {};
+  Object.entries(pb.byBus).forEach(([busId, arr]) => {
+    const color = pbColor(busId);
+    arr.forEach((p) => {
+      const k = busId + '|' + p.lat.toFixed(4) + ',' + p.lng.toFixed(4);
+      if (pb.stops[k]) { pb.stops[k].visits.push(p.t); return; }
+      const m = L.marker([p.lat, p.lng], {
+        icon: L.divIcon({ className: 'pb-stop', html: `<div class="pb-stop-ring" style="--c:${color}"></div>`, iconSize: [18, 18], iconAnchor: [9, 9] }),
+        interactive: true, zIndexOffset: 500,
+      }).addTo(stopsGroup);
+      m.bindTooltip(`<strong>${escapeHtml(rsStopLabel(String(p.stop || 'Stop')))}</strong><br><span style="opacity:.75">Bus ${escapeHtml(busId)}</span>`, { direction: 'top', offset: [0, -8] });
+      pb.stops[k] = { marker: m, busId, visits: [p.t], state: '' };
+    });
   });
 
-  // Slider mapped to point index across the entire dataset (in time order).
+  Object.keys(pb.byBus).forEach((busId) => {
+    const color = pbColor(busId);
+    const first = pb.byBus[busId][0];
+    // Trail: white casing for contrast, then route-colour core segments.
+    const group = L.layerGroup().addTo(map);
+    const casing = [], core = [];
+    for (let i = 0; i < PB_TRAIL_SEGS; i++) {
+      casing.push(L.polyline([], { color: '#ffffff', weight: 8, opacity: 0, lineCap: 'butt', lineJoin: 'round', interactive: false, className: 'pb-trail-casing' }).addTo(group));
+    }
+    for (let i = 0; i < PB_TRAIL_SEGS; i++) {
+      core.push(L.polyline([], { color, weight: 4, opacity: 0, lineCap: i === PB_TRAIL_SEGS - 1 ? 'round' : 'butt', lineJoin: 'round', interactive: false, className: 'pb-trail' }).addTo(group));
+    }
+    pb.trails[busId] = group;
+    pb.trailLines = pb.trailLines || {};
+    pb.trailLines[busId] = { casing, core };
+    const marker = new SmoothBusMarker([first.lat, first.lng], {
+      pane: busPane(map),
+      icon: L.divIcon({ className: 'pb-bus', html: `<div class="pb-bus-dot" style="--c:${color}">${escapeHtml(String(busId).slice(-3))}</div>`, iconSize: [30, 30], iconAnchor: [15, 15] }),
+      zIndexOffset: 1200,
+    }).addTo(map);
+    pb.markers[busId] = marker;
+  });
+
   const slider = document.getElementById('playbackSlider');
-  if (slider) {
-    slider.min = 0;
-    slider.max = HISTORY.points.length - 1;
-    slider.value = 0;
-  }
-  HISTORY.playback.idx = 0;
-  HISTORY.playback.playing = false;
+  if (slider) { slider.min = 0; slider.max = 1000; slider.step = 1; slider.value = 0; }
+  pb.idx = 0;
+  pb.playing = false;
   updatePlaybackUI();
-  seekPlayback(0);
+  pbRender();
+}
+
+// Draw everything for the current replay time.
+function pbRender() {
+  const pb = HISTORY.playback;
+  if (!pb.byBus || pb.t0 == null) return;
+  const t = pb.t;
+  const slider = document.getElementById('playbackSlider');
+  const span = Math.max(1, pb.t1 - pb.t0);
+  if (slider) slider.value = Math.round(((t - pb.t0) / span) * 1000);
+  const time = document.getElementById('playbackTime');
+  if (time) time.textContent = new Date(t).toLocaleString();
+  // Keep idx (used by the stop card) on the latest point at or before t.
+  const pts = HISTORY.points;
+  let lo = 0, hi = pts.length - 1;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (new Date(pts[mid].timestamp).getTime() <= t) lo = mid; else hi = mid - 1; }
+  pb.idx = lo;
+  if (STOP_CARD_ACTIVE && STOP_CARD_ACTIVE._stopCardRefresh && Date.now() - (pbRender._cardT || 0) > 400) {
+    pbRender._cardT = Date.now(); STOP_CARD_ACTIVE._stopCardRefresh();
+  }
+  const dwelling = new Set();
+  Object.keys(pb.byBus).forEach((busId) => {
+    const cur = pbPositionAt(busId, t);
+    if (!cur) return;
+    const marker = pb.markers[busId];
+    if (marker) {
+      marker.setLatLng(cur.pos);
+      const el = marker.getElement && marker.getElement();
+      if (el) el.classList.toggle('pb-bus-stopped', !cur.moving);
+    }
+    if (!cur.moving && cur.at) dwelling.add(busId + '|' + cur.at.lat.toFixed(4) + ',' + cur.at.lng.toFixed(4));
+    // Trail: sample positions back in replay time, trim to a set distance.
+    const samples = [cur.pos];
+    let dist = 0;
+    const N = 120, dt = PB_TRAIL_WINDOW / N;
+    for (let k = 1; k <= N && dist < PB_TRAIL_M; k++) {
+      const q = pbPositionAt(busId, t - k * dt);
+      if (!q) break;
+      const last = samples[samples.length - 1];
+      const d = geoDist(last, q.pos);
+      if (d < 0.5) continue;
+      if (d > 3000) break;                 // parked overnight / jump: stop the trail
+      samples.push(q.pos); dist += d;
+    }
+    samples.reverse();                       // tail -> head
+    const lines = pb.trailLines && pb.trailLines[busId];
+    if (!lines) return;
+    const cum = [0];
+    for (let i = 1; i < samples.length; i++) cum.push(cum[i - 1] + geoDist(samples[i - 1], samples[i]));
+    const total = cum[cum.length - 1];
+    for (let sIdx = 0; sIdx < PB_TRAIL_SEGS; sIdx++) {
+      if (total < 5) { lines.casing[sIdx].setStyle({ opacity: 0 }); lines.core[sIdx].setStyle({ opacity: 0 }); continue; }
+      const d0 = total * sIdx / PB_TRAIL_SEGS, d1 = total * (sIdx + 1) / PB_TRAIL_SEGS;
+      const chunk = [];
+      const at = (d) => { let k = 0; while (k < cum.length - 2 && cum[k + 1] < d) k++; const seg = cum[k + 1] - cum[k] || 1; const f = Math.max(0, Math.min(1, (d - cum[k]) / seg)); const q = samples[Math.min(k + 1, samples.length - 1)]; return [samples[k][0] + (q[0] - samples[k][0]) * f, samples[k][1] + (q[1] - samples[k][1]) * f]; };
+      chunk.push(at(d0));
+      for (let k = 1; k < samples.length - 1; k++) if (cum[k] > d0 && cum[k] < d1) chunk.push(samples[k]);
+      chunk.push(at(d1));
+      const f = (sIdx + 1) / PB_TRAIL_SEGS, e = f * f;
+      lines.casing[sIdx].setLatLngs(chunk).setStyle({ opacity: 0.15 + 0.75 * e, weight: 4 + 6 * f });
+      lines.core[sIdx].setLatLngs(chunk).setStyle({ opacity: 0.12 + 0.88 * e, weight: 2 + 4 * f });
+    }
+  });
+  // Stop rings: visited / bus dwelling here now.
+  Object.entries(pb.stops || {}).forEach(([k, st]) => {
+    const visited = st.visits[0] <= t;
+    const state = dwelling.has(k) ? 'here' : visited ? 'visited' : '';
+    if (state === st.state) return;
+    st.state = state;
+    const el = st.marker.getElement && st.marker.getElement();
+    if (el) { el.classList.toggle('pb-stop-visited', state === 'visited'); el.classList.toggle('pb-stop-here', state === 'here'); }
+  });
 }
 
 function updatePlaybackUI() {
@@ -6132,63 +6326,42 @@ function updatePlaybackUI() {
 }
 
 function togglePlayback() {
-  if (!HISTORY.points.length) return;
-  HISTORY.playback.playing = !HISTORY.playback.playing;
+  const pb = HISTORY.playback;
+  if (!HISTORY.points.length || pb.t0 == null) return;
+  pb.playing = !pb.playing;
   updatePlaybackUI();
-  if (HISTORY.playback.playing) {
-    if (HISTORY.playback.idx >= HISTORY.points.length - 1) HISTORY.playback.idx = 0;
-    const step = () => {
-      if (!HISTORY.playback.playing) return;
-      seekPlayback(HISTORY.playback.idx + 1);
-      if (HISTORY.playback.idx >= HISTORY.points.length - 1) {
-        HISTORY.playback.playing = false;
-        updatePlaybackUI();
-        return;
-      }
-      // Interval scales with speed multiplier.
-      const interval = Math.max(20, 500 / HISTORY.playback.speed);
-      HISTORY.playback.timer = setTimeout(step, interval);
-    };
-    step();
-  } else {
-    stopPlayback();
-  }
+  if (!pb.playing) { stopPlayback(); return; }
+  if (pb.t >= pb.t1) pb.t = pb.t0;
+  let last = performance.now();
+  const frame = (now) => {
+    if (!pb.playing) return;
+    const dtReal = Math.min(100, now - last); last = now;
+    let next = pb.t + dtReal * PB_RATE * (pb.speed || 4);
+    // Skip long idle gaps (overnight) when every bus is parked.
+    const ahead = Object.values(pb.byBus).map((arr) => { const n = arr.find((p) => p.t > pb.t); return n ? n.t : Infinity; });
+    const soonest = Math.min(...ahead);
+    const allParked = Object.values(pb.byBus).every((arr) => { const n = arr.find((p) => p.t > pb.t); const prev = [...arr].reverse().find((p) => p.t <= pb.t); return !n || !prev || n.t - prev.t > PB_GAP_PARK_MS; });
+    if (allParked && isFinite(soonest) && soonest - next > 60000) next = soonest - 60000;
+    pb.t = Math.min(pb.t1, next);
+    pbRender();
+    if (pb.t >= pb.t1) { pb.playing = false; updatePlaybackUI(); return; }
+    pb.timer = requestAnimationFrame(frame);
+  };
+  pb.timer = requestAnimationFrame(frame);
 }
 
 function stopPlayback() {
-  if (HISTORY.playback.timer) clearTimeout(HISTORY.playback.timer);
+  if (HISTORY.playback.timer) cancelAnimationFrame(HISTORY.playback.timer);
   HISTORY.playback.timer = null;
   HISTORY.playback.playing = false;
 }
 
-function seekPlayback(idx) {
-  if (!HISTORY.points.length) return;
-  idx = Math.max(0, Math.min(HISTORY.points.length - 1, idx));
-  HISTORY.playback.idx = idx;
-  const slider = document.getElementById('playbackSlider');
-  if (slider && parseInt(slider.value, 10) !== idx) slider.value = idx;
-  // Time readout.
-  const p = HISTORY.points[idx];
-  const time = document.getElementById('playbackTime');
-  if (time && p) time.textContent = new Date(p.timestamp).toLocaleString();
-  // Keep an open stop card in step with the replay (throttled).
-  if (STOP_CARD_ACTIVE && STOP_CARD_ACTIVE._stopCardRefresh && Date.now() - (seekPlayback._cardT || 0) > 400) {
-    seekPlayback._cardT = Date.now(); STOP_CARD_ACTIVE._stopCardRefresh();
-  }
-  // Move each bus marker to its most-recent point at or before this timestamp.
-  const cutoffTs = new Date(p.timestamp).getTime();
-  Object.keys(HISTORY.playback.markers).forEach(busId => {
-    // Linear scan is fine — points are pre-sorted and per-bus arrays are small.
-    let latest = null;
-    for (const pt of HISTORY.points) {
-      if (pt.bus_id !== busId) continue;
-      if (new Date(pt.timestamp).getTime() > cutoffTs) break;
-      latest = pt;
-    }
-    if (latest) {
-      HISTORY.playback.markers[busId].setLatLng([latest.lat, latest.lng]);
-    }
-  });
+// Slider: 0..1000 across the loaded time range.
+function seekPlayback(v) {
+  const pb = HISTORY.playback;
+  if (!HISTORY.points.length || pb.t0 == null) return;
+  pb.t = pb.t0 + (Math.max(0, Math.min(1000, v)) / 1000) * (pb.t1 - pb.t0);
+  pbRender();
 }
 
 // Wire history controls once after the page loads. Safe to run before
