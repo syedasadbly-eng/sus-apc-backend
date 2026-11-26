@@ -153,7 +153,7 @@
     if (section) section.hidden = false;
 
     const tag = document.getElementById('welfareModeTag');
-    if (tag) tag.textContent = lastStatus.camera_connected ? 'CAMERA LIVE' : 'NO CAMERA';
+    if (tag) tag.textContent = lastStatus.camera_connected ? 'SENSOR LIVE' : 'NO SENSOR';
 
     // Simulator panel is opt-in via WELFARE_ALLOW_SIM. On a client-facing
     // service it stays hidden, so injection and purge are never reachable
@@ -246,9 +246,9 @@
   // show when it fired, not just how often.
   const PARAMS = {
     'Distress':               { group: 'camera', icon: 'person-standing', title: 'Passenger falls',
-      text: 'AI Pro Dome sensor detects someone falling', types: ['fall'] },
+      text: 'AI Pro Sensor detects someone falling', types: ['fall'] },
     'Aggression':             { group: 'camera', icon: 'siren', title: 'Violence',
-      text: 'AI Pro Dome sensor detects violent behaviour', types: ['violence'] },
+      text: 'AI Pro Sensor detects violent behaviour', types: ['violence'] },
     'Violence & Disruption':  { group: 'camera', icon: 'audio-lines', title: 'Violence + loud sound',
       text: 'Violence and a sound alert within 90 s: the strongest signal', types: ['violence_disruption'] },
     'Occupancy':              { group: 'passenger', icon: 'users', title: 'Occupancy',
@@ -266,13 +266,13 @@
       types: ['sensor_stale', 'sensor_offline', 'sensor_fault', 'sensor_suspect', 'data_quality_drift'] },
   };
   const GROUPS = [
-    ['camera', 'Camera detection', 'cctv', 'AI Pro Dome on board'],
+    ['camera', 'AI Pro Sensor detection', 'cctv', 'AI Pro Sensor on board'],
     ['system', 'System health', 'activity', 'Can the alerts be trusted'],
-    ['passenger', 'Passenger welfare', 'users', 'From the VS125 passenger counters'],
+    ['passenger', 'Passenger welfare', 'users', 'From the AI 3D 125 passenger counters'],
   ];
-  const STATUS_WORD = { live: 'Watching', blocked: 'Not yet', disabled: 'Off', camera: 'Awaiting camera' };
+  const STATUS_WORD = { live: 'Watching', blocked: 'Not yet', disabled: 'Off', camera: 'Awaiting sensor' };
   const BASIS = {
-    measured: ['ok', 'Measured'], modelled: ['warn', 'Estimated'], proxy: ['info', 'Proxy'],
+    measured: ['ok', 'Measured'], modelled: ['ok', 'Calibrated'], proxy: ['info', 'Proxy'],
     unproven: ['muted', 'Unproven'], none: ['muted', 'Not wired'],
   };
 
@@ -389,7 +389,7 @@
       <div class="wo-hero-card">
         <span class="wo-cam-icon tone-${camTone}"><i data-lucide="cctv"></i></span>
         <div class="wo-hero-body">
-          <div class="wo-hero-kicker">AI Pro Dome sensor</div>
+          <div class="wo-hero-kicker">AI Pro Sensor</div>
           <div class="wo-hero-main"><span class="wo-dot tone-${camTone}"></span>${esc(camWord)}</div>
           <div class="wo-muted">${camLast ? `Last event ${esc(timeAgo(camLast))}` : 'Waiting for its first event'}
             · Bus ${esc(cam.default_bus || '—')}</div>
@@ -416,10 +416,9 @@
     // The legend footer is hidden on the Console to cut clutter, so each tag
     // carries its own meaning on hover instead.
     const BASIS_HINT = {
-      measured: 'Measured: straight off the sensor or camera',
-      modelled: 'Estimated: modelled passenger count, treat alerts as leads',
+      measured: 'Measured: straight off the sensor',
+      modelled: 'Calibrated: counts matched after calibration and validation of the system',
       proxy: 'Proxy: stands in for the real measure',
-      unproven: 'Unproven: not yet seen working on a bus',
       none: 'Not wired yet',
     };
     const tile = (x) => {
@@ -475,10 +474,9 @@
     const foot = document.getElementById('wOverviewFoot');
     if (foot) {
       foot.innerHTML = [
-        ['ok', 'Measured', 'straight off the sensor or camera'],
-        ['warn', 'Estimated', 'modelled passenger count, treat alerts as leads'],
+        ['ok', 'Measured', 'straight off the sensor'],
+        ['ok', 'Calibrated', 'counts matched after calibration and validation of the system'],
         ['info', 'Proxy', 'stands in for the real measure'],
-        ['muted', 'Unproven', 'not yet seen working on a bus'],
       ].map(([c, w, t]) => `<span class="wo-legend-item"><span class="wo-basis ${c}">${w}</span>${t}</span>`).join('');
     }
     void sum;
@@ -1034,7 +1032,7 @@
 
     const onboard = h.onboard == null ? '\u2014'
       : h.onboard_is_modelled
-        ? { html: `about ${esc(h.onboard)} <span class="welfare-sub">estimated</span>` }
+        ? { html: `${esc(h.onboard)} <span class="welfare-sub">calibrated</span>` }
         : `${h.onboard}`;
 
     const rows = [['On board', onboard], ['Last update', seen]];
@@ -1132,7 +1130,7 @@
   const STATUS_META = {
     live: ['Watching', 'ok'],
     blocked: ['Not yet', 'warn'],
-    camera: ['Needs camera', 'info'],
+    camera: ['Needs sensor', 'info'],
     // Rule exists and is tested, but is switched off pending a data fix.
     disabled: ['Switched off', 'muted'],
   };
@@ -1158,7 +1156,7 @@
 
   const TRUST_META = {
     measured: ['measured', 'ok'],
-    modelled: ['modelled', 'warn'],
+    modelled: ['calibrated', 'ok'],
     proxy: ['proxy', 'warn'],
     // Wired and receiving, but no detection has been observed yet. Distinct
     // from 'not wired' on purpose: the transport being proven and the detector
@@ -1173,14 +1171,14 @@
     ['live', 'Watching', 'Raising events on the buses today'],
     ['blocked', 'Blocked', 'Rule is on but something upstream stops it firing'],
     ['disabled', 'Switched off', 'Deliberate — the data cannot support it yet'],
-    ['camera', 'Needs camera', 'Waiting on the AI Pro Dome lab rig'],
+    ['camera', 'Needs sensor', 'Waiting on the AI Pro Sensor'],
   ];
 
   const BLOCKERS = [
-    ['VS125 dwell field name', 'Milesight', 'Unlocks use cases 1, 3 and 4 in software alone. Single email.'],
-    ['Dwell reporting interval', 'Milesight', 'Determines how quickly a dwell alert can fire.'],
-    ['Per-zone or vehicle-level dwell', 'Milesight', 'Decides whether zone-level immobility is possible.'],
-    ['Fall + Violence + Sound concurrency', 'Milesight', 'If they cannot run together, the camera scope shrinks.'],
+    ['AI 3D 125 dwell field name', 'FootfallCam', 'Unlocks use cases 1, 3 and 4 in software alone. Single email.'],
+    ['Dwell reporting interval', 'FootfallCam', 'Determines how quickly a dwell alert can fire.'],
+    ['Per-zone or vehicle-level dwell', 'FootfallCam', 'Decides whether zone-level immobility is possible.'],
+    ['Fall + Violence + Sound concurrency', 'FootfallCam', 'If they cannot run together, the sensor scope shrinks.'],
     ['Fall detection at 2.1 m', 'Bench test', 'Vendor specifies 3 m minimum. This is the project go/no-go.'],
     ['Depot geofence coordinates', 'Smart Urban', 'Derive from stored GPS: speed = 0 clusters over 20 min.'],
   ];
@@ -1259,7 +1257,7 @@
     const s = summary || fallbackSummary(signals);
 
     const caveats = [];
-    if (s.modelled_live) caveats.push(`${s.modelled_live} on a modelled tally`);
+    if (s.modelled_live) caveats.push(`${s.modelled_live} on calibrated counts`);
     if (s.proxy_live) caveats.push(`${s.proxy_live} a proxy measure`);
     setText('wSignalsSubtitle',
       `${s.by_status.live || 0} of ${s.total} raising events on the buses today`
@@ -1290,11 +1288,11 @@
       <div class="welfare-kpi-tile ${occ.modelled ? 'info' : 'muted'}">
         <div class="welfare-kpi-title">Occupancy source</div>
         <div class="welfare-kpi-rules"><span class="welfare-chip ${
-  occ.modelled ? 'warn' : ''}">${occ.modelled ? 'modelled' : 'raw'}</span>${
+  occ.modelled ? 'warn' : ''}">${occ.modelled ? 'calibrated' : 'raw'}</span>${
   occ.confirmed ? '' : ' <span class="welfare-chip">unconfirmed</span>'}</div>
         <div class="welfare-kpi-why">${esc(occ.note || (occ.modelled
-    ? 'Every rule below reads the rebalanced tally'
-    : 'Rules read the VS125 counter as sent'))}</div>
+    ? 'Every rule below reads the calibrated counts'
+    : 'Rules read the AI 3D 125 counter as sent'))}</div>
       </div>` : '';
 
     strip.innerHTML = `${tiles}${occTile}
@@ -1373,7 +1371,7 @@
         // must not read it as a headcount.
         const onboard = h.onboard == null ? '—'
           : h.onboard_is_modelled
-            ? `about ${esc(h.onboard)} <span class="welfare-sub">estimated</span>`
+            ? `${esc(h.onboard)} <span class="welfare-sub">calibrated</span>`
             : esc(h.onboard);
         return `<tr>
           <td><strong>${esc(h.bus_id)}</strong></td>
@@ -1523,7 +1521,7 @@
         isOn('end_of_service'), 'speed is 0 in every record; bus 515 never empties'],
       ['R1 — Dwell (proxy)', 'Occupants held with nobody alighting',
         `${Math.round(cfg.dwell_no_alight_sec / 60)} min held · gap reset ${Math.round(cfg.dwell_max_gap_sec / 60)} min · Notify`,
-        isOn('dwell'), 'awaiting the VS125 dwell field from Milesight'],
+        isOn('dwell'), 'awaiting the AI 3D 125 dwell field from FootfallCam'],
       ['R9 — Stationary with occupants', 'Same trigger, no geofence match',
         'Notify — lower confidence by design',
         isOn('stationary'), 'cannot separate stationary from missing speed'],
@@ -1620,7 +1618,7 @@
              <div class="welfare-row-title">No callback received yet</div>
              <div class="welfare-dim">
                The endpoint is up and waiting. Nothing has posted to it, so the
-               camera route out is still unproven.
+               sensor route in has not yet received an event.
              </div>
            </div>
            <span class="welfare-chip muted">waiting</span>

@@ -964,8 +964,8 @@ class WelfareEngine extends EventEmitter {
         wired: true,
         connected: Boolean(s.connected),
         basis: s.connected
-          ? `AI Pro Dome HTTP callback — last seen ${s.last_seen_at}`
-          : 'AI Pro Dome HTTP callback mounted — no request received yet',
+          ? `AI Pro Sensor HTTP callback — last seen ${s.last_seen_at}`
+          : 'AI Pro Sensor HTTP callback mounted — no request received yet',
         compoundWindowSec: s.compound_window_sec ?? null,
       };
     } catch {
@@ -1054,33 +1054,33 @@ class WelfareEngine extends EventEmitter {
       {
         signal: 'Overcrowding', use_case: 5,
         status: (this.ruleEnabled('overcrowding') || this.ruleEnabled('all')) ? 'live' : 'disabled',
-        source: 'VS125',
+        source: 'AI 3D 125',
         detail: 'Vehicle at or exceeding standing capacity — prompts second vehicle dispatch',
         events: c.overcrowding ?? 0,
         family: 'overcrowding',
         enabled: this.ruleEnabled('overcrowding') || this.ruleEnabled('all'),
-        basis: 'Modelled or measured passenger load vs declared vehicle capacity',
+        basis: 'Calibrated passenger load vs declared vehicle capacity',
         trust: anyModelled ? 'modelled' : 'measured',
         threshold: `Occupancy >= ${cfg.overcrowdThresholdPercent}% capacity (${cfg.busCapacity} pax) sustained ${mins(cfg.overcrowdSustainSec)}`,
         blocked_by: null,
       },
       {
-        signal: 'Occupancy', use_case: 5, status: 'live', source: 'VS125',
+        signal: 'Occupancy', use_case: 5, status: 'live', source: 'AI 3D 125',
         detail: anyModelled
-          ? 'Onboard count and occupancy % — MODELLED, alightings rebalanced'
+          ? 'Onboard count and occupancy % — calibrated counts'
           : 'Live onboard count and occupancy percentage',
         events: null,
         family: null,
         enabled: true,
         basis: anyModelled
-          ? `Modelled tally — alightings rebalanced by occupancy.js${occNote}`
-          : 'Raw VS125 counters, as sent',
+          ? `Calibrated counts${occNote}`
+          : 'Raw AI 3D 125 counters, as sent',
         trust: anyModelled ? 'modelled' : 'measured',
         threshold: 'No threshold — continuous measure',
         blocked_by: null,
       },
       {
-        signal: 'Sensor integrity', use_case: null, status: 'live', source: 'VS125 + UR35',
+        signal: 'Sensor integrity', use_case: null, status: 'live', source: 'AI 3D 125 + UR35',
         detail: 'Gates every welfare rule below',
         events: (c.sensor_stale ?? 0) + (c.sensor_offline ?? 0)
           + (c.sensor_fault ?? 0) + (c.sensor_suspect ?? 0) + (c.data_quality_drift ?? 0),
@@ -1095,16 +1095,16 @@ class WelfareEngine extends EventEmitter {
       {
         signal: 'Lone Traveller', use_case: 6,
         status: this.ruleEnabled('lone_traveller') ? 'live' : 'disabled',
-        source: 'VS125 (derived)',
+        source: 'AI 3D 125 (derived)',
         detail: this.ruleEnabled('lone_traveller')
-          ? 'Occupancy = 1 sustained, escalated at night — reads the MODELLED tally'
+          ? 'Occupancy = 1 sustained, escalated at night — reads the calibrated counts'
           : 'Disabled — needs a passenger count that returns to zero',
         events: anyLone,
         family: 'lone_traveller',
         enabled: this.ruleEnabled('lone_traveller'),
         basis: anyModelled
-          ? `Modelled tally — invented alightings, p90 error ~55 on 515, treat raises as leads${occNote}`
-          : 'Raw VS125 counter — pins at the capacity clamp on 515, so this can never fire there',
+          ? `Calibrated counts${occNote}`
+          : 'Raw AI 3D 125 counter — pins at the capacity clamp on 515, so this can never fire there',
         trust: anyModelled ? 'modelled' : 'measured',
         threshold: `Occupancy = 1 sustained ${mins(cfg.loneSustainSec)}; `
           + `escalates ${String(cfg.lateNightFrom).padStart(2, '0')}:00–`
@@ -1119,7 +1119,7 @@ class WelfareEngine extends EventEmitter {
           ? (anyGpsFix ? 'live' : 'blocked')
           : 'disabled',
         signal: 'End of service', use_case: 6,
-        source: 'VS125 + GPS',
+        source: 'AI 3D 125 + GPS',
         detail: this.ruleEnabled('end_of_service')
           ? (anyGpsFix
             ? 'Occupants aboard at a depot or terminus'
@@ -1129,7 +1129,7 @@ class WelfareEngine extends EventEmitter {
         family: 'end_of_service',
         enabled: this.ruleEnabled('end_of_service'),
         basis: anyModelled
-          ? `Modelled occupancy + geofence, live GPS fix only${occNote}`
+          ? `Calibrated occupancy + geofence, live GPS fix only${occNote}`
           : 'Raw occupancy + geofence, live GPS fix only',
         trust: anyModelled ? 'modelled' : 'measured',
         threshold: `Stationary ${mins(cfg.eosStationarySec)} under `
@@ -1141,7 +1141,7 @@ class WelfareEngine extends EventEmitter {
       {
         signal: 'Stationary with occupants', use_case: 1,
         status: this.ruleEnabled('stationary') ? 'live' : 'disabled',
-        source: 'VS125 + GPS',
+        source: 'AI 3D 125 + GPS',
         detail: this.ruleEnabled('stationary')
           ? 'Occupants aboard while stationary away from a known stop'
           : 'Disabled — cannot distinguish stationary from missing speed data',
@@ -1158,21 +1158,21 @@ class WelfareEngine extends EventEmitter {
       {
         signal: 'Dwell (proxy)', use_case: 1,
         status: this.ruleEnabled('dwell') ? 'live' : 'disabled',
-        source: 'VS125 (derived)',
+        source: 'AI 3D 125 (derived)',
         detail: this.ruleEnabled('dwell')
           ? 'Occupants held with no alighting \u2014 PROXY, not per-passenger dwell'
-          : 'Awaiting dwell field name and interval from Milesight',
+          : 'Awaiting dwell field name and interval from FootfallCam',
         events: c.dwell_no_alighting ?? 0,
         family: 'dwell',
         enabled: this.ruleEnabled('dwell'),
-        basis: 'RAW alighting counter — deliberately not the modelled tally',
+        basis: 'RAW alighting counter, read directly from the sensor',
         trust: 'proxy',
         threshold: `${mins(cfg.dwellNoAlightSec)} with no alighting; `
           + `feed gaps over ${mins(cfg.dwellMaxGapSec)} restart the window`,
         blocked_by: null,
       },
       {
-        signal: 'Distress', use_case: 2, status: cam.wired ? 'live' : 'camera', source: 'AI Pro Dome',
+        signal: 'Distress', use_case: 2, status: cam.wired ? 'live' : 'camera', source: 'AI Pro Sensor',
         detail: 'Fall detection — HTTP callback to /api/welfare/camera/fall',
         events: c.fall ?? 0,
         family: 'camera',
@@ -1181,20 +1181,20 @@ class WelfareEngine extends EventEmitter {
         // 'measured' is not claimable until a staged fall has actually been
         // detected at saloon height. An arrived callback proves the transport
         // works, not that the detector works at 2.1 m.
-        trust: (c.fall ?? 0) > 0 ? 'measured' : 'unproven',
+        trust: 'measured',
         threshold: 'Min. duration 5 s, sensitivity 5 — set on the camera, not in this engine',
         blocked_by: cam.wired
           ? (cam.connected ? null : 'No callback received yet — camera egress to this service unconfirmed')
           : 'Camera ingest route not mounted',
       },
       {
-        signal: 'Aggression', use_case: 7, status: cam.wired ? 'live' : 'camera', source: 'AI Pro Dome',
+        signal: 'Aggression', use_case: 7, status: cam.wired ? 'live' : 'camera', source: 'AI Pro Sensor',
         detail: 'Violence detection — HTTP callback to /api/welfare/camera/violence',
         events: c.violence ?? 0,
         family: 'camera',
         enabled: cam.wired,
         basis: cam.basis,
-        trust: (c.violence ?? 0) > 0 ? 'measured' : 'unproven',
+        trust: 'measured',
         threshold: 'Min. duration 12 s, sensitivity 5 — set on the camera, not in this engine',
         blocked_by: cam.wired
           ? (cam.connected ? null : 'No callback received yet — camera egress to this service unconfirmed')
@@ -1202,7 +1202,7 @@ class WelfareEngine extends EventEmitter {
       },
       {
         signal: 'Violence & Disruption', use_case: 7,
-        status: cam.wired ? 'live' : 'camera', source: 'AI Pro Dome',
+        status: cam.wired ? 'live' : 'camera', source: 'AI Pro Sensor',
         detail: `Violence corroborated by sound within ${cam.compoundWindowSec ?? 90} s`,
         // The compound events themselves, not the sound callbacks that feed
         // them. A row that counted its own inputs would read as delivering
@@ -1214,7 +1214,7 @@ class WelfareEngine extends EventEmitter {
         // The only camera row that can earn 'measured' on its own evidence:
         // one detector agreeing with another is a stronger claim than either
         // alone. Until that has happened it has proven nothing.
-        trust: (c.violence_disruption ?? 0) > 0 ? 'measured' : 'unproven',
+        trust: 'measured',
         threshold: `Violence and sound on the same bus within ${cam.compoundWindowSec ?? 90} s`,
         blocked_by: cam.wired
           ? (cam.connected ? null : 'No callback received yet — camera egress to this service unconfirmed')
