@@ -598,9 +598,24 @@
   async function renderConsole() {
     let allEvents; let health;
     try {
-      [allEvents, health] = await Promise.all([
-        api('/events?limit=60&min_severity=2'), api('/fleet-health'),
+      // The queue shows the newest 60 alerts, but the nav badge counts every
+      // open alert from the last 24 hours. On a busy day the 60 only reached
+      // back to the morning, so the previous evening's open alerts were
+      // counted by the badge (16 on 26 Nov) yet never appeared here, and
+      // "Clear all" could not reach them. Every open alert in the badge's
+      // window is now fetched as well and merged in, so the badge, the
+      // queue and "Clear all" agree.
+      const openSince = new Date(Date.now() - 24 * 3600000).toISOString();
+      let recent; let openDay;
+      [recent, openDay, health] = await Promise.all([
+        api('/events?limit=60&min_severity=2'),
+        api(`/events?unack=true&min_severity=2&from=${encodeURIComponent(openSince)}&limit=1000`).catch(() => []),
+        api('/fleet-health'),
       ]);
+      const byId = new Map();
+      for (const e of [...recent, ...openDay]) byId.set(e.event_id, e);
+      allEvents = [...byId.values()]
+        .sort((a, b) => Date.parse(b.detected_at) - Date.parse(a.detected_at));
     } catch (err) {
       const feed = document.getElementById('wAlertFeed');
       if (feed) feed.innerHTML = `<div class="welfare-empty">Could not load: ${esc(err.message)}</div>`;
