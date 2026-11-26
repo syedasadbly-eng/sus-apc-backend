@@ -1,5 +1,5 @@
 /* ============================================
-   CAMERA INGEST — Milesight AI Pro Dome → welfare console
+   CAMERA INGEST — Milesight AI Pro Sensor → welfare console
    Smart Urban Sensing
 
    The camera has no MQTT client on firmware 63.8.0.6-r1, so its only outbound
@@ -62,7 +62,7 @@ function cameraMap() {
 const DEFAULT_BUS = process.env.WELFARE_CAMERA_BUS || '515';
 
 /** Renames applied after the bus is resolved, whichever route resolved it.
- *  The AI Pro Dome's notification URLs were configured with ?bus=lab-rig, so
+ *  The AI Pro Sensor's notification URLs were configured with ?bus=lab-rig, so
  *  that name is mapped onto the vehicle the camera now belongs to without
  *  touching the camera. Override with WELFARE_CAMERA_ALIASES (JSON). */
 function busAliases() {
@@ -359,7 +359,7 @@ function compoundEvent(signal, bus, nowTs, primary, ctx) {
     use_case: 7,
     detail: {
       signal: 'violence_disruption',
-      device: 'MS-C2972-RFPG1',
+      device: 'AI Pro Sensor',
       corroborated_by: [signal, partner],
       order,
       gap_sec: Math.round(gapSec),
@@ -464,7 +464,7 @@ function createCameraRouter(engine, store) {
       severity: spec.severity,
       severity_name: { 1: 'log', 2: 'notify', 3: 'alert', 4: 'escalate' }[spec.severity],
       rule: spec.rule,
-      reason: `${spec.label} by AI Pro Dome`,
+      reason: `${spec.label} by AI Pro Sensor`,
       use_case: spec.use_case,
       route: ctx.route ?? null,
       lat: ctx.lat ?? null,
@@ -474,7 +474,7 @@ function createCameraRouter(engine, store) {
       acknowledged: 0,
       detail: {
         signal,
-        device: 'MS-C2972-RFPG1',
+        device: 'AI Pro Sensor',
         from_ip: clientIp(req),
         bus_resolved_via: via,
         http_method: req.method,

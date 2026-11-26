@@ -328,11 +328,11 @@ function planDay(busId, dateStr, capacity) {
 
 const WELFARE_TYPES = [
   { w: 16, type: 'fall', source: 'camera', severity: 3, rule: 'camera_fall', use_case: 2,
-    reason: () => 'Fall detected by AI Pro Dome' },
+    reason: () => 'Fall detected by AI Pro Sensor' },
   { w: 15, type: 'sound_classification', source: 'camera', severity: 2, rule: 'camera_sound', use_case: 7,
-    reason: (r) => pick(r, ['Loud noise detected by AI Pro Dome (shouting)', 'Loud noise detected by AI Pro Dome (scream)', 'Loud noise detected by AI Pro Dome (glass break)']) },
+    reason: (r) => pick(r, ['Loud noise detected by AI Pro Sensor (shouting)', 'Loud noise detected by AI Pro Sensor (scream)', 'Loud noise detected by AI Pro Sensor (glass break)']) },
   { w: 10, type: 'violence', source: 'camera', severity: 4, rule: 'camera_violence', use_case: 7,
-    reason: () => 'Violent behaviour detected by AI Pro Dome' },
+    reason: () => 'Violent behaviour detected by AI Pro Sensor' },
   { w: 8, type: 'violence_disruption', source: 'camera', severity: 4, rule: 'camera_violence_sound', use_case: 7,
     reason: (r) => `Violence and sound agree within ${8 + Math.floor(r() * 50)}s \u2014 ${r() < 0.5 ? 'sound then violence' : 'violence then sound'}` },
   { w: 13, type: 'overcrowding', source: 'vs125', severity: 3, rule: 'R5_overcrowding', use_case: 5,
@@ -436,7 +436,7 @@ function buildIncident(dateStr, minute, busId, spec, rng, capacity, n) {
       detail: {
         demo: true,
         signal: spec.type,
-        device: spec.source === 'camera' ? 'MS-C2972-RFPG1' : 'VS125',
+        device: spec.source === 'camera' ? 'AI Pro Sensor' : 'AI 3D 125',
         location: v.name || null,
         vehicle_context: { route: busId, onboard, gps_valid: true },
       },
@@ -604,7 +604,7 @@ function gpsPayload(lat, lng, speedKph) {
 function triggerPayload(boardings, alightings) {
   // VS125 is mounted inverted on these doors: sensor 'out' = boarding.
   return {
-    device_info: { device_sn: 'DEMO-VS125' },
+    device_info: { device_sn: 'demo-sensor-feed' },
     time_info: { start_time: new Date().toISOString() },
     line_trigger_data: [{ total: { out: boardings, in: alightings } }],
   };
