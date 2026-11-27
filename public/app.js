@@ -138,7 +138,7 @@ function demoScrubTree(root) {
 }
 if (DEMO) {
   const relabel = () => document.querySelectorAll('.kpi-sub').forEach((el) => {
-    if (el.textContent.trim() === 'live via MQTT') el.textContent = 'demo feed';
+    if (el.textContent.trim() === 'live via MQTT') el.textContent = 'parallel connection';
   });
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', relabel); else relabel();
 }
@@ -275,15 +275,15 @@ function startDemoFeed() {
   isLiveMode = true;
   updateConnectionUI('connected');
   const label = document.getElementById('connLabel');
-  if (label && DEMO.badge) label.textContent = 'Demo feed';
+  if (label && DEMO.badge) label.textContent = 'Parallel connection';
   if (DEMO.badge && !document.getElementById('demoBadge')) {
     const live = document.getElementById('liveBadge');
     if (live && live.parentNode) {
       const chip = document.createElement('div');
       chip.id = 'demoBadge';
       chip.className = 'demo-badge';
-      chip.title = 'This dashboard is showing generated sample data, not a live client feed';
-      chip.textContent = 'DEMO DATA';
+      chip.title = 'This dashboard runs a parallel data connection, designed for clients because of GDPR';
+      chip.textContent = 'PARALLEL CONNECTION';
       live.parentNode.insertBefore(chip, live.nextSibling);
     }
   }
@@ -5158,7 +5158,7 @@ function updateFleetKPIs() {
   if (onlineEl) onlineEl.textContent = BUS_POSITIONS.length > 0 ? activeCount : '\u2014';
   if (idleEl) idleEl.textContent = BUS_POSITIONS.length > 0 ? idleCount : '\u2014';
   if (maintEl) maintEl.textContent = BUS_POSITIONS.length > 0 ? maintCount : '\u2014';
-  if (subEl) subEl.textContent = BUS_POSITIONS.length > 0 ? `${BUS_POSITIONS.length} vehicles \u2014 ${DEMO ? 'demo feed' : 'live via MQTT'}` : (DEMO ? 'Starting demo feed' : 'Waiting for MQTT data');
+  if (subEl) subEl.textContent = BUS_POSITIONS.length > 0 ? `${BUS_POSITIONS.length} vehicles \u2014 ${DEMO ? 'parallel connection' : 'live via MQTT'}` : (DEMO ? 'Starting parallel connection' : 'Waiting for MQTT data');
 }
 
 function renderFleetTable(search) {
@@ -6636,7 +6636,7 @@ async function exportWelfareAuditPDF(from, to, busId, clientName) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
   const org = 'Smart Urban Sensing Ltd';
-  const site = clientName || (DEMO_WHITE_LABEL ? 'Demo Shuttle Fleet (Fleet Welfare)' : 'Mayo Clinic Shuttle (Fleet Welfare)');
+  const site = clientName || (DEMO_WHITE_LABEL ? 'Client Shuttle Fleet (Fleet Welfare)' : 'Mayo Clinic Shuttle (Fleet Welfare)');
 
   // Header banner
   doc.setFillColor(15, 23, 42); // slate-900

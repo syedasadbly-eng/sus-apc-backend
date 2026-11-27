@@ -48,7 +48,7 @@ live client feed.
   cannot reach it).
 - The demo refuses to start against a database that already holds non-demo
   records. Always give the demo service its **own volume**.
-- The header shows a **DEMO DATA** chip and "Demo feed". Set `DEMO_BADGE=false`
+- The header shows a **PARALLEL CONNECTION** chip and "Parallel connection". Set `DEMO_BADGE=false`
   only for clean promotional captures, and caption those images as illustrative.
 - Never set `DEMO_MODE` on the client-facing service.
 
