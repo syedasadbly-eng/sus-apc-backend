@@ -496,6 +496,90 @@ docker logs -f sus-backend
 
 ---
 
+## Authentication & Admin Section
+
+The dashboard requires every user to sign in with their own email + password. All login attempts (success and failure) are timestamped, attributed, and stored in SQLite so admins can audit who has used the dashboard.
+
+### Creating the first admin user
+
+After the server starts and the `users` table has been created automatically, run:
+
+```bash
+node scripts/create-admin.js you@example.com 'a-strong-password' 'Your Name'
+```
+
+Or drive it from environment variables (handy in CI / Railway one-shot jobs):
+
+```bash
+ADMIN_EMAIL=you@example.com ADMIN_PASSWORD='a-strong-password' ADMIN_NAME='Your Name' \
+  node scripts/create-admin.js
+```
+
+The script is idempotent: re-running it with the same email upgrades the user to `admin / active` and resets the password.
+
+### Required environment variables
+
+| Var | Default | Notes |
+|-----|---------|-------|
+| `AUTH_JWT_SECRET` | _derived dev secret_ | **Set this in production**. Long random string. |
+| `AUTH_JWT_TTL_HOURS` | `12` | Session lifetime. |
+| `AUTH_COOKIE_NAME` | `sus_session` | HTTP-only cookie name. |
+| `AUTH_INSECURE_COOKIE` | unset | Set to `1` ONLY for local plain-http development. |
+
+### Endpoints
+
+Public:
+- `POST /api/auth/login` — `{ email, password }` → sets session cookie + returns JWT.
+- `POST /api/auth/logout` — clears the cookie.
+- `GET  /api/auth/me` — returns the current user (requires session).
+- `POST /api/auth/change-password` — `{ current, next }` (requires session).
+
+Admin only (role = `admin`):
+- `GET    /api/admin/users` — list users.
+- `POST   /api/admin/users` — create user (`{ email, name, password, role }`).
+- `PUT    /api/admin/users/:id` — update name / role / active / password.
+- `DELETE /api/admin/users/:id` — delete user (last active admin is protected).
+- `GET    /api/admin/login-events` — filterable audit log. Query: `from`, `to`, `email`, `status`, `user_id`, `limit`, `offset`, `format=csv`.
+- `GET    /api/admin/login-events/summary` — 7-day counts for the admin dashboard.
+
+The existing destructive endpoints `PUT /api/stops` and `POST /api/admin/backfill-history-locations` are now also gated behind `requireAdmin`.
+
+### Admin UI
+
+When an admin logs in, an **Administration → Admin** entry appears in the sidebar. The page shows:
+- 7-day login summary (successes, failures, unique users).
+- Full user list with role, status, created date, last-login timestamp, and inline edit/delete.
+- Filterable login history (by date range, email substring, success/failure) with CSV export.
+
+Regular (non-admin) users see the dashboard as normal; the Administration section is hidden for them and the underlying endpoints return `403`.
+
+### Data model
+
+```sql
+CREATE TABLE users (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  email         TEXT    NOT NULL UNIQUE COLLATE NOCASE,
+  name          TEXT    NOT NULL DEFAULT '',
+  password_hash TEXT    NOT NULL,            -- bcrypt, 12 rounds
+  role          TEXT    NOT NULL DEFAULT 'user',  -- 'admin' | 'user'
+  active        INTEGER NOT NULL DEFAULT 1,
+  created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+  last_login_at TEXT
+);
+
+CREATE TABLE login_events (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  email      TEXT    NOT NULL,
+  login_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+  ip_address TEXT,
+  user_agent TEXT,
+  status     TEXT    NOT NULL,   -- 'success' | 'failure'
+  reason     TEXT             -- 'bad_password' | 'unknown_user' | 'account_disabled' | etc.
+);
+```
+
+
 ## Connecting the Dashboard to the Backend
 
 Once the backend is deployed and running 24/7, the dashboard needs to know where to find it. The dashboard's `probeBackend()` function (in `app.js`, line ~18) auto-detects the backend by probing URLs in order:
